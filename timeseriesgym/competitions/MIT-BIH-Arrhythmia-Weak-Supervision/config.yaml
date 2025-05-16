@@ -1,0 +1,18 @@
+id: MIT-BIH-Arrhythmia-Weak-Supervision
+parent_id: MIT-BIH-Arrhythmia
+name: MIT-BIH-Arrhythmia Detection using Weak Supervision
+
+competition_type: simple
+awards_medals: false
+
+description: timeseriesgym/competitions/MIT-BIH-Arrhythmia-Weak-Supervision/description_only_label.md
+
+dataset:
+  answers: MIT-BIH-Arrhythmia-Weak-Supervision/prepared/private/labels.csv
+  sample_submission: MIT-BIH-Arrhythmia-Weak-Supervision/prepared/public/sample_submission.csv
+
+grader:
+  name: accuracy
+  grade_fn: timeseriesgym.competitions.MIT-BIH-Arrhythmia-Weak-Supervision.grade:grade
+
+preparer: timeseriesgym.competitions.MIT-BIH-Arrhythmia-Weak-Supervision.prepare:prepare

@@ -1,0 +1,2 @@
+git+https://github.com/moment-timeseries-foundation-model/aideml
+httpx==0.27.2

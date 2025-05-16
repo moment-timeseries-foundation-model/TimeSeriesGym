@@ -1,0 +1,32 @@
+id: stomp-R-to-python
+name: Convert STOMP Algorithm Implementation in R to Python
+competition_type: simple
+awards_medals: false
+
+description: timeseriesgym/competitions/stomp-R-to-python/description.md
+
+dataset:
+  answers: stomp-R-to-python/prepared/private/test_results.csv
+  sample_submission: stomp-R-to-python/prepared/public/sample_submission.py
+
+grader:
+  name: python-code-grading
+  grade_fn: timeseriesgym.competitions.stomp-R-to-python.grade:grade_code
+
+preparer: timeseriesgym.competitions.stomp-R-to-python.prepare:prepare
+
+coding_config:
+  name: python-stomp
+  input_data_dir: stomp-R-to-python/prepared/public/
+  required_functions:
+    stomp:
+      exact_match: true  # if true, args should exactly match in the same order
+      required_args:
+        ref_data:
+          file_name: ref_data.npy
+        query_data: null  # self-join, return the left and right matrix profile as well
+        window_size: 30
+        exclusion_zone: 0.5
+        verbose: 2
+      expected_output_type: [numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]
+      expected_output_shape: [[521, ], [521, ], [521, ], [521, ], [521, ], [521, ]]

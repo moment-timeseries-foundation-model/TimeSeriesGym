@@ -1,0 +1,23 @@
+id: online-sales
+name: Online Sales
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true  # Not sure about this
+prizes:
+  - position: 1
+    value: 15000
+  - position: 2
+    value: 5000
+  - position: 3
+    value: 2500
+
+description: timeseriesgym/competitions/online-sales/description.md
+
+dataset:
+  answers: online-sales/prepared/private/test.csv
+  sample_submission: online-sales/prepared/public/sample_submission.csv
+
+grader:
+  name: root-mean-squared-logarithmic-error
+  grade_fn: timeseriesgym.competitions.online-sales.grade:grade
+
+preparer: timeseriesgym.competitions.online-sales.prepare:prepare

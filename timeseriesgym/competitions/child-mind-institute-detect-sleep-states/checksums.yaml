@@ -1,0 +1,8 @@
+private:
+  test_events.csv: a257b2524da5c0df7eee5692ac6d9a32
+public:
+  sample_submission.csv: aa6fc1e2c9619a8a411f2b35dc06aa3d
+  test_series.parquet: 520160897ec3459ee539b0b2713dd8ff
+  train_events.csv: f329673c5363939f3c1bfe14106aa7c7
+  train_series.parquet: d696d4f6027375fb2ef4b1b350eb4abb
+zip: a94d6ccd95ab2f3bb326f93e504018c9

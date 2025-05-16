@@ -1,0 +1,19 @@
+openhands:
+  start: openhands/start.sh
+  dockerfile: openhands/Dockerfile
+  kwargs_type: argparse
+  kwargs:
+    agent: CodeActAgent
+    model: gpt-4.1-2025-04-14  # gpt-4o-2024-08-06
+    max_time_in_hours: 6
+    max_steps: 500
+    shm_size: "100G"
+    enable_debugging: false
+    enable_default_condenser: true
+    input_cost_per_token: .000002  # .0000025 for gpt-4o
+    output_cost_per_token: .000008  # .00001 for gpt-4o
+    caching_prompt: true
+    enable_browsing: false
+  env_vars:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  privileged: true

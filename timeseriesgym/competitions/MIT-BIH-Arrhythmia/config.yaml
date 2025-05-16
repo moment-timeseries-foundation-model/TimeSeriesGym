@@ -1,0 +1,16 @@
+id: MIT-BIH-Arrhythmia
+name: MIT-BIH Arrhythmia
+competition_type: simple  # Check
+awards_medals: false
+
+description: timeseriesgym/competitions/MIT-BIH-Arrhythmia/description.md
+
+dataset:
+  answers: MIT-BIH-Arrhythmia/prepared/private/test_labels.h5
+  sample_submission: MIT-BIH-Arrhythmia/prepared/public/sample_submission.h5
+
+grader:
+  name: accuracy
+  grade_fn: timeseriesgym.competitions.MIT-BIH-Arrhythmia.grade:grade
+
+preparer: timeseriesgym.competitions.MIT-BIH-Arrhythmia.prepare:prepare

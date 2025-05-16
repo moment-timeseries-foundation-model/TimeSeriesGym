@@ -1,0 +1,17 @@
+id: csdi-reproduce-pm25
+name: Train and Evaluate CSDI to Impute PM2.5 Data
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/csdi-reproduce-pm25/description.md
+
+dataset:
+  answers: csdi-reproduce-pm25/prepared/private/
+  sample_submission: csdi-reproduce-pm25/prepared/public/CSDI/save/pm25_validationindex0_20250513_210308
+
+grader:
+  name: custom
+  grade_fn: timeseriesgym.competitions.csdi-reproduce-pm25.grade:grade
+
+preparer: timeseriesgym.competitions.csdi-reproduce-pm25.prepare:prepare

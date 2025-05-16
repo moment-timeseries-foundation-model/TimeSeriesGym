@@ -1,0 +1,73 @@
+iTRANSFORMER: INVERTED TRANSFORMERS ARE EFFECTIVE FOR TIME SERIES FORECASTING
+
+Abstract:
+The recent boom of linear forecasting models questions the ongoing passion for
+architectural modifications of Transformer-based forecasters. These forecasters
+leverage Transformers to model the global dependencies over temporal tokens of
+time series, with each token formed by multiple variates of the same timestamp.
+However, Transformers are challenged in forecasting series with larger lookback
+windows due to performance degradation and computation explosion. Besides, the
+embedding for each temporal token fuses multiple variates that represent potential
+delayed events and distinct physical measurements, which may fail in learning
+variate-centric representations and result in meaningless attention maps. In this
+work, we reflect on the competent duties of Transformer components and repurpose
+the Transformer architecture without any modification to the basic components. We
+propose iTransformer that simply applies the attention and feed-forward network
+on the inverted dimensions. Specifically, the time points of individual series are em-
+bedded into variate tokens which are utilized by the attention mechanism to capture
+multivariate correlations; meanwhile, the feed-forward network is applied for each
+variate token to learn nonlinear representations. The iTransformer model achieves
+state-of-the-art on challenging real-world datasets, which further empowers the
+Transformer family with promoted performance, generalization ability across differ-
+ent variates, and better utilization of arbitrary lookback windows, making it a nice
+alternative as the fundamental backbone of time series forecasting
+
+**3 ITRANSFORMER**
+In multivariate time series forecasting, given historical observations X = {x1, ..., xT} ∈ R^(T×N)
+with T time steps and N variates, we predict the future S time steps Y = {x\_{T+1}, ..., x\_{T+S}} ∈
+R^(S×N). For convenience, we denote X\_{t,:} as the simultaneously recorded time points at the step t, and
+X\_{:,n} as the whole time series of each variate indexed by n. It is notable that X\_{t,:} may not contain
+time points that essentially reflect the same event in real-world scenarios because of the systematical
+time lags among variates in the dataset. Besides, the elements of X\_{t,:} can be distinct from each other
+in physical measurements and statistical distributions, for which a variate X\_{:,n} generally shares.
+
+**3.1 STRUCTURE OVERVIEW**
+Our proposed iTransformer illustrated in Figure 4 adopts the encoder-only architecture of Transformer (Vaswani et al., 2017), including the embedding, projection, and Transformer blocks.
+Embedding the whole series as the token Most Transformer-based forecasters typically regard
+multiple variates of the same time as the (temporal) token and follow the generative formulation of
+forecasting tasks. However, we find the approach on the numerical modality can be less instructive for learning attention maps, which is supported by increasing applications of Patching (Dosovitskiy et al., 2021; Nie et al., 2023) that broadens the respective field. Meanwhile, the triumph of linear forecasters also challenges the necessity of adopting a heavy encoder-decoder Transformer for generating tokens.
+Instead, our proposed encoder-only iTransformer focuses on representation learning and adaptive correlating of multivariate series. Each time series driven by the underlying complicated process is firstly tokenized to describe the properties of the variate, applied by self-attention for mutual interactions, and individually processed by feed-forward networks for series representations. Notably, the task to generate the predicted series is essentially delivered to linear layers, which has been proven competent by previous work (Das et al., 2023) and we provide a detailed analysis in the next section.
+Based on the above considerations, in iTransformer, the process of predicting future series of each specific variate Ŷ\_{:,n} based on the lookback series X\_{:,n} is simply formulated as follows:
+
+h₀ⁿ = Embedding(X\_{:,n})
+H^{l+1} = TrmBlock(H^l), for l = 0, ..., L - 1
+Ŷ\_{:,n} = Projection(h\_Lⁿ) ...(1)
+
+where H = {h₁, ..., h\_N} ∈ R^(N×D) contains N embedded tokens of dimension D and the superscript denotes the layer index.
+Embedding: R^T → R^D and Projection: R^D → R^S are both implemented by multi-layer perceptron (MLP).
+The obtained variate tokens interact with each other by self-attention and are independently processed by the shared feed-forward network in each TrmBlock. Specifically, as the order of sequence is implicitly stored in the neuron permutation of the feed-forward network, the position embedding in the vanilla Transformer is no longer needed here.
+
+**iTransformers**
+The architecture essentially presupposes no more specific requirements on Transformer variants, other than the attention is applicable for multivariate correlation. Thus, a bundle of efficient attention mechanisms (Li et al., 2021; Wu et al., 2022; Dao et al., 2022) can be the plugins, reducing the complexity when the variate number grows large. Besides, with the input flexibility of attention, the token number can vary from training to inference, and the model is allowed to be trained on arbitrary numbers of variates. The inverted Transformers, named iTransformers, are extensively evaluated in experiments of Section 4.2 and demonstrate advantages on time series forecasting.
+
+**3.2 INVERTED TRANSFORMER COMPONENTS**
+We organize a stack of L blocks composed of the layer normalization, feed-forward network, and self-attention modules. But their duties on the inverted dimension are carefully reconsidered.
+
+**Layer normalization**
+Layer normalization (Ba et al., 2016) is originally proposed to increase the convergence and training stability of deep networks. In typical Transformer-based forecasters, the module normalizes the multivariate representation of the same timestamp, gradually fusing the variates with each other. Once the collected time points do not represent the same event, the operation will also introduce interaction noises between noncausal or delayed processes. In our inverted version, the normalization is applied to the series representation of individual variate as Equation 2, which has been studied and proved effective in tackling non-stationary problems (Kim et al., 2021; Liu et al., 2022b). Besides, since all series as (variate) tokens are normalized to a Gaussian distribution, the discrepancies caused by inconsistent measurements can be diminished. By contrast, in previous architecture, different tokens of time steps will be normalized, leading to oversmooth time series.
+
+LayerNorm(H) =
+(h\_n - Mean(h\_n)) / sqrt(Var(h\_n)), for n = 1, ..., N ...(2)
+
+**Feed-forward network**
+Transformer adopts the feed-forward network (FFN) as the basic building block for encoding token representation and it is identically applied to each token. As aforementioned, in the vanilla Transformer, multiple variates of the same timestamp that form the token can be malpositioned and too localized to reveal enough information for predictions. In the inverted version, FFN is leveraged on the series representation of each variate token. By the universal approximation theorem (Hornik, 1991), they can extract complicated representations to describe a time series. With the stacking of inverted blocks, they are devoted to encoding the observed time series and decoding the representations for future series using dense non-linear connections, which work effectively as the recent works completely built on MLPs (Tolstikhin et al., 2021; Das et al., 2023).
+
+More interestingly, the identical linear operation on independent time series, which serves as the combination of the recent linear forecasters (Zeng et al., 2023) and Channel Independence (Nie et al., 2023), can be instructive for us to understand the series representations. Recent revisiting on linear forecasters (Li et al., 2023) highlights that temporal features extracted by MLPs are supposed to be shared within distinct time series. We propose a rational explanation that the neurons of MLP are taught to portray the intrinsic properties of any time series, such as the amplitude, periodicity, and even frequency spectrums (neuron as a filter), serving as a more advantageous predictive representation learner than the self-attention applied on time points. Experimentally, we validate that the division of labor helps enjoy the benefits of linear layers in Section 4.3, such as the promoted performance if providing enlarged lookback series, and the generalization ability on unseen variates.
+
+**Self-attention**
+While the attention mechanism is generally adopted for facilitating the temporal dependencies modeling in previous forecasters, the inverted model regards the whole series of one variate as an independent process. Concretely, with comprehensively extracted representations of each time series H = {h₀, ..., h\_N} ∈ R^(N×D), the self-attention module adopts linear projections to get queries, keys, and values Q, K, V ∈ R^(N×d\_k), where d\_k is the projected dimension.
+With denotation of q\_i, k\_j ∈ R^(d\_k) as the specific query and key of one (variate) token, we notice that each entry of the pre-Softmax scores is formulated as:
+
+A\_{i,j} = (QKᵀ / sqrt(d\_k))\_{i,j} ∝ qᵀ\_i \* k\_j
+
+Since each token is previously normalized on its feature dimension, the entries can somewhat reveal the variate-wise correlation, and the whole score map A ∈ R^(N×N) exhibits the multivariate correlations between paired variate tokens. Consequently, highly correlated variate will be more weighted for the next representation interaction with values V. Based on this intuition, the proposed mechanism is believed to be more natural and interpretable for multivariate series forecasting.

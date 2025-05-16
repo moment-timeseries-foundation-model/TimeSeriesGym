@@ -1,0 +1,17 @@
+id: moment-anomaly-detection-score
+name: Moment Anomaly Detection Score
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/moment-anomaly-detection-score/description.md
+
+dataset:
+  answers: moment-anomaly-detection-score/prepared/private/test.npy
+  sample_submission: moment-anomaly-detection-score/prepared/public/sample_submission.npy
+
+grader:
+  name: accuracy
+  grade_fn: timeseriesgym.competitions.moment-anomaly-detection-score.grade:grade
+
+preparer: timeseriesgym.competitions.moment-anomaly-detection-score.prepare:prepare

@@ -1,0 +1,17 @@
+id: context-is-key-moirai
+name: Evaluate MOIRAI time series foundation model on the Context Is Key (CiK) benchmark
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/context-is-key-moirai/description.md
+
+dataset:
+  answers: context-is-key-moirai/prepared/private/solution.pkl
+  sample_submission: context-is-key-moirai/prepared/public/sample_submission.pkl
+
+grader:
+  name: custom
+  grade_fn: timeseriesgym.competitions.context-is-key-moirai.grade:grade
+
+preparer: timeseriesgym.competitions.context-is-key-moirai.prepare:prepare

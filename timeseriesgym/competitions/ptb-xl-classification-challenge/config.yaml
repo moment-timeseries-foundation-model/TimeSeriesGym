@@ -1,0 +1,17 @@
+id: ptb-xl-classification-challenge
+name: PTB-XL Classification Challenge
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/ptb-xl-classification-challenge/description.md
+
+dataset:
+  answers: ptb-xl-classification-challenge/prepared/private/test_label_df.csv
+  sample_submission: ptb-xl-classification-challenge/prepared/public/sample_submission.csv
+
+grader:
+  name: accuracy
+  grade_fn: timeseriesgym.competitions.ptb-xl-classification-challenge.grade:grade
+
+preparer: timeseriesgym.competitions.ptb-xl-classification-challenge.prepare:prepare

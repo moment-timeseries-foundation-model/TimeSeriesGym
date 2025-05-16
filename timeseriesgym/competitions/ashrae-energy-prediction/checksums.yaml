@@ -1,0 +1,9 @@
+private:
+  test.csv: 07cc8042f50e49efe946395755258a3a
+public:
+  building_metadata.csv: 86c39556d08ad430fced4085852360d2
+  sample_submission.csv: 7d48c04d2378d0e6267eecbb7bde0fa9
+  test_features.csv: dd978a4a85e4260f0daae42c240e3cac
+  train_features.csv: ad92d7958ad444a76b7f67633518fb3b
+  train_label.csv: 0807cb15180f0fde97c221a909e88e35
+zip: cd2b16e03e7d55e44a21c3480b55838c

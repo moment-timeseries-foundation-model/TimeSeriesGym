@@ -1,0 +1,17 @@
+id: ucr-anomaly-detection
+name: ucr-anomaly-detection
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/ucr-anomaly-detection/description.md
+
+dataset:
+  answers: ucr-anomaly-detection/prepared/private/labels.h5
+  sample_submission: ucr-anomaly-detection/prepared/public/sample_submission.h5
+
+grader:
+  name: adjusted-f1-score
+  grade_fn: timeseriesgym.competitions.ucr-anomaly-detection.grade:grade
+
+preparer: timeseriesgym.competitions.ucr-anomaly-detection.prepare:prepare

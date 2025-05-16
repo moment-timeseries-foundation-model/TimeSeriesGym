@@ -1,0 +1,27 @@
+id: m5-forecasting-accuracy
+name: M5 Forecasting - Accuracy
+competition_type: simple
+awards_medals: true
+prizes:
+  - position: 1
+    value: 25000
+  - position: 2
+    value: 10000
+  - position: 3
+    value: 5000
+  - position: 4
+    value: 3000
+  - position: 5
+    value: 2000
+
+description: timeseriesgym/competitions/m5-forecasting-accuracy/description.md
+
+dataset:
+  answers: m5-forecasting-accuracy/prepared/private/test.jsonl
+  sample_submission: m5-forecasting-accuracy/prepared/public/sample_submission.csv
+
+grader:
+  name: weighted-root-mean-squared-scaled-error
+  grade_fn: timeseriesgym.competitions.m5-forecasting-accuracy.grade:grade
+
+preparer: timeseriesgym.competitions.m5-forecasting-accuracy.prepare:prepare

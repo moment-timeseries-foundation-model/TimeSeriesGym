@@ -1,0 +1,97 @@
+artifacts:
+  - path: example/train.py
+    type: training_script
+    criteria:
+      - name: TensorBoard Usage
+        threshold: 0.75
+        description: >
+          Evaluate if the script properly implements TensorBoard for experiment tracking.
+          Check for:
+          1. Proper import of SummaryWriter from torch.utils.tensorboard
+          2. Initialization of SummaryWriter with an appropriate log directory
+          3. Logging of training and validation metrics using add_scalar
+          4. Logging of model architecture using add_graph
+          5. Proper closure of the writer at the end of training
+
+      - name: Code Quality and Documentation
+        threshold: 0.8
+        description: >
+          Evaluate the code quality and documentation of the training script.
+          Check for:
+          1. Comprehensive module-level docstring explaining the script's purpose
+          2. Type annotations for function parameters and return types
+          3. Function docstrings with Args and Returns sections for all substantive functions
+          4. PEP 8 compliance (line length, spacing, naming conventions)
+          5. Well-organized code structure with logical function separation
+          6. Clear variable names and consistent code style
+
+      - name: Hydra Configuration Usage
+        threshold: 0.75
+        description: >
+          Evaluate the proper usage of Hydra for configuration management.
+          Check for:
+          1. Import of hydra and use of @hydra.main decorator
+          2. Import and use of OmegaConf or DictConfig from omegaconf
+          3. Access to model parameters from the config object
+          4. Proper config_path and config_name specification
+          5. Evidence of passing configuration to the model
+
+      - name: Model Training Completeness
+        threshold: 0.75
+        description: >
+          Evaluate if the training script implements a complete training workflow.
+          Check for:
+          1. Proper data loading and preprocessing
+          2. Training and validation loops
+          3. Loss calculation and optimization
+          4. Learning rate scheduling
+          5. Model checkpoint saving
+          6. Final prediction generation
+
+  - path: example/model.py
+    type: model_script
+    criteria:
+      - name: Code Quality and Documentation
+        threshold: 0.8
+        description: >
+          Evaluate the code quality and documentation of the model implementation.
+          Check for:
+          1. Comprehensive module-level docstring explaining the model's purpose and architecture
+          2. Type annotations for function parameters and return types
+          3. Class and method docstrings with proper Args and Returns sections
+          4. PEP 8 compliance (line length, spacing, naming conventions)
+          5. Clear architecture implementation with logical component organization
+
+      - name: Model Architecture Design
+        threshold: 0.75
+        description: >
+          Evaluate the model architecture design for ECG classification.
+          Check for:
+          1. Proper handling of configuration parameters
+          2. Appropriate network architecture for the ECG classification task
+          3. Proper forward method implementation
+          4. Inclusion of useful utility functions (like parameter counting)
+          5. Flexibility to adapt to different hyperparameters from config
+
+      - name: Model Configuration Handling
+        threshold: 0.75
+        description: >
+          Evaluate how the model handles configuration parameters.
+          Check for:
+          1. Ability to accept a configuration object or use default parameters
+          2. Proper extraction of parameters from configuration
+          3. Support for Hydra configuration structure
+          4. Clear documentation of configuration parameters
+          5. Reasonable default values when configuration is not provided
+
+criteria:
+  - name: Overall ECG Classification Solution
+    threshold: 0.75
+    description: >
+      Evaluate the overall solution for ECG classification based on engineering best practices.
+      Consider:
+      1. How well the TensorBoard integration enables experiment tracking
+      2. The quality and completeness of code documentation
+      3. The effectiveness of the Hydra configuration management
+      4. The implementation completeness for ECG classification
+      5. The potential effectiveness of the model architecture for the task

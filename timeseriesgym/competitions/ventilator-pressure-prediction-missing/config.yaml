@@ -1,0 +1,29 @@
+id: ventilator-pressure-prediction-missing
+parent_id: ventilator-pressure-prediction
+name: "Google Brain - Ventilator Pressure Prediction with Missing Data"
+
+competition_type: simple
+awards_medals: true
+prizes:
+  - position: 1
+    value: 2500
+  - position: 2
+    value: 2500
+  - position: 3
+    value: 2500
+
+dataset:
+  answers: ventilator-pressure-prediction-missing/prepared/private/test.csv
+  sample_submission: ventilator-pressure-prediction-missing/prepared/public/sample_submission.csv
+
+missingness_simulator:
+  name: random-missingness
+  missingness_fn: timeseriesgym.missingness_helpers:simulate_random_missingness
+  file_names:
+    - train.csv
+  ignore_columns:
+    - id
+    - breath_id
+    - time_step
+    - pressure
+  missingness_ratio: 0.2

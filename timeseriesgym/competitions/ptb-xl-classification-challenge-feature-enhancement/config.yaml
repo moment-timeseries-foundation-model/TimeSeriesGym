@@ -1,0 +1,22 @@
+id: ptb-xl-classification-challenge-feature-enhancement
+name: ptb-xl-classification-challenge-feature-enhancement
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/ptb-xl-classification-challenge-feature-enhancement/description.md
+
+parent_id: ptb-xl-classification-challenge
+
+dataset:
+  answers: ptb-xl-classification-challenge-feature-enhancement/prepared/private/test_label_df.csv
+  sample_submission: ptb-xl-classification-challenge-feature-enhancement/prepared/public/sample_submission.csv
+
+grader:
+  name: custom-feature-enhancement-grading
+  grade_fn: timeseriesgym.competitions.ptb-xl-classification-challenge-feature-enhancement.grade:grade_feature_enhancement
+
+feature_enhancement_config:
+  model_code_file: model.py
+  config_file: config.yaml
+  training_file: train.py

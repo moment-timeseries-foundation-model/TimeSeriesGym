@@ -1,0 +1,23 @@
+id: ptb-xl-classification-challenge-hyperparameter-search
+name: ptb-xl-classification-challenge-hyperparameter-search
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/ptb-xl-classification-challenge-hyperparameter-search/description.md
+
+parent_id: ptb-xl-classification-challenge
+
+dataset:
+  answers: ptb-xl-classification-challenge-hyperparameter-search/prepared/private/test_label_df.csv
+  sample_submission: ptb-xl-classification-challenge-hyperparameter-search/prepared/public/sample_submission.csv
+
+grader:
+  name: custom-hyperparameter-search-grading
+  grade_fn: timeseriesgym.competitions.ptb-xl-classification-challenge-hyperparameter-search.grade:grade_hyperparameter_search
+
+hyperparameter_search_config:
+  baseline_submission_name: baseline_submission.csv
+  improved_submission_name: submission.csv
+  baseline_model_name: baseline_model.pt
+  improved_model_name: model.pt

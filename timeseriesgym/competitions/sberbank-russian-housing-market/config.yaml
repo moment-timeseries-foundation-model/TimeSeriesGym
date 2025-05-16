@@ -1,0 +1,26 @@
+id: sberbank-russian-housing-market
+name: Sberbank Russian Housing Market
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true  # Not sure about this
+prizes:
+  - position: 1
+    value: 20000
+  - position: 2
+    value: 15000
+  - position: 3
+    value: 7000
+  - position: 4
+    value: 5000
+  - position: 5
+    value: 3000
+description: timeseriesgym/competitions/sberbank-russian-housing-market/description.md
+
+dataset:
+  answers: sberbank-russian-housing-market/prepared/private/test.csv
+  sample_submission: sberbank-russian-housing-market/prepared/public/sample_submission.csv
+
+grader:
+  name: root-mean-squared-logarithmic-error
+  grade_fn: timeseriesgym.competitions.sberbank-russian-housing-market.grade:grade
+
+preparer: timeseriesgym.competitions.sberbank-russian-housing-market.prepare:prepare

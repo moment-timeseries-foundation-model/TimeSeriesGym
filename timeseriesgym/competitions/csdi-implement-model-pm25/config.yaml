@@ -1,0 +1,17 @@
+id: csdi-implement-model-pm25
+name: Implement CSDI to Impute PM2.5 Data
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/csdi-implement-model-pm25/description.md
+
+dataset:
+  answers: csdi-implement-model-pm25/prepared/private/
+  sample_submission: csdi-implement-model-pm25/prepared/public/CSDI/save/pm25_validationindex0_20250513_210308
+
+grader:
+  name: custom
+  grade_fn: timeseriesgym.competitions.csdi-implement-model-pm25.grade:grade
+
+preparer: timeseriesgym.competitions.csdi-implement-model-pm25.prepare:prepare

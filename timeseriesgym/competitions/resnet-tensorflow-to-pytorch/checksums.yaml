@@ -1,0 +1,11 @@
+private:
+  test_labels.csv: b3da3d0ef12668f793e301f5e2191e80
+public:
+  resnet.py: 9d870c8b30c4d8fe55403d743f7add91
+  sample_submission.py: 0b5d6f85240b096c2c59294e8bc30519
+  test_data.pt: 7539caf8076350af54edfb4a924f54c3
+  train_data.pt: 32f163ecab17521a610fa08e5f2422e7
+  utils.py: bc6d7d621c4007a990274352156874d9
+  val_data.pt: 09e0b8f4f5fadd3e5375c45c95f5fbe5
+  x.pt: de5b446aad4966414d084be121d73e14
+zip: null

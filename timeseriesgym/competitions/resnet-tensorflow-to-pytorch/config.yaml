@@ -1,0 +1,62 @@
+id: resnet-tensorflow-to-pytorch
+name: Convert a ResNet Implementation in TensorFlow to PyTorch
+competition_type: simple
+awards_medals: false
+
+description: timeseriesgym/competitions/resnet-tensorflow-to-pytorch/description.md
+
+dataset:
+  answers: resnet-tensorflow-to-pytorch/prepared/private/test_labels.csv
+  sample_submission: resnet-tensorflow-to-pytorch/prepared/public/sample_submission.py
+
+grader:
+  name: python-code-grading
+  grade_fn: timeseriesgym.competitions.resnet-tensorflow-to-pytorch.grade:grade_code
+
+preparer: timeseriesgym.competitions.resnet-tensorflow-to-pytorch.prepare:prepare
+
+coding_config:
+  name: pytorch-resnet
+  input_data_dir: resnet-tensorflow-to-pytorch/prepared/public/
+  required_classes:
+    ResNet:
+      required_methods:
+        __init__:
+          exact_match: false  # if true, args should exactly match in the same order
+          required_args:
+            output_directory: ./output/
+            input_shape: [1, 50]
+            n_classes: 2
+            n_feature_maps: 64
+            verbose: true
+            random_seed: 42
+        forward:
+          exact_match: true
+          required_args:
+            x:
+              file_name: x.pt
+          expected_output_type: torch.Tensor
+          # output shape needs to be passed as a list as yaml cannot take tuple
+          expected_output_shape: [10, 2]
+  required_functions:
+    train:
+      exact_match: false
+      required_args:
+        model: null  # can only be initialized if the ResNet class is correctly implemented
+        train_data:
+          file_name: train_data.pt
+        val_data:
+          file_name: val_data.pt
+        batch_size: 64
+        n_epochs: 1
+        learning_rate: 0.001
+        verbose: true
+    predict:
+      exact_match: false
+      required_args:
+        model: null  # can only be initialized if the ResNet class is correctly implemented
+        test_data:
+          file_name: test_data.pt
+      expected_output_type: [numpy.ndarray, numpy.ndarray]
+      expected_output_shape: [[100, ], [100, 2]]  # if multiple outputs, should be a list of lists
+      expected_accuray: 0.8  # test accuracy should be greater than this value

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = 'timeseriesgym'
+readme = "README.md"
+requires-python = ">=3.11"
+version = "1.0.0"
+dependencies = [
+  "appdirs>=1.4.4",
+  "deepeval==2.9.1",
+  "docker>=7.1",
+  "fastparquet>=2024.5.0",
+  "kaggle==1.6.17",
+  "levenshtein>=0.25.1",
+  "openai>=1.10.0",
+  "pandas==2.2.3",
+  "pyyaml>=6.0",
+  "py7zr>=0.21",
+  "scikit-learn==1.6.1",
+  "tensorflow>=2.16",
+  "pillow>=10.3",
+  "python-dotenv>=1.0.1",
+  "aiohttp>=3.9.5",
+  "tenacity>=8.5.0",
+  "nbformat>=5.10.4",
+  "nbconvert>=7.16.4",
+  "ipython>=8.26.0",
+  "pymongo>=4.8.0",
+  "pycocotools>=2.0.8",
+  "diskcache>=5.6.3",
+  "pyquaternion>=0.9.9",
+  "shapely>=2.0.5",
+  "numpy==2.0.2",
+  "torch==2.6.0",
+  "xgboost==2.1.1",
+  "datasets==3.4.1",
+  "gluonts==0.16.1",
+  "pytest==8.3.5",
+  "wfdb==4.2.0",
+  "pyarrow==20.0.0",
+]
+
+[tool.setuptools]
+packages = { find = { include = ["timeseriesgym", "timeseriesgym.*"] } }
+
+[project.scripts]
+timeseriesgym = "timeseriesgym.cli:main"
+
+[project.optional-dependencies]
+formatters = ["black>=23.3", "isort>=5.13"]
+dev = ["pytest>=8.2", "mypy>=1.10", "pre-commit>=3.7", "ruff>=0.3.0"]
+
+[tool.setuptools.package-data]
+timeseriesgym = ["competitions/**/*"]
+
+[tool.black]
+line-length = 100 # match the precommit
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "B",   # flake8-bugbear
+    "RUF", # ruff-specific rules
+]
+ignore = []
+
+[tool.ruff.isort]
+known-first-party = ["timeseriesgym"]
+
+[tool.pytest.ini_options]
+# Pytest can take a long time to collect test cases
+# when many Kaggle competitions have been downloaded.
+# We avoid this up by telling Pytest where the
+# tests live ahead of time.
+testpaths = ["tests"]

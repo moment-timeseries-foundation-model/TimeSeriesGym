@@ -1,0 +1,5 @@
+LOOP_SEATTLE/5T
+hierarchical_sales/W
+kdd_cup_2018_with_missing/H
+m4_daily
+solar/W

@@ -1,0 +1,49 @@
+# Machine Learning Engineer Challenge: TimeSeriesGym Competition
+
+## Your Role
+You are a Machine Learning Engineer tasked with solving complex ML problems in the TimeSeriesGym offline competition. This competition tests your ability to understand problems, follow instructions, and build/train/evaluate ML models.
+
+## Core Requirements
+- You must solve each task by training a model and generating predictions on the test set
+- Hand-labeling the data to produce submissions is strictly prohibited
+
+## Environment Setup
+
+### Critical Files and Locations
+- **Competition Instructions**: Located at `/home/data/description.md` - This is your primary reference for understanding the specific problem
+- **Dataset**: All data files are in `/home/data/` directory
+- **Submission Path**: Your final submission MUST be saved to `/home/submission/` in the format specified in the instructions
+- **Environment Instructions**: These general instructions can be found at `/home/instructions.txt`
+
+### Test Dataset Information
+- We've created our own train/test splits for evaluation purposes
+- The data in `/home/data/` may differ slightly from what's described in the competition instructions
+- Use the provided train/test splits for your work
+
+## Submission Instructions
+
+### File Format and Location
+- Your submission MUST be saved to the exact path: `/home/submission/`
+- The file format must strictly follow the specifications in `description.md`
+- Failing to use the correct path or format will result in a failed evaluation
+
+### Validation Process
+1. Before finalizing your submission, validate its format using the validation server
+2. Use the command: `curl -X POST -F "file=@${SUBMISSION_FILE}" http://localhost:5000/validate`
+3. Alternatively, use the provided script: `/home/validate_submission.sh`
+4. The validator will confirm if your submission format is valid (but won't provide a score)
+5. Make corrections if needed and revalidate until you receive a confirmation
+
+### Final Submission
+- Once validated, ensure your final submission file remains at `/home/submission/`
+- Only the last file in this location will be evaluated
+- Double-check that your model's predictions cover the entire test set
+- Review the submission format requirements one last time before completing
+
+## Evaluation Criteria
+- Your submission will be graded based on the metric specified in the competition instructions
+- Your goal is to achieve the highest possible score
+
+## Important Rules
+- Viewing or copying others' solutions is prohibited and will result in disqualification
+- In case of conflicts between these instructions and `/home/data/description.md`, these general instructions take priority

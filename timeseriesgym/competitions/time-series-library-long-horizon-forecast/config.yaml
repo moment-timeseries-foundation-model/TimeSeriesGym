@@ -1,0 +1,17 @@
+id: time-series-library-long-horizon-forecast
+name: Time Series Library Long Horizon Forecast
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/time-series-library-long-horizon-forecast/description.md
+
+dataset:
+  answers: time-series-library-long-horizon-forecast/prepared/private/test.h5
+  sample_submission: time-series-library-long-horizon-forecast/prepared/public/sample_submission.h5
+
+grader:
+  name: custom
+  grade_fn: timeseriesgym.competitions.time-series-library-long-horizon-forecast.grade:grade
+
+preparer: timeseriesgym.competitions.time-series-library-long-horizon-forecast.prepare:prepare

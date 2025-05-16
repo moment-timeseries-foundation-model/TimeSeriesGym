@@ -1,0 +1,17 @@
+id: time-series-library-itransformer-weather-forecast
+name: Time Series Library Itransformer Weather Forecast
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/time-series-library-itransformer-weather-forecast/description.md
+
+dataset:
+  answers: time-series-library-itransformer-weather-forecast/prepared/private/test.npy
+  sample_submission: time-series-library-itransformer-weather-forecast/prepared/public/sample_submission.npy
+
+grader:
+  name: custom
+  grade_fn: timeseriesgym.competitions.time-series-library-itransformer-weather-forecast.grade:grade
+
+preparer: timeseriesgym.competitions.time-series-library-itransformer-weather-forecast.prepare:prepare
