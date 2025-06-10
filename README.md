@@ -34,7 +34,7 @@ timeseriesgym grade-sample path/to/submission.csv amp-parkinsons-disease-progres
 ```bash
 # Clone the repository
 git clone https://github.com/your-org/timeseriesgym.git
-cd timeseriesgym
+cd TimeSeriesGym
 
 # Install the package
 pip install -e .
