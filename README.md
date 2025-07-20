@@ -94,13 +94,24 @@ timeseriesgym prepare -l my_competitions.txt
 
 **Note**: Before preparing Kaggle challenges, make sure to review the competition rules, and accept them. You will not be able to proceed without accepting the competition rules. TimeSeriesGym uses a specific version of the Kaggle API (kaggle==1.6.17). We currently do not support newer versions.
 
+#### Additional Files
+
+For non-Kaggle competitions, the datasets are stored using Git LFS. After installing Git LFS, run the following commands to retrieve the data stored in `timeseriesgym/data/`:
+
+```bash
+git lfs fetch --all
+git lfs pull
+```
+
+For competitions where licensing restrictions prevent us from directly distributing the dataset, a script named **download\_data.py** is provided in the corresponding competition folder to help you download it manually.
+
 #### Additional Preparation Options
 
 - `--keep-raw`: Retain original download files (useful for debugging)
 - `--data-dir=PATH`: Use custom data directory instead of default cache
 - `--overwrite-checksums`: Developer option to update checksums
 - `--skip-verification`: Skip checksum verification (not recommended)
-- `--skip-leaderboard`: Skip leaderboard download and verification
+- `--skip-leaderboard`: Skip leaderboard download and verification. Please add this when preparing non-kaggle competitions.
 
 ### Competition Evaluation
 
