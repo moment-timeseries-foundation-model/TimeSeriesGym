@@ -12,7 +12,11 @@ import numpy as np
 def prepare(raw: Path, public: Path, private: Path):
     # Download the long-term forecast dataset from Google Drive by TSL authors
     url = "https://drive.google.com/drive/folders/1vE0ONyqPlym2JaaAoEe0XNDR8FS_d322"
-    gdown.download_folder(url=url, output=str(raw), quiet=False, use_cookies=False)
+    try:
+        gdown.download_folder(url=url, output=str(raw), quiet=False, use_cookies=False)
+    except Exception as e:
+        logging.error(f"Failed to download the dataset from Google Drive: {e}")
+        return
 
     # Unzip the downloaded files in the long_term_forecast directory
     zip_dir = raw
@@ -28,9 +32,13 @@ def prepare(raw: Path, public: Path, private: Path):
         extracted_folder.rename(public / zip_path.stem)
 
     # Download the tsl GitHub repository
-    os.system(
-        f"cd {public}; git clone --branch long-horizon-forecast --single-branch https://github.com/raycai420/Time-Series-Library.git"
-    )
+    try:
+        os.system(
+            f"cd {public}; git clone --branch long-horizon-forecast --single-branch https://github.com/raycai420/Time-Series-Library.git"
+        )
+    except Exception as e:
+        logging.error(f"Failed to clone the Time-Series-Library repository: {e}")
+        return
 
     # Remove all .json and .csv files from the cloned repository
     for file in (public / "Time-Series-Library").rglob("*"):
