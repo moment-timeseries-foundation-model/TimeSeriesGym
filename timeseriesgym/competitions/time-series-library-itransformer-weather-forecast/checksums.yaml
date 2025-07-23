@@ -72,4 +72,5 @@ public:
   Time-Series-Library/utils/timefeatures.py: 4a7c15f9f6d4fac64c6bb6b9d7c13365
   Time-Series-Library/utils/tools.py: 8215a3180d3bf722135e555ae048c519
   sample_submission.npy: 2bb1ffb9d2c3e4b825708f3a9428e340
+  weather.csv: 2e79e5e4c921d3542684c4a34c6748b4
 zip: 3d018f8d4de1d1e96d9f8bf76cf1715b

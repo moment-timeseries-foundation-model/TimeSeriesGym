@@ -21,3 +21,7 @@ def prepare(raw: Path, public: Path, private: Path):
     for file in (public / "time-series-library").rglob("*"):
         if file.suffix in [".json", ".csv"]:
             file.unlink()
+
+    # move weather data
+    weather_data = raw / "weather.csv"
+    weather_data.rename(public / "weather.csv")
