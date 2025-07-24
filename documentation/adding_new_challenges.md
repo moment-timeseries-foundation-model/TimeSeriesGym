@@ -15,7 +15,7 @@ TimeSeriesGym supports competitions from various sources beyond Kaggle, includin
 Create a directory for your competition:
 
 ```bash
-mkdir -p /timeseriesgym/competitions/<competition-id>
+mkdir -p timeseriesgym/competitions/<competition-id>
 ```
 
 > **Important**: Choose a clear, descriptive `competition-id` that follows the naming convention of other competitions (kebab-case recommended).
@@ -100,7 +100,7 @@ If programmatic download is not feasible:
 
 1. Download the dataset files manually
 2. Create a zip archive containing all necessary files
-3. Place the zip file at `/timeseriesgym/competitions/<competition-id>/<competition-id>.zip`
+3. Place the zip file at `timeseriesgym/competitions/<competition-id>/<competition-id>.zip`
 
 > **Important**: When downloading data manually, be consistent with file naming and organization to ensure reproducibility.
 

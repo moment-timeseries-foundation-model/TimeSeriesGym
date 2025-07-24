@@ -18,7 +18,7 @@ Adding a new competition requires several components:
 Create a new directory for your competition in the TimeSeriesGym structure:
 
 ```bash
-mkdir -p /timeseriesgym/competitions/<competition-id>
+mkdir -p timeseriesgym/competitions/<competition-id>
 ```
 
 > **Important**: The directory name must match the competition ID exactly. You can find the competition ID from the Kaggle dataset download command:
@@ -136,7 +136,7 @@ Make sure your grading function implements the exact same metric used by the Kag
 Create an empty `leaderboard.csv` file, which will be populated automatically:
 
 ```bash
-touch /timeseriesgym/competitions/<competition-id>/leaderboard.csv
+touch timeseriesgym/competitions/<competition-id>/leaderboard.csv
 ```
 
 Then download the leaderboard data:
@@ -350,7 +350,7 @@ Where `custom.txt` is a file containing only your competition ID.
 After completion, your competition directory should look like:
 
 ```
-/timeseriesgym/competitions/<competition-id>/
+timeseriesgym/competitions/<competition-id>/
 ├── config.yaml
 ├── description.md
 ├── grade.py
