@@ -42,7 +42,7 @@ dependencies = [
   "pyarrow==20.0.0",
   "gdown==5.2.0",
   "sktime==0.38.3",
-  "patoolib==0.0.1"
+  "patool==1.12"
 ]
 
 [tool.setuptools]
