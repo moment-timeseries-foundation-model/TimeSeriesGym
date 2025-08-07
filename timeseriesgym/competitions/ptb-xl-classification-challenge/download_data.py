@@ -297,7 +297,7 @@ def main(args):
             raise ValueError(f"[ERROR] unexpected file {file} in {tmp_dir}")
 
     # compress the files
-    zipfile_path = competition_dir / "ptb-xl-classification-challenge_test.zip"
+    zipfile_path = competition_dir / "ptb-xl-classification-challenge.zip"
     compress_zip(tmp_dir, zipfile_path)
     print(f"[INFO] compressed files to {zipfile_path}")
 
