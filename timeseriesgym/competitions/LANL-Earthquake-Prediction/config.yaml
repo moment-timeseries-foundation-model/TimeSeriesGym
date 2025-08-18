@@ -1,0 +1,26 @@
+id: LANL-Earthquake-Prediction
+name: LANL Earthquake Prediction
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true  # Not sure about this
+prizes:
+  - position: 1
+    value: 20000
+  - position: 2
+    value: 15000
+  - position: 3
+    value: 7000
+  - position: 4
+    value: 5000
+  - position: 5
+    value: 3000
+description: timeseriesgym/competitions/LANL-Earthquake-Prediction/description.md
+
+dataset:
+  answers: LANL-Earthquake-Prediction/prepared/private/test.csv
+  sample_submission: LANL-Earthquake-Prediction/prepared/public/sample_submission.csv
+
+grader:
+  name: mean-absolute-error
+  grade_fn: timeseriesgym.competitions.LANL-Earthquake-Prediction.grade:grade
+
+preparer: timeseriesgym.competitions.LANL-Earthquake-Prediction.prepare:prepare

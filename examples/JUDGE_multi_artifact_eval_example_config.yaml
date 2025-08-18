@@ -1,0 +1,55 @@
+# Multi-artifact evaluation configuration
+# This config demonstrates evaluating multiple artifacts with different criteria
+
+# Global criteria (used as fallback if an artifact doesn't specify its own)
+criteria:
+  - name: default_quality
+    description: |
+      Evaluate the default quality of code for:
+        - Basic correctness
+        - Readability
+
+# Artifacts to evaluate
+artifacts:
+  - path: # example/path/to/artifact.py
+    type: python_code
+    # This artifact has its own specific criteria
+    criteria:
+      - name: code_quality
+        description: |
+          Evaluate the code for:
+            - Proper docstrings and documentation
+            - Type hints usage
+            - Code structure and organization
+            - Code style and linting compliance (PEP 8)
+            - Naming conventions
+
+      - name: security
+        description: |
+          Evaluate the code for potential security issues:
+            - Proper input validation
+            - Avoiding dangerous functions
+            - Secure handling of external data
+            - Protection against common vulnerabilities
+
+  - path: # example/path/to/cli.py
+    type: python_code
+    # This artifact has different criteria focused on CLI design
+    criteria:
+      - name: cli_design
+        description: |
+          Evaluate the CLI design for:
+            - User-friendly interface
+            - Consistent argument naming
+            - Helpful error messages
+            - Proper documentation of commands
+            - Appropriate use of subparsers
+
+      - name: code_maintainability
+        description: |
+          Evaluate the maintainability of the code:
+            - Function/method length and complexity
+            - Separation of concerns
+            - Proper error handling
+            - Minimal duplication
+            - Modularity and extensibility

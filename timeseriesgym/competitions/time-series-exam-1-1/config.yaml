@@ -1,0 +1,17 @@
+id: time-series-exam-1-1
+name: TimeSeriesExam-- A Time Series Understanding Exam
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/time-series-exam-1-1/description.md
+
+dataset:
+  answers: time-series-exam-1-1/prepared/private/test.csv
+  sample_submission: time-series-exam-1-1/prepared/public/sample_submission.csv
+
+grader:
+  name: accuracy
+  grade_fn: timeseriesgym.competitions.time-series-exam-1-1.grade:grade
+
+preparer: timeseriesgym.competitions.time-series-exam-1-1.prepare:prepare

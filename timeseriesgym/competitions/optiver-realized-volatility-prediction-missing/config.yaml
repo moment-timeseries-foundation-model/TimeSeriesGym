@@ -1,0 +1,33 @@
+id: optiver-realized-volatility-prediction-missing
+name: Optiver Realized Volatility Prediction with Missing Data
+competition_type: simple
+awards_medals: true
+prizes:
+  - position: 1
+    value: 25000
+  - position: 2
+    value: 20000
+  - position: 3
+    value: 15000
+  - position: 4
+    value: 10000
+  - position: 5
+    value: 5000
+
+parent_id: optiver-realized-volatility-prediction
+
+dataset:
+  answers: optiver-realized-volatility-prediction-missing/prepared/private/test.csv
+  sample_submission: optiver-realized-volatility-prediction-missing/prepared/public/sample_submission.csv
+
+missingness_simulator:
+  name: random-missingness
+  missingness_fn: timeseriesgym.missingness_helpers:simulate_random_missingness
+  dir_names:
+    - book_train.parquet
+    - trade_train.parquet
+  ignore_columns:
+    - stock_id
+    - time_id
+    - seconds_in_bucket
+  missingness_ratio: 0.2

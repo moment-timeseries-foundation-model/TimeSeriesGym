@@ -1,0 +1,91 @@
+Challenge,Metric,Is_lower_better,Score,Leaderboard,Run Group Folder Name ,Owner,Note
+Online Product Sales ,root mean square logarithmic error,TRUE,1.24177,Below Median,2025-05-06T16-04-50-GMT_run-group_aide,Xinyu,
+Recruit Restaurant Visitor Forecasting,root mean square logarithmic error,TRUE,0.57342,Below Median,2025-05-06T16-04-50-GMT_run-group_aide,Xinyu,
+sberbank-russian-housing-market,root mean square logarithmic error,TRUE,0.39493,Below Median,2025-05-06T15-55-42-GMT_run-group_aide,Yifu,
+ashrae-energy-prediction,root mean square logarithmic error,TRUE,1.02181,Below Median,2025-05-06T15-55-42-GMT_run-group_aide,Yifu,
+M5 Forecasting - Accuracy,weighted root mean squared scaled error,TRUE,0.82332,Above Median,2025-05-06T23-36-54-GMT_run-group_aide,Yifu,
+LANL Earthquake Prediction,mean absolute error,TRUE,3.59542,Below Median,2025-05-09T05-52-59-GMT_run-group_aide,Yifu,
+Optiver Realized Volatility Prediction,root mean square percentage error,TRUE,0.27952,Below Median,2025-05-06T22-29-20-GMT_run-group_aide,Xinyu,
+Optiver Realized Volatility Prediction with Missingness,root mean square percentage error,TRUE,0.32604,Below Median,2025-05-06T22-29-20-GMT_run-group_aide,Xinyu,
+Optiver Realized Volatility Prediction with Hyperparameter Search,Improvement:: root mean square percentage error,TRUE,0,Below Median,2025-05-06T22-29-20-GMT_run-group_aide,Xinyu,no hps attempt by AIDE
+Google Brain - Ventilator Pressure Prediction,mean absolute error,TRUE,1.618,Below Median,2025-05-06T23-36-54-GMT_run-group_aide,Yifu,
+Google Brain - Ventilator Pressure Prediction with Missingness,mean absolute error,TRUE,13.59579,Below Median,2025-05-06T23-36-54-GMT_run-group_aide,Yifu,
+AMP-Parkinson's Disease Progression Prediction,symmetric mean absolute percentage error,TRUE,N/A,N/A,2025-05-10T02-02-34-GMT_run-group_aide,Yifu,submission length mismatch
+G2Net Gravitational Wave Detection,area under ROC curve,FALSE,0.50584,Below Median,2025-05-10T02-02-34-GMT_run-group_aide,Yifu,
+Child Mind Institute-- Detect Sleep States,event detection average precision,FALSE,0.0218,Below Median,2025-05-09T19-55-13-GMT_run-group_aide,Yifu,
+HMS - Harmful Brain Activity Classification,kullback liebler divergence,TRUE,1.15703,Below Median,2025-05-15T01-32-59-GMT_run-group_aide,Xinyu,
+PTB-XL ECG Classification,Accuracy,FALSE,0.80788,N/A,2025-05-09T19-55-13-GMT_run-group_aide,Yifu,
+PTB-XL ECG Classification with Hyperparameter Search,Improvement:: Accuracy,FALSE,-0.02159,N/A,2025-05-09T19-55-13-GMT_run-group_aide,Yifu,
+MIT-BIH Arrhythmia Detection,Accuracy,FALSE,0.79667,N/A,2025-05-10T06-02-59-GMT_run-group_aide,Yifu,
+MIT-BIH Arrhythmia Detection with Weak Supervision,Accuracy,FALSE,0.7262,N/A,2025-05-10T06-02-59-GMT_run-group_aide,Yifu,
+TimeSeriesExam-1,Accuracy,FALSE,0,N/A,2025-05-09T19-55-13-GMT_run-group_aide,Yifu,this is not valid; not a question by question
+GIFT-Eval,CRPS,TRUE,N/A,N/A,2025-05-15T04-27-01-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+context-is-key-moirai,binary: resolved,FALSE,N/A,N/A,2025-05-08T22-48-46-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+context-is-key-nn5-chronos,binary: resolved,FALSE,N/A,N/A,2025-05-08T22-48-46-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+Familiarity W/ Coding Resnet,"classes: binary (defined & initialized)
+methods: binary (defined & executed)
+functions: binary  (defined & executed)
+test metric: binary (passed cases / all cases)",,"""defined_classes"": ""1/1"",
+""initialized_classes"": ""1/1"",
+""defined_class_methods"": ""1/1"",
+""executed_class_methods"": ""0/1"",
+""defined_functions"": ""2/2"",
+""executed_functions"": ""0/2"",
+""test_metric"": ""0/1"",",N/A,2025-05-09T02-46-15-GMT_run-group_aide,Xinyu,"did not generate submission.py in the submission directory, graded solution.py in the code directory instead"
+Familiarity W/ Coding STOMP,"classes: binary (defined & initialized)
+methods: binary (defined & executed)
+functions: binary  (defined & executed)
+test metric: binary (passed cases / all cases)",,"""defined_functions"": ""1/1"",
+    ""executed_functions"": ""1/1"",
+    ""test_metric"": ""0/2"",",N/A,2025-05-13T02-27-03-GMT_run-group_aide,Xinyu,graded submission/submission.py
+PTB-XL ECG Classification with feature enhancement,,,,,2025-05-15T03-04-12-GMT_run-group_aide,,
+CSDI challenge reproduce pm2.5,N/A,,N/A,N/A,2025-05-15T03-04-12-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+CSDI challenge implement pm2.5,N/A,,N/A,N/A,2025-05-15T03-04-12-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+MOMENT Anomaly Score calculation ,Exact Match,FALSE,N/A,N/A,2025-05-10T17-51-41-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+Time Series Library iTransformer block implementation,Exact Match,FALSE,N/A,N/A,2025-05-10T17-51-41-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+Time Series Library Long Horizon Forecast Dataset,MSE,TRUE,N/A,N/A,2025-05-15T03-04-12-GMT_run-group_aide,Yifu,did not generate valid solution when step limit reached
+UCR Anolmaly Detection Dataset,F1,FALSE,N/A,N/A,2025-05-15T04-27-01-GMT_run-group_aide,Yifu,shape mismatch
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,

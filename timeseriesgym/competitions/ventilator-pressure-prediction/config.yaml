@@ -1,0 +1,22 @@
+id: ventilator-pressure-prediction
+name: Google Brain - Ventilator Pressure Prediction
+competition_type: simple
+awards_medals: true
+prizes:
+  - position: 1
+    value: 2500
+  - position: 2
+    value: 2500
+  - position: 3
+    value: 2500
+description: timeseriesgym/competitions/ventilator-pressure-prediction/description.md
+
+dataset:
+  answers: ventilator-pressure-prediction/prepared/private/test.csv
+  sample_submission: ventilator-pressure-prediction/prepared/public/sample_submission.csv
+
+grader:
+  name: mean-absolute-error
+  grade_fn: timeseriesgym.competitions.ventilator-pressure-prediction.grade:grade
+
+preparer: timeseriesgym.competitions.ventilator-pressure-prediction.prepare:prepare

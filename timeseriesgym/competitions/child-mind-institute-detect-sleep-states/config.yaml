@@ -1,0 +1,28 @@
+id: child-mind-institute-detect-sleep-states
+name: Child Mind Institute - Detect Sleep States
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true  # Not sure about this
+prizes:
+  - position: 1
+    value: 15000
+  - position: 2
+    value: 10000
+  - position: 3
+    value: 8000
+  - position: 4
+    value: 7000
+  - position: 5
+    value: 5000
+  - position: 6
+    value: 5000
+description: timeseriesgym/competitions/child-mind-institute-detect-sleep-states/description.md
+
+dataset:
+  answers: child-mind-institute-detect-sleep-states/prepared/private/test_events.csv
+  sample_submission: child-mind-institute-detect-sleep-states/prepared/public/sample_submission.csv
+
+grader:
+  name: event-detection-average-precision
+  grade_fn: timeseriesgym.competitions.child-mind-institute-detect-sleep-states.grade:grade
+
+preparer: timeseriesgym.competitions.child-mind-institute-detect-sleep-states.prepare:prepare

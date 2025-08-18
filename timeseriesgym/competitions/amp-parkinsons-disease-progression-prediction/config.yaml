@@ -1,0 +1,22 @@
+id: amp-parkinsons-disease-progression-prediction
+name: AMP-Parkinson's Disease Progression Prediction
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true
+prizes:
+  - position: 1
+    value: 25000
+  - position: 2
+    value: 20000
+  - position: 3
+    value: 15000
+description: timeseriesgym/competitions/amp-parkinsons-disease-progression-prediction/description.md
+
+dataset:
+  answers: amp-parkinsons-disease-progression-prediction/prepared/private/ground_truth.csv
+  sample_submission: amp-parkinsons-disease-progression-prediction/prepared/public/sample_submission.csv
+
+grader:
+  name: symmetric-mean-absolute-percentage-error
+  grade_fn: timeseriesgym.competitions.amp-parkinsons-disease-progression-prediction.grade:grade
+
+preparer: timeseriesgym.competitions.amp-parkinsons-disease-progression-prediction.prepare:prepare

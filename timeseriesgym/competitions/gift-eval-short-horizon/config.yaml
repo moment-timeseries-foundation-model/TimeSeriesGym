@@ -1,0 +1,17 @@
+id: gift-eval-short-horizon
+name: GIFT Eval Short Horizon
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/gift-eval-short-horizon/description.md
+
+dataset:
+  answers: gift-eval-short-horizon/prepared/private/test.h5
+  sample_submission: gift-eval-short-horizon/prepared/public/sample_submission.h5
+
+grader:
+  name: mean-absolute-percentage-error
+  grade_fn: timeseriesgym.competitions.gift-eval-short-horizon.grade:grade
+
+preparer: timeseriesgym.competitions.gift-eval-short-horizon.prepare:prepare

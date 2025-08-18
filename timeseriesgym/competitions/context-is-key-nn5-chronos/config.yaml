@@ -1,0 +1,17 @@
+id: context-is-key-nn5-chronos
+name: Evaluate Chronos time series foundation model on the NN5 dataset within Context Is Key (CiK) benchmark
+competition_type: simple
+awards_medals: false
+prizes: null
+
+description: timeseriesgym/competitions/context-is-key-nn5-chronos/description.md
+
+dataset:
+  answers: context-is-key-nn5-chronos/prepared/private/solution.pkl
+  sample_submission: context-is-key-nn5-chronos/prepared/public/sample_submission.pkl
+
+grader:
+  name: custom
+  grade_fn: timeseriesgym.competitions.context-is-key-nn5-chronos.grade:grade
+
+preparer: timeseriesgym.competitions.context-is-key-nn5-chronos.prepare:prepare

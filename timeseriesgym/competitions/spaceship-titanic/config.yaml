@@ -1,0 +1,16 @@
+id: spaceship-titanic
+name: Spaceship Titanic
+competition_type: simple
+awards_medals: false
+prizes: null
+description: timeseriesgym/competitions/spaceship-titanic/description.md
+
+dataset:
+  answers: spaceship-titanic/prepared/private/test.csv
+  sample_submission: spaceship-titanic/prepared/public/sample_submission.csv
+
+grader:
+  name: accuracy
+  grade_fn: timeseriesgym.competitions.spaceship-titanic.grade:grade
+
+preparer: timeseriesgym.competitions.spaceship-titanic.prepare:prepare

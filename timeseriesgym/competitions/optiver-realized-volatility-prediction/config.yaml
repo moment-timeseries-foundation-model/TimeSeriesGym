@@ -1,0 +1,26 @@
+id: optiver-realized-volatility-prediction
+name: Optiver Realized Volatility Prediction
+competition_type: simple
+awards_medals: true
+prizes:
+  - position: 1
+    value: 25000
+  - position: 2
+    value: 20000
+  - position: 3
+    value: 15000
+  - position: 4
+    value: 10000
+  - position: 5
+    value: 5000
+description: timeseriesgym/competitions/optiver-realized-volatility-prediction/description.md
+
+dataset:
+  answers: optiver-realized-volatility-prediction/prepared/private/test.csv
+  sample_submission: optiver-realized-volatility-prediction/prepared/public/sample_submission.csv
+
+grader:
+  name: root-mean-square-percentage-error
+  grade_fn: timeseriesgym.competitions.optiver-realized-volatility-prediction.grade:grade
+
+preparer: timeseriesgym.competitions.optiver-realized-volatility-prediction.prepare:prepare

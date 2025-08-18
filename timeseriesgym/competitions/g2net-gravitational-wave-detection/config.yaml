@@ -1,0 +1,22 @@
+id: g2net-gravitational-wave-detection
+name: g2net Gravitational Wave Detection
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true  # Not sure about this
+prizes:
+  - position: 1
+    value: 6000
+  - position: 2
+    value: 5000
+  - position: 3
+    value: 4000
+description: timeseriesgym/competitions/g2net-gravitational-wave-detection/description.md
+
+dataset:
+  answers: g2net-gravitational-wave-detection/prepared/private/test_labels.csv
+  sample_submission: g2net-gravitational-wave-detection/prepared/public/sample_submission.csv
+
+grader:
+  name: area-under-roc-curve
+  grade_fn: timeseriesgym.competitions.g2net-gravitational-wave-detection.grade:grade
+
+preparer: timeseriesgym.competitions.g2net-gravitational-wave-detection.prepare:prepare

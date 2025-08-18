@@ -1,0 +1,23 @@
+id: recruit-restaurant-visitor-forecasting
+name: Recruit Restaurant Visitor Forecasting
+competition_type: simple  # Unsure of how this is chosen
+awards_medals: true  # Not sure about this
+prizes:
+  - position: 1
+    value: 12000
+  - position: 2
+    value: 8000
+  - position: 3
+    value: 5000
+
+description: timeseriesgym/competitions/recruit-restaurant-visitor-forecasting/description.md
+
+dataset:
+  answers: recruit-restaurant-visitor-forecasting/prepared/private/test.csv
+  sample_submission: recruit-restaurant-visitor-forecasting/prepared/public/sample_submission.csv
+
+grader:
+  name: root-mean-squared-logarithmic-error
+  grade_fn: timeseriesgym.competitions.recruit-restaurant-visitor-forecasting.grade:grade
+
+preparer: timeseriesgym.competitions.recruit-restaurant-visitor-forecasting.prepare:prepare

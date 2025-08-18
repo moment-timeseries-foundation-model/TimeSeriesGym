@@ -1,0 +1,12 @@
+private:
+  test.csv: 0b5551c37771c2df4c55d9c13feb961b
+public:
+  air_reserve.csv: f4fc7fc929beb8e1a9fe66c0102b3868
+  air_store_info.csv: fc46bce3d75638f4bd82062b408f5c49
+  date_info.csv: 53ccfe0e89b6e45bc46b69f1a7019ffd
+  hpg_reserve.csv: a9124da4ee2169426857521fb1736d9b
+  hpg_store_info.csv: 5948ea684b9172c2ffb233550c0f6fe0
+  sample_submission.csv: 66214b5ecaf192174aad4f18f75abc11
+  store_id_relation.csv: c4835f412c140df4053b14c07b58eb0f
+  train.csv: f0aeafc2c4a66bbb194a3370841f686d
+zip: 115e266b8762e432e93278c182f3d07a

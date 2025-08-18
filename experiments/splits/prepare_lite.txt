@@ -1,0 +1,9 @@
+child-mind-institute-detect-sleep-states
+MIT-BIH-Arrhythmia
+MIT-BIH-Arrhythmia-Weak-Supervision
+moment-anomaly-detection-score
+optiver-realized-volatility-prediction
+optiver-realized-volatility-prediction-missing
+ptb-xl-classification-challenge
+ptb-xl-classification-challenge-hyperparameter-search
+resnet-tensorflow-to-pytorch
