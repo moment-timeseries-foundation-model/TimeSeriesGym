@@ -7,6 +7,8 @@
 
 TimeSeriesGym is a comprehensive benchmarking framework for evaluating AI agents on time series machine learning engineering challenges. The current version features **34 challenges** derived from **23 unique data sources** across **8 distinct time series problems**, spanning more than **15 domains**.
 
+Paper: https://arxiv.org/pdf/2505.13291
+
 Beyond standard model development tasks, TimeSeriesGym evaluates AI agents on realistic ML engineering skills including:
 - Data preprocessing and labeling
 - Model selection and hyperparameter tuning
@@ -166,12 +168,12 @@ A carefully curated subset of six challenges designed for efficient evaluation w
 
 ```
 # Available in TimeSeriesGym/experiments/splits/lite.txt
-amp-parkinsons-disease-progression-prediction
-context-is-key-moirai
-g2net-gravitational-wave-detection
-optiver-realized-volatility-prediction-hyperparameter-search
-ptb-xl-classification-challenge-feature-enhancement
-stomp-R-to-python
+child-mind-institute-detect-sleep-states
+MIT-BIH-Arrhythmia-Weak-Supervision
+moment-anomaly-detection-score
+ptb-xl-classification-challenge-hyperparameter-search
+optiver-realized-volatility-prediction-missing
+resnet-tensorflow-to-pytorch
 ```
 
 ### Full Competition Set
