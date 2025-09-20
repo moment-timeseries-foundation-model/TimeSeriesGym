@@ -17,6 +17,7 @@ online-sales
 optiver-realized-volatility-prediction
 optiver-realized-volatility-prediction-hyperparameter-search
 optiver-realized-volatility-prediction-missing
+osic-pulmonary-fibrosis-progression
 ptb-xl-classification-challenge
 ptb-xl-classification-challenge-feature-enhancement
 ptb-xl-classification-challenge-hyperparameter-search

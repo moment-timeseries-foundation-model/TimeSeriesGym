@@ -16,6 +16,7 @@ kaggle_original_competitions = [
     "g2net-gravitational-wave-detection",
     "amp-parkinsons-disease-progression-prediction",
     "hms-harmful-brain-activity-classification",
+    "osic-pulmonary-fibrosis-progression",
 ]
 
 # These competitions are not available on Kaggle but must be downloaded from other sources
