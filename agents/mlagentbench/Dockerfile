@@ -31,8 +31,6 @@ RUN conda run -n ${CONDA_ENV_NAME} pip install -r ${AGENT_DIR}/requirements.txt 
 RUN git clone https://github.com/JunShern/MLAgentBench.git ${AGENT_DIR}/MLAgentBench && \
     cd ${AGENT_DIR}/MLAgentBench && \
     git checkout 328c713c02ea43e63f2d11cd7fd1293acb58f09f
-# RUN git clone https://github.com/mononitogoswami/MLAgentBench.git ${AGENT_DIR}/MLAgentBench && \
-#     cd ${AGENT_DIR}/MLAgentBench
 COPY ./benchmark_dir ${AGENT_DIR}/MLAgentBench/MLAgentBench/benchmarks/timeseriesgym
 
 # put remaining necessary agent files in the expected location
