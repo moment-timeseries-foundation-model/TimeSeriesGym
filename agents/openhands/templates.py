@@ -65,7 +65,7 @@ shm_size="${shm_size}"
 """
 )
 
-# TODO(mononito): Change this to account for TimeSeriesGym
+# TODO: Change this to account for TimeSeriesGym
 # ruff: noqa: E501
 additional_notes_template = Template(
     """

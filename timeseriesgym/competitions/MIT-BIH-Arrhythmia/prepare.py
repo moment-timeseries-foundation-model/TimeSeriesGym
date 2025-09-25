@@ -164,7 +164,7 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
         # Process all records
         process_records()
 
-        # TODO(mononito): Add synthetic noise samples
+        # TODO: Add synthetic noise samples
 
         # Convert data to numpy arrays
         for channel in data_dict.keys():
