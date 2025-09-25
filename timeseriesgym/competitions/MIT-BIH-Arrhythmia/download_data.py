@@ -7,7 +7,7 @@ from tqdm import tqdm
 from timeseriesgym.registry import registry
 from timeseriesgym.utils import compress
 
-# TODO(mononito): Maybe this should be moved elsewhere?
+# TODO: Maybe this should be moved elsewhere?
 
 
 def download_mitdb(download_dir: Path, force: bool = False, **kwargs):

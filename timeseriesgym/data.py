@@ -89,7 +89,7 @@ def download_and_prepare_dataset(
 
         zipfile = competition_dir / f"{competition.id}.zip"
 
-        # TODO(mononito): Some of these competitions may still have automatic download scripts.
+        # TODO: Some of these competitions may still have automatic download scripts.
         # We can invoke them here if they exist.
         # For now, we will assume that data has been downloaded manually, and placed in the
         # competition directory.

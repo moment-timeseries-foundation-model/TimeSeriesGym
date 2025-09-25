@@ -5,7 +5,7 @@
 
 ## Overview
 
-TimeSeriesGym is a comprehensive benchmarking framework for evaluating AI agents on time series machine learning engineering challenges. The current version features **34 challenges** derived from **23 unique data sources** across **8 distinct time series problems**, spanning more than **15 domains**.
+TimeSeriesGym is a comprehensive benchmarking framework for evaluating AI agents on time series machine learning engineering challenges. The current version features **33 challenges** derived from **23 unique data sources** across **8 distinct time series problems**, spanning more than **15 domains**.
 
 Paper: https://arxiv.org/pdf/2505.13291
 
@@ -178,7 +178,7 @@ resnet-tensorflow-to-pytorch
 
 ### Full Competition Set
 
-The complete set of 34 challenges is available in `TimeSeriesGym/experiments/splits/all.txt`.
+The complete set of 33 challenges is available in `TimeSeriesGym/experiments/splits/all.txt`.
 
 ## Docker Environment
 

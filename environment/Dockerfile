@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install virtualenv
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
-# NOTE (mononito): Try using the appropriate Miniconda version for ARM:
+# NOTE: Try using the appropriate Miniconda version for ARM:
 # RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O /tmp/miniconda.sh
 RUN bash /tmp/miniconda.sh -b -p /opt/conda
 RUN rm /tmp/miniconda.sh
@@ -49,7 +49,7 @@ ARG INSTALL_HEAVY_DEPENDENCIES=true
 ENV INSTALL_HEAVY_DEPENDENCIES=${INSTALL_HEAVY_DEPENDENCIES}
 
 # The rest of your Dockerfile
-# NOTE (mononito): This does not work yet, skipping
+# NOTE: This does not work yet, skipping
 RUN if [ "$INSTALL_HEAVY_DEPENDENCIES" = "true" ]; then \
     /opt/conda/bin/conda run -n ${CONDA_ENV_NAME} pip install -r /tmp/requirements.txt && \
     /opt/conda/bin/conda run -n ${CONDA_ENV_NAME} pip install tensorflow[and-cuda]==2.17 && \
