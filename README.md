@@ -73,6 +73,8 @@ TimeSeriesGym provides a comprehensive command-line interface:
 | `grade-sample` | Grade a single competition submission |
 | `grade-hyperparameter-search` | Evaluate hyperparameter optimization results |
 | `grade-code` | Grade a Python code submission |
+| `judge` | Run LLM-as-a-judge evaluation on artifacts |
+| `evaluate-reasonableness` | Check if code makes a genuine modeling attempt |
 | `dev` | Tools for developers extending the benchmark |
 | `cleanup` | Manage disk space by removing competition files |
 
@@ -149,6 +151,33 @@ timeseriesgym grade-hyperparameter-search search_results/ optiver-realized-volat
 ```bash
 timeseriesgym grade-code solution.py mit-bih-arrhythmia
 ```
+
+#### Evaluating Code Reasonableness
+
+The `evaluate-reasonableness` command uses an LLM-as-a-judge and simple rule-based heuristics to determine whether code makes a genuine modeling attempt rather than gaming the submission format (e.g., copying sample submissions, using random predictions).
+
+```bash
+# Basic usage
+timeseriesgym evaluate-reasonableness path/to/code/folder
+
+# With custom model
+timeseriesgym evaluate-reasonableness path/to/code/folder --model gpt-4o
+
+# JSON output
+timeseriesgym evaluate-reasonableness path/to/code/folder --json
+
+# Verbose output
+timeseriesgym evaluate-reasonableness path/to/code/folder --verbose
+```
+
+**Requirements**: Set `OPENAI_API_KEY` environment variable.
+
+**Output includes**:
+- `is_reasonable`: Whether the code is a genuine modeling attempt
+- `score`: Evaluation score
+- `threshold`: Dynamic threshold based on code patterns
+- `has_suspicious_patterns`: Regex detection of non-genuine patterns
+- `has_modeling_patterns`: Regex detection of genuine ML code
 
 ### Managing Disk Space
 
