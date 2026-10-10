@@ -19,6 +19,7 @@ def prepare(raw: Path, public: Path, private: Path):
         "https://github.com/raycai420/Time-Series-Library.git",
         public / "Time-Series-Library",
         branch="itransformer-weather-eval",
+        commit="493256f1584e126ca2d4c3cf93d0a4a339791153",
     )
 
     # Remove all .json and .csv files from the cloned repository

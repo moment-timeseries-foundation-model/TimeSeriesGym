@@ -18,7 +18,9 @@ def prepare(raw: Path, public: Path, private: Path):
 
     # Download the tsl GitHub repository
     clone_repository(
-        "https://github.com/moment-timeseries-foundation-model/moment.git", public / "moment"
+        "https://github.com/moment-timeseries-foundation-model/moment.git",
+        public / "moment",
+        commit="38f7310ad594100747ca2a8357e9c7ca7d323e0e",
     )
 
     # Remove all .json and .csv files from the cloned repository

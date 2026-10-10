@@ -15,6 +15,7 @@ def prepare(raw: Path, public: Path, private: Path):
         "https://github.com/moment-timeseries-foundation-model/context-is-key-forecasting.git",
         public / "context-is-key-forecasting",
         branch="moirai-evaluation",
+        commit="e69271d9e7b85c8ac110868b1b30dd857cd14850",
     )
 
     # Remove all .json and .csv files from the cloned repository

@@ -50,6 +50,18 @@ def test_clone_repository_ships_no_git_history(tmp_path):
     leftovers = [p for p in dest.rglob("*") if "SOLUTION = 42" in p.read_text(errors="ignore")]
     assert leftovers == []
 
+    # pinned commit: exactly that tree, still without history
+    first = subprocess.run(
+        ["git", "-C", str(origin), "rev-list", "--max-parents=0", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    git("config", "uploadpack.allowAnySHA1InWant", "true")
+    pinned = clone_repository(f"file://{origin}", tmp_path / "pinned", commit=first)
+    assert (pinned / "model.py").read_text() == "SOLUTION = 42\n"
+    assert not (pinned / ".git").exists()
+
 
 # ---------------------------------------------------------------- UCR: every dataset is scored
 

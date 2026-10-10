@@ -665,22 +665,37 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
     return False
 
 
-def clone_repository(url: str, destination: Path, branch: str | None = None) -> Path:
-    """Shallow-clone a repository for a challenge's public data and delete its `.git`.
+def clone_repository(
+    url: str, destination: Path, branch: str | None = None, commit: str | None = None
+) -> Path:
+    """Clone a repository for a challenge's public data, without its `.git`.
 
     Agents get these repositories as task material. Their git history must not be part of it:
     earlier commits can contain the reference solution (e.g. the full implementation that a
     challenge asks the agent to complete) or files that prepare scripts delete afterwards.
+    With `commit`, exactly that commit is fetched, so prepared data (and its checksums) do not
+    change when the upstream branch moves; otherwise the head of `branch` (or the default
+    branch) is cloned shallowly.
     """
     import shutil
     import subprocess
 
     destination = Path(destination)
-    cmd = ["git", "clone", "--depth", "1", "--single-branch"]
-    if branch is not None:
-        cmd += ["--branch", branch]
-    subprocess.run([*cmd, url, str(destination)], check=True)
-    shutil.rmtree(destination / ".git", ignore_errors=False)
+    if commit is not None:
+        destination.mkdir(parents=True, exist_ok=False)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "remote", "add", "origin", url],
+            ["git", "fetch", "-q", "--depth", "1", "origin", commit],
+            ["git", "checkout", "-q", "--detach", "FETCH_HEAD"],
+        ):
+            subprocess.run(cmd, cwd=destination, check=True)
+    else:
+        cmd = ["git", "clone", "--depth", "1", "--single-branch"]
+        if branch is not None:
+            cmd += ["--branch", branch]
+        subprocess.run([*cmd, url, str(destination)], check=True)
+    shutil.rmtree(destination / ".git")
     return destination
 
 

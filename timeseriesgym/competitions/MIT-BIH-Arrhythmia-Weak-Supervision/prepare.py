@@ -69,7 +69,11 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     os.system(f"cd {public}; pdftotext snorkel-docs.pdf -f 39 -l 67 snorkel-labeling-doc.txt")
 
     # Download the Snorkel GitHub repository
-    clone_repository("https://github.com/snorkel-team/snorkel.git", public / "snorkel")
+    clone_repository(
+        "https://github.com/snorkel-team/snorkel.git",
+        public / "snorkel",
+        commit="45824f9867228c6cb6c9fdc2afd2b7e5bb7fd0b3",
+    )
 
     # Copy assets/ to public
     assets_path = Path(__file__).parent / "assets"

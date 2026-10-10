@@ -38,7 +38,9 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     # Download the STOMP R code files
     clone_repository(
-        "https://github.com/moment-timeseries-foundation-model/tsmp.git", public / "tsmp"
+        "https://github.com/moment-timeseries-foundation-model/tsmp.git",
+        public / "tsmp",
+        commit="24c9ff2121436c40b5330c392e072650cf4af1c8",
     )
     os.system(f"mv {public}/tsmp/R {public}/")  # the R code are under the R folder
     os.system(f"rm -rf {public}/tsmp")

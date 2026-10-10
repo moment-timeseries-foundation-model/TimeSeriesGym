@@ -38,6 +38,7 @@ def prepare(raw: Path, public: Path, private: Path):
             "https://github.com/raycai420/Time-Series-Library.git",
             public / "Time-Series-Library",
             branch="long-horizon-forecast",
+            commit="7f9820b0cc67c6ae12307df2cc0a348a7721b5ff",
         )
     except Exception as e:
         logging.error(f"Failed to clone the Time-Series-Library repository: {e}")
