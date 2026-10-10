@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from timeseriesgym.utils import read_csv
+from timeseriesgym.utils import clone_repository, read_csv
 
 
 def prepare(raw: Path, public: Path, private: Path) -> None:
@@ -37,8 +37,8 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     )
 
     # Download the STOMP R code files
-    os.system(
-        f"git clone https://github.com/moment-timeseries-foundation-model/tsmp.git {public}/tsmp"
+    clone_repository(
+        "https://github.com/moment-timeseries-foundation-model/tsmp.git", public / "tsmp"
     )
     os.system(f"mv {public}/tsmp/R {public}/")  # the R code are under the R folder
     os.system(f"rm -rf {public}/tsmp")

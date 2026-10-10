@@ -51,7 +51,7 @@ Your `data` directory includes the following:
 
 * **Time-Series-Library/** – the cloned TSL repository
 * **weather.csv** – the raw weather time series data
-* **itransformer.pdf** – reference paper for iTransformer implementation
+* **itransformer.txt** – the pertinent sections of the iTransformer paper
 * **sample\_submission.npy** – an example output; your pipeline will generate this automatically if configured correctly
 
 ## Evaluation

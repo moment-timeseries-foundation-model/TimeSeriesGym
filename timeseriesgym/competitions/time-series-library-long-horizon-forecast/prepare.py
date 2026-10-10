@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -7,6 +6,8 @@ from pathlib import Path
 import gdown
 import h5py
 import numpy as np
+
+from timeseriesgym.utils import clone_repository
 
 
 def prepare(raw: Path, public: Path, private: Path):
@@ -33,8 +34,10 @@ def prepare(raw: Path, public: Path, private: Path):
 
     # Download the tsl GitHub repository
     try:
-        os.system(
-            f"cd {public}; git clone --branch long-horizon-forecast --single-branch https://github.com/raycai420/Time-Series-Library.git"
+        clone_repository(
+            "https://github.com/raycai420/Time-Series-Library.git",
+            public / "Time-Series-Library",
+            branch="long-horizon-forecast",
         )
     except Exception as e:
         logging.error(f"Failed to clone the Time-Series-Library repository: {e}")

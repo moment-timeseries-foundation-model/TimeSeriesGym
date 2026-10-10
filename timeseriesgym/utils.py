@@ -627,4 +627,23 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
     return False
 
 
+def clone_repository(url: str, destination: Path, branch: str | None = None) -> Path:
+    """Shallow-clone a repository for a challenge's public data and delete its `.git`.
+
+    Agents get these repositories as task material. Their git history must not be part of it:
+    earlier commits can contain the reference solution (e.g. the full implementation that a
+    challenge asks the agent to complete) or files that prepare scripts delete afterwards.
+    """
+    import shutil
+    import subprocess
+
+    destination = Path(destination)
+    cmd = ["git", "clone", "--depth", "1", "--single-branch"]
+    if branch is not None:
+        cmd += ["--branch", branch]
+    subprocess.run([*cmd, url, str(destination)], check=True)
+    shutil.rmtree(destination / ".git", ignore_errors=False)
+    return destination
+
+
 logger = get_logger(__name__)

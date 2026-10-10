@@ -5,6 +5,8 @@ import h5py
 import numpy as np
 import pandas as pd
 
+from timeseriesgym.utils import clone_repository
+
 
 def prepare(raw: Path, public: Path, private: Path) -> None:
     del raw
@@ -67,7 +69,7 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     os.system(f"cd {public}; pdftotext snorkel-docs.pdf -f 39 -l 67 snorkel-labeling-doc.txt")
 
     # Download the Snorkel GitHub repository
-    os.system(f"cd {public}; git clone https://github.com/snorkel-team/snorkel.git")
+    clone_repository("https://github.com/snorkel-team/snorkel.git", public / "snorkel")
 
     # Copy assets/ to public
     assets_path = "timeseriesgym/competitions/MIT-BIH-Arrhythmia-Weak-Supervision/assets"

@@ -1,9 +1,12 @@
-import os
 from pathlib import Path
+
+from timeseriesgym.utils import clone_repository
 
 
 def prepare(raw: Path, public: Path, private: Path):
     # Download the CSDI GitHub repository
-    os.system(
-        f"cd {public}; git clone --branch easy --single-branch https://github.com/moment-timeseries-foundation-model/CSDI.git"
+    clone_repository(
+        "https://github.com/moment-timeseries-foundation-model/CSDI.git",
+        public / "CSDI",
+        branch="easy",
     )
