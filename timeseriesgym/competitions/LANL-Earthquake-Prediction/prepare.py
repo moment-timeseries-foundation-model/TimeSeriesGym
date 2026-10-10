@@ -10,10 +10,10 @@ from timeseriesgym.utils import get_logger, read_csv
 logger = get_logger(__name__)
 
 
-def generate_random_id(length: int = 6):
+def generate_random_id(rng: random.Random, length: int = 6) -> str:
     """Generate a random alphanumeric string of specified length."""
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
-    return "".join(random.choice(characters) for _ in range(length))
+    return "".join(rng.choice(characters) for _ in range(length))
 
 
 # Notes:
@@ -61,6 +61,10 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     n_test_observations = 15000
     n_samples = 500  # Number of samples per segment
     seg_ids = []
+    # Segment ids used the unseeded global `random`, so every prepare produced different file
+    # names (checksums could never match) and a collision would silently overwrite a segment.
+    id_rng = random.Random(0)
+    used_ids = set()
 
     # First make a public test directory
     public_test = public / "test"
@@ -74,7 +78,10 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
             seg = segment[start:end]
             time_to_failure = seg.iloc[-1, 1]
 
-            rand_id = generate_random_id()
+            rand_id = generate_random_id(id_rng)
+            while rand_id in used_ids:
+                rand_id = generate_random_id(id_rng)
+            used_ids.add(rand_id)
             seg_ids.append((f"seg_{rand_id}", time_to_failure))
 
             # Save to public and private directories
