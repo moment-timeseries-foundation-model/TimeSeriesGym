@@ -23,6 +23,8 @@ class GradingInput:
     solution_file_path: Path | None = None
     submission_file_path: Path | None = None
     coding_config: dict | None = None
+    feature_enhancement_config: dict | None = None
+    solution_files_path: Path | None = None
 
 
 class Grader:

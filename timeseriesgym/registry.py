@@ -34,6 +34,7 @@ class Competition:
     public_dir: Path
     checksums: Path
     leaderboard: Path
+    feature_enhancement_config: dict | None = None
 
     def __post_init__(self):
         assert isinstance(self.id, str), "Competition id must be a string."
@@ -96,6 +97,7 @@ class Competition:
                 missingness_simulator=missingness_simulator,
                 hyperparameter_search_config=hyperparameter_search_config,
                 coding_config=coding_config,
+                feature_enhancement_config=data.get("feature_enhancement_config"),
                 raw_dir=data["raw_dir"],
                 public_dir=data["public_dir"],
                 private_dir=data["private_dir"],

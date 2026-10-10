@@ -48,6 +48,9 @@ def grade_jsonl(
             single_report = grade_hyperparameter_search(submission_path, competition, solution)
         elif competition.coding_config is not None:
             single_report = grade_code(submission_path, competition)
+        elif competition.feature_enhancement_config is not None:
+            solution = submission.get("solution_files_path")
+            single_report = grade_feature_enhancement(submission_path, competition, solution)
         else:
             single_report = grade_sample(submission_path, competition)
         competitions_reports.append(single_report)
@@ -176,6 +179,50 @@ def grade_hyperparameter_search(
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         is_lower_better=is_lower_better,
+        created_at=datetime.now(),
+        submission_path=str(path_to_submission_folder),
+    )
+
+
+def grade_feature_enhancement(
+    path_to_submission_folder: Path,
+    competition: Competition,
+    path_to_solution_files: str | None = None,
+) -> CompetitionReport:
+    """Grades a feature-enhancement submission folder (submission.csv plus the code, config
+    and TensorBoard logs it was produced with). The solution files default to the submission
+    folder. The score is a dict of sub-scores including `overall_score`."""
+    if not is_dataset_prepared(competition, grading_only=True):
+        raise ValueError(
+            f"Dataset for competition `{competition.id}` is not prepared! "
+            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
+        )
+    if competition.feature_enhancement_config is None:
+        raise ValueError(f"`{competition.id}` has no feature_enhancement_config")
+
+    grading_input = GradingInput(
+        submission_folder_path=path_to_submission_folder,
+        answers=load_answers(competition.answers),
+        feature_enhancement_config=competition.feature_enhancement_config,
+        solution_files_path=Path(path_to_solution_files or path_to_submission_folder),
+    )
+    score = competition.grader(grading_input)
+    rank_info = get_null_rank_info()  # dict scores are not on a leaderboard's scale
+    return CompetitionReport(
+        competition_id=competition.id,
+        score=score,
+        gold_threshold=rank_info["gold_threshold"],
+        silver_threshold=rank_info["silver_threshold"],
+        bronze_threshold=rank_info["bronze_threshold"],
+        median_threshold=rank_info["median_threshold"],
+        any_medal=False,
+        gold_medal=False,
+        silver_medal=False,
+        bronze_medal=False,
+        above_median=False,
+        submission_exists=path_to_submission_folder.is_dir(),
+        valid_submission=score is not None,
+        is_lower_better=False,
         created_at=datetime.now(),
         submission_path=str(path_to_submission_folder),
     )

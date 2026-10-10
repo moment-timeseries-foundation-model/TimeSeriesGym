@@ -10,6 +10,7 @@ from timeseriesgym.data import (
 )
 from timeseriesgym.grade import (
     grade_code,
+    grade_feature_enhancement,
     grade_hyperparameter_search,
     grade_jsonl,
     grade_sample,
@@ -209,6 +210,34 @@ def main():
         default=registry.get_data_dir(),
     )
 
+    # Grade feature-enhancement sub-parser
+    parser_grade_fe = subparsers.add_parser(
+        name="grade-feature-enhancement",
+        help="Grade a feature-enhancement submission folder.",
+    )
+    parser_grade_fe.add_argument(
+        "folder_path",
+        help="Submission folder (submission.csv, model/training code, conf/, TensorBoard logs).",
+        type=str,
+    )
+    parser_grade_fe.add_argument(
+        "competition_id",
+        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        type=str,
+    )
+    parser_grade_fe.add_argument(
+        "--solution-files-path",
+        help="Folder with the code, config and logs (default: the submission folder).",
+        required=False,
+        default=None,
+    )
+    parser_grade_fe.add_argument(
+        "--data-dir",
+        help="Path to the directory where the data will be stored.",
+        required=False,
+        default=registry.get_data_dir(),
+    )
+
     # Dev tools sub-parser
     parser_dev = subparsers.add_parser("dev", help="Developer tools for extending TimeSeriesGym.")
     dev_subparsers = parser_dev.add_subparsers(dest="dev_command", help="Developer command to run.")
@@ -391,6 +420,14 @@ def main():
 
         report = grade_hyperparameter_search(
             submission, competition, path_to_solution=args.solution_file_path
+        )
+        logger.info("Competition report:")
+        logger.info(json.dumps(report.to_dict(), indent=4))
+    if args.command == "grade-feature-enhancement":
+        new_registry = registry.set_data_dir(Path(args.data_dir))
+        competition = new_registry.get_competition(args.competition_id)
+        report = grade_feature_enhancement(
+            Path(args.folder_path), competition, path_to_solution_files=args.solution_files_path
         )
         logger.info("Competition report:")
         logger.info(json.dumps(report.to_dict(), indent=4))

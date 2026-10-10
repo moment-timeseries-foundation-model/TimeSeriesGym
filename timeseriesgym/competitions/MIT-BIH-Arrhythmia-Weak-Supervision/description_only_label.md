@@ -117,8 +117,8 @@ pip install snorkel
 ### sample_submission.csv
 - Submission template with the required format:
   - **Id**: Unique heartbeat identifier matching train_features.csv
-  - **Normal**: Probability (0-1) that the heartbeat is normal
-  - **PVC**: Probability (0-1) that the heartbeat is a Premature Ventricular Contraction
+  - **normal**: Probability (0-1) that the heartbeat is normal
+  - **pvc**: Probability (0-1) that the heartbeat is a Premature Ventricular Contraction
 
 *Note: Probabilities must sum to 1.0 for each heartbeat*
 
@@ -159,8 +159,8 @@ $\mathbb{1}$ is the indicator function that equals 1 when $\hat{y}_i = y_i$ and 
 ### submission.csv
 - A single CSV file containing:
   - **Id**: Unique identifier for each ECG heartbeat
-  - **Normal**: Probability (0-1) that the heartbeat is normal
-  - **PVC**: Probability (0-1) that the heartbeat is a Premature Ventricular Contraction
+  - **normal**: Probability (0-1) that the heartbeat is normal
+  - **pvc**: Probability (0-1) that the heartbeat is a Premature Ventricular Contraction
 
 ### Important Rules
 - You **MUST** use the provided heuristics and programmatic weak supervision approach

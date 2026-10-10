@@ -221,3 +221,32 @@ def test_aggregate_reports_accepts_code_reports():
     code_report = SimpleNamespace(submission_exists=True, valid_submission=True, to_dict=lambda: {})
     summary = aggregate_reports([code_report])
     assert summary["total_runs"] == 1 and summary["total_medals"] == 0
+
+
+# ---------------------------------------------------------------- feature enhancement
+
+
+def test_feature_enhancement_grader_is_reachable(tmp_path):
+    from timeseriesgym.grade_helpers import GradingInput
+    from timeseriesgym.registry import Registry
+
+    cid = "ptb-xl-classification-challenge-feature-enhancement"
+    competition = Registry(tmp_path).get_competition(cid)
+    assert competition.feature_enhancement_config["model_code_file"] == "model.py"
+    example = (
+        Path(importlib.import_module("timeseriesgym").__file__).parent
+        / "competitions"
+        / cid
+        / "example"
+    )
+    labels = pd.read_csv(example / "submission.csv")
+    score = competition.grader(
+        GradingInput(
+            submission_folder_path=example,
+            answers=labels,  # the example's own predictions: accuracy 1.0
+            feature_enhancement_config=competition.feature_enhancement_config,
+            solution_files_path=example,
+        )
+    )
+    assert isinstance(score, dict) and score["accuracy"] == pytest.approx(1.0)
+    assert 0.0 <= score["overall_score"] <= 1.0
