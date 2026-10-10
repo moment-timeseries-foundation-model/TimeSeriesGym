@@ -601,6 +601,11 @@ def get_leaderboard(competition: Competition) -> pd.DataFrame | None:
     if leaderboard_path.exists():
         logger.info(f"Leaderboard found locally for competition `{competition.id}`. Loading...")
         leaderboard_df = pd.read_csv(leaderboard_path)
+        if len(leaderboard_df) < 2:
+            # Placeholder leaderboards (one "dummy" row) give no medal thresholds; with one row
+            # every score >= 0 counted as gold, even for lower-is-better metrics.
+            logger.warning(f"Leaderboard for `{competition.id}` is a placeholder; ignoring it.")
+            return None
         return leaderboard_df
     logger.warning(f"Leaderboard not found locally for competition `{competition.id}`.")
     return None

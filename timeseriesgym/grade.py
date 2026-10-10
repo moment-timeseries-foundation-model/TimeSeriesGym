@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 from tqdm import tqdm
 
 from timeseriesgym.data import get_leaderboard, is_dataset_prepared
@@ -146,15 +147,12 @@ def grade_hyperparameter_search(
     score = competition.grader(grading_input)
 
     submission_exists = path_to_submission_folder.is_dir()
-    valid_submission = score is not None
-    competition_leaderboard = get_leaderboard(competition)
-
-    if competition_leaderboard is not None:
-        rank_info = competition.grader.rank_score(score, competition_leaderboard)
-        is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
-    else:
-        rank_info = get_null_rank_info()
-        is_lower_better = None
+    valid_submission = score is not None and np.isfinite(score)
+    # The score is a relative improvement over the submitted baseline, not a value on the
+    # (inherited) competition leaderboard's scale, so it is not ranked: ranking it against an
+    # RMSPE leaderboard counted -inf (an invalid search) as a gold medal.
+    rank_info = get_null_rank_info()
+    is_lower_better = False
 
     return CompetitionReport(
         competition_id=competition.id,

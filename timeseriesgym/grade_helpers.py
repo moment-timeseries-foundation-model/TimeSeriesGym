@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from timeseriesgym.utils import InvalidSubmissionError, get_logger, import_fn
@@ -150,6 +151,18 @@ class Grader:
             score, float | int
         ), f"Expected `score` to be a `float` or `int` but got a {type(score)}."
 
+        if not np.isfinite(score):  # e.g. -inf from an invalid hyperparameter search
+            return {
+                "gold_medal": False,
+                "silver_medal": False,
+                "bronze_medal": False,
+                "above_median": False,
+                "gold_threshold": gold_threshold,
+                "silver_threshold": silver_threshold,
+                "bronze_threshold": bronze_threshold,
+                "median_threshold": median_threshold,
+            }
+
         gold_medal = score <= gold_threshold if lower_is_better else score >= gold_threshold
         silver_medal = not gold_medal and (
             score <= silver_threshold if lower_is_better else score >= silver_threshold
@@ -196,9 +209,9 @@ class CompetitionReport:
         # Convert all values to JSON-compatible types explicitly
         return {
             "competition_id": self.competition_id,
-            "score": str(self.score)
-            if self.score is not None
-            else None,  # TODO: find a better way to support none-float output
+            "score": (
+                str(self.score) if self.score is not None else None
+            ),  # TODO: find a better way to support none-float output
             "gold_threshold": float(self.gold_threshold),
             "silver_threshold": float(self.silver_threshold),
             "bronze_threshold": float(self.bronze_threshold),

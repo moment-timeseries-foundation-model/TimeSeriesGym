@@ -575,24 +575,51 @@ def have_different_hyperparameters(baseline_model: Model, improved_model: Model)
         return have_different_hyperparameters_torch(baseline_model.model, improved_model.model)
 
     if isinstance(baseline_model, PickleModel) and isinstance(improved_model, PickleModel):
-        baseline_dict = baseline_model.model.__dict__
-        improved_dict = improved_model.model.__dict__
+        baseline, improved = baseline_model.model, improved_model.model
+        if hasattr(baseline, "get_params") and hasattr(improved, "get_params"):
+            # scikit-learn API (also XGBoost, LightGBM, CatBoost wrappers): compare the
+            # hyperparameters themselves, not fitted state such as the booster object.
+            baseline_dict, improved_dict = baseline.get_params(), improved.get_params()
+        else:
+            baseline_dict = {k: v for k, v in vars(baseline).items() if not k.endswith("_")}
+            improved_dict = {k: v for k, v in vars(improved).items() if not k.endswith("_")}
 
         for key in improved_dict:
             if key not in baseline_dict or improved_dict[key] is None:
                 continue
-            if baseline_dict[key] != improved_dict[key]:
+            if _values_differ(baseline_dict[key], improved_dict[key]):
                 return True
 
     return False
 
 
+def _values_differ(a: Any, b: Any) -> bool:
+    """NaN-aware inequality. XGBoost's default `missing=nan` made identical models compare as
+    different (nan != nan), so the same-hyperparameters check never fired."""
+    if isinstance(a, float) and isinstance(b, float) and np.isnan(a) and np.isnan(b):
+        return False
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        try:
+            return not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True)
+        except TypeError:
+            return not np.array_equal(np.asarray(a), np.asarray(b))
+    try:
+        return bool(a != b)
+    except (TypeError, ValueError):  # objects whose comparison is ambiguous
+        return repr(a) != repr(b)
+
+
 def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_for=None) -> bool:
     """
-    Check if the solution code contains hyperparameter searching attempts.
+    Check if the solution code imports a hyperparameter search library and uses it.
+
+    The previous string heuristic required the literal `import optuna` to appear twice, and
+    for `from optuna import ...` it split on commas across the rest of the file, so common,
+    honest scripts were rejected. This version parses the code: a library counts as used when
+    a name it was imported as is referenced again.
     """
-    # Check for common hyperparameter searching libraries
-    # TODO: add regex
+    import ast
+
     if packages_to_look_for is None:
         hyperparameter_searching_libraries = [
             "optuna",
@@ -610,20 +637,31 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
     else:
         hyperparameter_searching_libraries = packages_to_look_for
 
-    for library in hyperparameter_searching_libraries:
-        import_str = f"import {library}"
-        from_str = f"from {library}"
-        if import_str in solution_code:
-            # count if used twice, so not just imported
-            if solution_code.count(import_str) > 1:
-                return True
-        elif from_str in solution_code:
-            # get actual function name
-            function_names = solution_code.split(from_str)[1].split(",")
-            for function_name in function_names:
-                if solution_code.count(function_name.strip()) > 1:
-                    return True
+    def from_library(module: str | None) -> bool:
+        return module is not None and any(
+            module == lib or module.startswith(lib + ".")
+            for lib in hyperparameter_searching_libraries
+        )
 
+    try:
+        tree = ast.parse(solution_code)
+    except SyntaxError:
+        return False
+
+    bound_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if from_library(alias.name):
+                    bound_names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and from_library(node.module):
+            bound_names.update(alias.asname or alias.name for alias in node.names)
+
+    if not bound_names:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in bound_names:
+            return True
     return False
 
 
