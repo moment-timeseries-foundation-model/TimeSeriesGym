@@ -175,3 +175,37 @@ def test_fitted_state_is_not_a_hyperparameter(tmp_path):
 )
 def test_hyperparameter_search_detection(code, expected):
     assert have_hyperparameter_searching_attempt(code, packages_to_look_for=["optuna"]) is expected
+
+
+# ---------------------------------------------------------------- infrastructure
+
+
+def test_container_archives_cannot_escape_on_extraction(tmp_path):
+    import io
+    import tarfile
+
+    from environment.utils import safe_extractall
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        link = tarfile.TarInfo("submission/submission.csv")
+        link.type, link.linkname = tarfile.SYMTYPE, "/etc/passwd"  # planted by an agent
+        tar.addfile(link)
+    buf.seek(0)
+    with tarfile.open(fileobj=buf, mode="r") as tar, pytest.raises(tarfile.FilterError):
+        safe_extractall(tar, tmp_path)
+    assert not (tmp_path / "submission" / "submission.csv").exists()
+
+
+def test_cli_does_not_import_deepeval():
+    code = "import sys, timeseriesgym.cli; print('deepeval' in sys.modules)"
+    out = subprocess.run(["python", "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"
+
+
+def test_aggregate_reports_accepts_code_reports():
+    from timeseriesgym.grade import aggregate_reports
+
+    code_report = SimpleNamespace(submission_exists=True, valid_submission=True, to_dict=lambda: {})
+    summary = aggregate_reports([code_report])
+    assert summary["total_runs"] == 1 and summary["total_medals"] == 0

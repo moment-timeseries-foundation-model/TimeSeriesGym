@@ -9,11 +9,14 @@ import os
 import re
 from dataclasses import dataclass
 
-from deepeval.metrics import GEval
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams
-from dotenv import load_dotenv
+# deepeval starts telemetry when it is imported; opt out before the import (as in judge.py)
+os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
-from timeseriesgym.utils import get_logger
+from deepeval.metrics import GEval  # noqa: E402
+from deepeval.test_case import LLMTestCase, LLMTestCaseParams  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
+
+from timeseriesgym.utils import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 

@@ -61,9 +61,9 @@ Your objective is to tackle the [Long Term Forecasting Challenge (LTF)](https://
 
    output_h5_file = ... #submission file path
    with h5py.File(output_h5_file, "r") as answers_file:
-      submission = load_arbitrary_h5(answers_file["labels"])
+      submission = load_arbitrary_h5(answers_file["submission"])
    ```
-   * Each dataset under the `labels` group must use the **competition name** as the key and contain a **prediction array with the required shape** as the value.
+   * Each dataset under the `submission` group must use the **dataset name** (the CSV file stem, e.g. `ETTh1`) as the key and contain a **prediction array with the required shape** as the value.
    * Submissions that do not follow this format will receive a score of **0**.
 
 ## Data

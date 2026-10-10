@@ -57,7 +57,12 @@ async def worker(
             f"{task.agent.name}"
         )
 
-        task_output = {}
+        task_output = {
+            "competition_id": task.competition.id,
+            "agent_id": task.agent.id,
+            "seed": task.seed,
+            "run_dir": str(task.path_to_run),
+        }
         try:
             await asyncio.to_thread(
                 run_in_container,

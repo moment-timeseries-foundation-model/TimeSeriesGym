@@ -44,12 +44,8 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     sample_submission_h5_file = public / "sample_submission.h5"
     labels_h5_file = private / "labels.h5"
-    datasets_for_processing_original = Path(
-        "timeseriesgym/competitions/ucr-anomaly-detection/datasets.txt"
-    )
-    anomaly_dataset_code_original = Path(
-        "timeseriesgym/competitions/ucr-anomaly-detection/anomaly_dataset.py"
-    )
+    datasets_for_processing_original = Path(__file__).parent / "datasets.txt"
+    anomaly_dataset_code_original = Path(__file__).parent / "anomaly_dataset.py"
 
     shutil.copy2(datasets_for_processing_original, public / "datasets.txt")
     shutil.copy2(anomaly_dataset_code_original, public / "anomaly_dataset.py")

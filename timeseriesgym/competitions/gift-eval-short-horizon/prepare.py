@@ -7,8 +7,8 @@ import numpy as np
 
 
 def prepare(raw: Path, public: Path, private: Path):
-    datasets_path = Path("timeseriesgym/competitions/gift-eval-short-horizon/datasets.txt")
-    dataset_prepare_path = Path("timeseriesgym/competitions/gift-eval-short-horizon/dataset.py")
+    datasets_path = Path(__file__).parent / "datasets.txt"
+    dataset_prepare_path = Path(__file__).parent / "dataset.py"
 
     # copy over to public
     shutil.copy2(datasets_path, public / datasets_path.name)

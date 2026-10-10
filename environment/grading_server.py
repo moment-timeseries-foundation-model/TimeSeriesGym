@@ -19,10 +19,17 @@ def run_validation(submission: Path) -> str:
     return message
 
 
+ALLOWED_SUFFIXES = {".csv", ".npy", ".h5", ".hdf5", ".pkl", ".py"}
+
+
 @app.route("/validate", methods=["POST"])
 def validate():
     submission_file = request.files["file"]
-    submission_path = Path("/tmp/submission_to_validate.csv")
+    suffix = Path(submission_file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        return jsonify({"result": f"Unsupported submission file type {suffix!r}."}), 400
+    # Keep the suffix: validation checks it against the sample submission's.
+    submission_path = Path(f"/tmp/submission_to_validate{suffix}")
     submission_file.save(submission_path)
 
     try:

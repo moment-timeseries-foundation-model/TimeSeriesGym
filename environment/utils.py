@@ -48,6 +48,19 @@ def reconcile_args(config_args: str | None = None, dict_args: dict | None = None
     return reconciled_args
 
 
+def safe_extractall(tar: tarfile.TarFile, local_dir: Path) -> None:
+    """Extract an archive of agent-controlled container files onto the host.
+
+    The archive comes from directories the agent writes (/home/submission, logs, code). A plain
+    extractall() recreates symlinks pointing anywhere on the host, which grading would then
+    follow. The "data" filter rejects absolute paths, members or links that leave local_dir,
+    and device files (Python >= 3.11.4).
+    """
+    if not hasattr(tarfile, "data_filter"):
+        raise RuntimeError("Python >= 3.11.4 is required for safe archive extraction")
+    tar.extractall(path=local_dir, filter="data")
+
+
 def extract_from_container_sysbox(container: Container, container_file_path: str, local_dir: Path):
     """
     Extracts a file or directory from a container to a specified local directory.
@@ -82,7 +95,7 @@ def extract_from_container_sysbox(container: Container, container_file_path: str
 
         # Extract the tar stream
         with tarfile.open(fileobj=stream_wrapper, mode="r|") as tar:
-            tar.extractall(path=local_dir)
+            safe_extractall(tar, local_dir)
 
     except FileNotFoundError:
         logger.warning(f"Nothing found in container at {container_file_path}.")
@@ -104,7 +117,7 @@ def extract_from_container(container: Container, container_file_path: str, local
 
         # extracts the original file(s) from the tar file
         with tarfile.open(tmp_tar_path, "r") as tar:
-            tar.extractall(path=local_dir)
+            safe_extractall(tar, local_dir)
 
         tmp_tar_path.unlink()
     except FileNotFoundError:

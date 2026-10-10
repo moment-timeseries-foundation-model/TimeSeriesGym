@@ -72,5 +72,5 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     clone_repository("https://github.com/snorkel-team/snorkel.git", public / "snorkel")
 
     # Copy assets/ to public
-    assets_path = "timeseriesgym/competitions/MIT-BIH-Arrhythmia-Weak-Supervision/assets"
+    assets_path = Path(__file__).parent / "assets"
     os.system(f"cp -r {assets_path} {public}")

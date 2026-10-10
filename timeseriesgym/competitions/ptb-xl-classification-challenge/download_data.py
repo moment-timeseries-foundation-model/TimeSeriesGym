@@ -145,7 +145,7 @@ def obtain_phase_to_paths_dict(df, paths_to_files, phase_to_pids=None):
     phase_to_paths = {}
 
     for phase, pids in phase_to_pids.items():
-        """ Obtain Paths For All Leads """
+        """Obtain Paths For All Leads"""
         paths = list(compress(paths_to_files, paths_to_ids_df.isin(pids).tolist()))
         # """ Assign Paths and Leads Labels """
         phase_to_paths[phase] = paths
@@ -297,7 +297,9 @@ def main(args):
             raise ValueError(f"[ERROR] unexpected file {file} in {tmp_dir}")
 
     # compress the files
-    zipfile_path = competition_dir / "ptb-xl-classification-challenge_test.zip"
+    zipfile_path = (
+        competition_dir / "ptb-xl-classification-challenge.zip"
+    )  # the name prepare expects
     compress_zip(tmp_dir, zipfile_path)
     print(f"[INFO] compressed files to {zipfile_path}")
 

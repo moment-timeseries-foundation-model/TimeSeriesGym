@@ -8,14 +8,18 @@ from datetime import datetime
 from io import StringIO
 
 import yaml
-from deepeval.metrics import GEval
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams
-from dotenv import load_dotenv
 
-from timeseriesgym.utils import get_logger
+# deepeval starts Sentry/PostHog telemetry when it is imported; opt out before the import
+# (setting the variable after the import, as before, had no effect).
+os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
+
+from deepeval.metrics import GEval  # noqa: E402
+from deepeval.test_case import LLMTestCase, LLMTestCaseParams  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
+
+from timeseriesgym.utils import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
-os.environ["DEEPEVAL_TELEMETRY_OPT_OUT"] = "YES"
 
 logging.getLogger("openai._client").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)

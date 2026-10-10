@@ -6,7 +6,7 @@ import pandas as pd
 
 
 class UCRAnomalyDataset:
-    def __init__(self, name: str, data_path: str = "home/data"):
+    def __init__(self, name: str, data_path: str = "/home/data"):
         """
         Load a single UCR anomaly detection dataset.
 
@@ -25,14 +25,14 @@ class UCRAnomalyDataset:
         """Load training data for this dataset
         Contains all the data points in the training set, no anomalies in it
         """
-        train_path = self.data_path / f"{self.name}_train.csv"
+        train_path = self.data_path / "train" / f"{self.name}.csv"
         return pd.read_csv(train_path).to_numpy().flatten()
 
     def _load_test_data(self) -> np.ndarray:
         """Load test data for this dataset
         Contains all the data points in the test set there is an anomaly in it
         """
-        test_path = self.data_path / f"{self.name}_test.csv"
+        test_path = self.data_path / "test" / f"{self.name}.csv"
         return pd.read_csv(test_path).to_numpy().flatten()
 
     def _load_sample_submission(self) -> np.ndarray:

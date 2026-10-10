@@ -57,7 +57,7 @@ Your `data` directory includes the following:
 ## Evaluation
 
 * If implemented correctly and the output path is set to the `submission/` folder, your pipeline will generate a `pred.npy` file containing your model's predictions.
-* **Score = 100** if your results exactly match the reference.
+* **Score = 1** if your results exactly match the reference.
 * **Score = 0** if the file is missing, incorrect, or manually fabricated.
 
 > ⚠ **Note:** Any attempt to hard-code or replicate the expected results without running the actual model will be considered an academic integrity violation.

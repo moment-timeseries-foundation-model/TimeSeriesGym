@@ -38,5 +38,5 @@ Submit a NumPy array named `anomaly_score.npy` containing the anomaly scores for
 
 Your submission will be evaluated as follows:
 
-* **Score = 100**: Output matches the reference exactly and is correctly saved.
+* **Score = 1**: Output matches the reference exactly and is correctly saved.
 * **Score = 0**: Output is missing, incorrectly formatted, or manually altered.

@@ -42,7 +42,14 @@ def grade_jsonl(
         submission_path = Path(str(submission["submission_path"]))
         competition_id = submission["competition_id"]
         competition = registry.get_competition(competition_id)
-        single_report = grade_sample(submission_path, competition)
+        # grade_sample does not handle code or hyperparameter-search submissions
+        if competition.hyperparameter_search_config is not None:
+            solution = submission.get("solution_file_path")
+            single_report = grade_hyperparameter_search(submission_path, competition, solution)
+        elif competition.coding_config is not None:
+            single_report = grade_code(submission_path, competition)
+        else:
+            single_report = grade_sample(submission_path, competition)
         competitions_reports.append(single_report)
 
     aggregated_report = aggregate_reports(competitions_reports)
@@ -288,10 +295,14 @@ def aggregate_reports(competition_reports: list[CompetitionReport]) -> dict:
     performance per competition, otherwise sum metrics
     """
 
-    total_gold_medals = sum(report.gold_medal for report in competition_reports)
-    total_silver_medals = sum(report.silver_medal for report in competition_reports)
-    total_bronze_medals = sum(report.bronze_medal for report in competition_reports)
-    total_above_median = sum(report.above_median for report in competition_reports)
+    # code-competition reports have no medal fields
+    def medals(field: str) -> int:
+        return sum(bool(getattr(report, field, False)) for report in competition_reports)
+
+    total_gold_medals = medals("gold_medal")
+    total_silver_medals = medals("silver_medal")
+    total_bronze_medals = medals("bronze_medal")
+    total_above_median = medals("above_median")
     total_submissions = sum(report.submission_exists for report in competition_reports)
     total_valid_submissions = sum(report.valid_submission for report in competition_reports)
 

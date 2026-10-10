@@ -14,8 +14,6 @@ from timeseriesgym.grade import (
     grade_jsonl,
     grade_sample,
 )
-from timeseriesgym.judge import llm_judge
-from timeseriesgym.reasonableness import evaluate_reasonableness
 from timeseriesgym.registry import registry
 from timeseriesgym.utils import get_logger
 
@@ -465,6 +463,10 @@ def main():
             parser_cleanup.error("Either --all or --competition-id must be specified.")
 
     if args.command == "judge":
+        # imported here: deepeval (telemetry, files in the working directory) is only
+        # needed for the LLM judge
+        from timeseriesgym.judge import llm_judge
+
         llm_judge(args.config, args.model, args.json)
 
     if args.command == "evaluate-reasonableness":
@@ -472,6 +474,9 @@ def main():
         if not code_folder.is_dir():
             logger.error(f"Code folder not found: {code_folder}")
             return
+
+        # imported here for the same reason as the judge: deepeval is only needed for this command
+        from timeseriesgym.reasonableness import evaluate_reasonableness
 
         result = evaluate_reasonableness(
             str(code_folder), model=args.model, verbose=args.verbose

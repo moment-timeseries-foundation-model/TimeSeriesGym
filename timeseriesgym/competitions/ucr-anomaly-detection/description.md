@@ -14,7 +14,7 @@ Each dataset consists of:
 - A training set containing only normal patterns
 - A test set containing one anomalous segment
 
-The datasets vary in length, sampling frequency, and the nature of the anomalies they contain. Datasets that you need to process are specified in dataset_names.txt, each line is a dataset name. You can pass this name to the `UCRAnomalyDataset` class to load the dataset.
+The datasets vary in length, sampling frequency, and the nature of the anomalies they contain. Datasets that you need to process are specified in datasets.txt, each line is a dataset name. You can pass this name to the `UCRAnomalyDataset` class to load the dataset.
 
 ## Evaluation
 Submissions are evaluated using the adjusted F1 score, which balances precision and recall in anomaly detection. The scoring function finds the optimal threshold of the score that maximizes the F1 score. When the optimal threshold is found, the best F1 score is used as the score for that dataset.
@@ -42,7 +42,7 @@ import pandas as pd
 
 
 class UCRAnomalyDataset:
-    def __init__(self, name: str, data_path: str = "home/data"):
+    def __init__(self, name: str, data_path: str = "/home/data"):
         """
         Load a single UCR anomaly detection dataset.
 
@@ -61,14 +61,14 @@ class UCRAnomalyDataset:
         """Load training data for this dataset
         Contains all the data points in the training set, no anomalies in it
         """
-        train_path = self.data_path / f"{self.name}_train.csv"
+        train_path = self.data_path / "train" / f"{self.name}.csv"
         return pd.read_csv(train_path).to_numpy().flatten()
 
     def _load_test_data(self) -> np.ndarray:
         """Load test data for this dataset
         Contains all the data points in the test set there is an anomaly in it
         """
-        test_path = self.data_path / f"{self.name}_test.csv"
+        test_path = self.data_path / "test" / f"{self.name}.csv"
         return pd.read_csv(test_path).to_numpy().flatten()
 
     def _load_sample_submission(self) -> np.ndarray:
