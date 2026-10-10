@@ -20,7 +20,7 @@ def prepare(raw: Path, public: Path, private: Path):
     clone_repository(
         "https://github.com/moment-timeseries-foundation-model/moment.git",
         public / "moment",
-        commit="38f7310ad594100747ca2a8357e9c7ca7d323e0e",
+        commit="37a8bde4eb3dd340bebc9b54a3b893bcba62cd4f",
     )
 
     # Remove all .json and .csv files from the cloned repository
