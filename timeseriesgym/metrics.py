@@ -5,6 +5,7 @@ from sklearn.metrics import f1_score
 
 from timeseriesgym import metrics_helpers
 from timeseriesgym.metrics_helpers import ParticipantVisibleError, adjust_predictions
+from timeseriesgym.utils import InvalidSubmissionError
 
 
 def symmetric_mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -154,3 +155,22 @@ def adjusted_best_f1(y_true: np.array, y_scores: np.array, n_splits: int = 100):
 
     best_adjusted_f1 = np.max(adjusted_f1)
     return best_adjusted_f1
+
+
+def root_mean_squared_log_error(y_true, y_pred) -> float:
+    """RMSLE over the cells whose answer is known.
+
+    Predictions must be finite and >= 0: log(1 + p) is undefined below -1, and graders that
+    dropped NaN terms let a submission remove chosen cells from the score by predicting < -1.
+    Only cells whose *answer* is missing are ignored.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if y_true.shape != y_pred.shape:
+        raise InvalidSubmissionError(
+            f"Submission shape {y_pred.shape} does not match answers shape {y_true.shape}"
+        )
+    if not np.isfinite(y_pred).all() or (y_pred < 0).any():
+        raise InvalidSubmissionError("Predictions must be finite and non-negative for RMSLE")
+    known = ~np.isnan(y_true)
+    return float(np.sqrt(np.mean((np.log1p(y_pred[known]) - np.log1p(y_true[known])) ** 2)))

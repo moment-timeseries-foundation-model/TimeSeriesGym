@@ -1,6 +1,6 @@
-import numpy as np
 import pandas as pd
 
+from timeseriesgym.metrics import root_mean_squared_log_error
 from timeseriesgym.utils import InvalidSubmissionError
 
 
@@ -13,8 +13,4 @@ def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
             f"{len(answers_array)}"
         )
 
-    log_squared_eeror = (np.log(submission_array + 1) - np.log(answers_array + 1)) ** 2
-    mean_log_squared_error = np.mean(log_squared_eeror)
-    root_mean_log_squared_error = np.sqrt(mean_log_squared_error)
-
-    return root_mean_log_squared_error
+    return root_mean_squared_log_error(answers_array, submission_array)

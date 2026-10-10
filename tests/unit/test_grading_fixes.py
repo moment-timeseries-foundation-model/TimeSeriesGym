@@ -250,3 +250,33 @@ def test_feature_enhancement_grader_is_reachable(tmp_path):
     )
     assert isinstance(score, dict) and score["accuracy"] == pytest.approx(1.0)
     assert 0.0 <= score["overall_score"] <= 1.0
+
+
+# ---------------------------------------------------------------- RMSLE graders
+
+
+def test_rmsle_rejects_predictions_that_would_drop_cells():
+    from sklearn.metrics import mean_squared_log_error
+
+    from timeseriesgym.metrics import root_mean_squared_log_error
+
+    y, p = np.array([1.0, 2.0, 3.0]), np.array([1.5, 2.0, 2.5])
+    assert root_mean_squared_log_error(y, p) == pytest.approx(np.sqrt(mean_squared_log_error(y, p)))
+    with pytest.raises(InvalidSubmissionError):
+        root_mean_squared_log_error(y, np.array([1.0, -5.0, 3.0]))  # used to be dropped
+    with pytest.raises(InvalidSubmissionError):
+        root_mean_squared_log_error(y, np.array([1.0, np.nan, 3.0]))
+    # only cells with a missing *answer* are ignored
+    assert root_mean_squared_log_error(np.array([1.0, np.nan]), np.array([1.0, 7.0])) == 0.0
+
+
+def test_online_sales_cannot_hide_cells():
+    grade = _grade_fn("online-sales")
+    cols = [f"Outcome_M{i}" for i in range(1, 13)]
+    answers = pd.DataFrame([[10.0] * 12, [20.0] * 12], columns=cols)
+    good = pd.DataFrame([[10.0] * 12, [10.0] * 12], columns=cols)
+    assert grade(good, answers) > 0
+    hiding = good.copy()
+    hiding.loc[1, cols] = -5.0  # made the badly predicted row vanish from the score
+    with pytest.raises(InvalidSubmissionError):
+        grade(hiding, answers)

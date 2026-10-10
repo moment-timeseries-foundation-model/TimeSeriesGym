@@ -1,11 +1,12 @@
-import numpy as np
 import pandas as pd
+
+from timeseriesgym.metrics import root_mean_squared_log_error
+from timeseriesgym.utils import InvalidSubmissionError
 
 
 def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
-    log_squared_error = (
-        np.log(submission.visitors.to_numpy() + 1) - np.log(answers.visitors.to_numpy() + 1)
-    ) ** 2
-    log_squared_error = log_squared_error.mean()
-
-    return np.sqrt(log_squared_error)
+    if len(submission) != len(answers):
+        raise InvalidSubmissionError(
+            f"Submission length {len(submission)} does not match answer length {len(answers)}"
+        )
+    return root_mean_squared_log_error(answers.visitors.to_numpy(), submission.visitors.to_numpy())
