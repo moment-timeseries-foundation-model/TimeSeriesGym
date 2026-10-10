@@ -75,20 +75,20 @@ label
 
 # Dataset Description
 
-In this competition your task is to predict the superclass of ECG recordings. To help you make these predictions, you're given a set of clinical 12-lead ECGs with extensive annotations and metadata. These ECGs are pre-processed by us so each sample is 512 time stamp and sampled with 100 hz frequency.
+In this competition your task is to predict the superclass of ECG recordings. To help you make these predictions, you're given a set of clinical 12-lead ECGs with extensive annotations and metadata. These ECGs are pre-processed by us so each sample is a 12-lead recording of 1000 time steps (10 seconds sampled at 100 Hz).
 
 ## File and Data Field Descriptions
 
 - **train_df.h5** - To be used as training data.
-    - `signals` - A 512 observation ECG signal
+    - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
     - `labels` - zero-indexed encoded label
 
 - **val_df.h5** - We provide a validation set for you to evaluate your own model
-    - `signals` - A 512 observation ECG signal
+    - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
     - `labels` - zero-indexed encoded label
 
 - **test_df.csv** - The actual test set for your model
-    - `signals` - A 512 observation ECG signal
+    - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
 
 - **sample_submission.csv** - A submission file in the correct format.
     - `label` - The target. For each ECG record, predict one of the five classes with zero-indexed encoding, i.e. 0-4.
