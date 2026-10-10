@@ -15,6 +15,7 @@ from timeseriesgym.grade import (
     grade_sample,
 )
 from timeseriesgym.judge import llm_judge
+from timeseriesgym.reasonableness import evaluate_reasonableness
 from timeseriesgym.registry import registry
 from timeseriesgym.utils import get_logger
 
@@ -304,6 +305,35 @@ def main():
         default=False,
     )
 
+    # Evaluate reasonableness sub-parser
+    parser_reasonableness = subparsers.add_parser(
+        "evaluate-reasonableness",
+        help="Evaluate whether code makes a genuine modeling attempt using LLM-as-a-judge.",
+    )
+    parser_reasonableness.add_argument(
+        "code_folder",
+        help="Path to the folder containing Python code to evaluate.",
+        type=str,
+    )
+    parser_reasonableness.add_argument(
+        "--model",
+        help="OpenAI model to use for evaluation (default: gpt-4.1-mini)",
+        type=str,
+        default="gpt-4.1-mini",
+    )
+    parser_reasonableness.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print detailed evaluation information",
+        default=False,
+    )
+    parser_reasonableness.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+        default=False,
+    )
+
     args = parser.parse_args()
 
     if args.command == "prepare":
@@ -436,6 +466,28 @@ def main():
 
     if args.command == "judge":
         llm_judge(args.config, args.model, args.json)
+
+    if args.command == "evaluate-reasonableness":
+        code_folder = Path(args.code_folder)
+        if not code_folder.is_dir():
+            logger.error(f"Code folder not found: {code_folder}")
+            return
+
+        result = evaluate_reasonableness(
+            str(code_folder), model=args.model, verbose=args.verbose
+        )
+
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            logger.info("Reasonableness evaluation results:")
+            logger.info(f"  Is Reasonable: {result.is_reasonable}")
+            logger.info(f"  Score: {result.score:.4f}")
+            logger.info(f"  Threshold: {result.threshold:.4f}")
+            logger.info(f"  Has Suspicious Patterns: {result.has_suspicious_patterns}")
+            logger.info(f"  Has Modeling Patterns: {result.has_modeling_patterns}")
+            if result.reason:
+                logger.info(f"  Reason: {result.reason}")
 
 
 if __name__ == "__main__":
