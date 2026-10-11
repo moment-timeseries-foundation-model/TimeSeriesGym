@@ -532,6 +532,21 @@ def test_m5_prepare_keeps_prices_of_every_training_day(tmp_path):
     assert pd.read_csv(public / "sample_submission.csv").id.tolist() == sample.id.tolist()
 
 
+# ---------------------------------------------------------------- PTB-XL folds
+
+
+def test_ptb_xl_trains_on_folds_one_to_eight():
+    pytest.importorskip("wfdb")
+    download = _module("ptb-xl-classification-challenge", "download_data")
+    df = pd.DataFrame({"strat_fold": np.repeat(np.arange(1, 11), 2)}, index=np.arange(1, 21))
+    paths = [f"records100/00000/{ecg_id:05d}_lr" for ecg_id in df.index]
+    phases = download.obtain_phase_to_paths_dict(df, paths)
+    fold_of = dict(zip(paths, df.strat_fold, strict=True))
+    assert sorted({fold_of[p] for p in phases["train"]}) == list(range(1, 9))  # fold 8 was unused
+    assert {fold_of[p] for p in phases["val"]} == {9}
+    assert {fold_of[p] for p in phases["test"]} == {10}
+
+
 # ---------------------------------------------------------------- checked downloads
 
 
