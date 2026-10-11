@@ -755,3 +755,15 @@ def test_hyperparameter_search_runs_are_graded_with_their_code(tmp_path):
     (run / "code" / "search.py").write_text("import optuna\noptuna.create_study()\n")
     report = graded()
     assert report["valid_submission"] and float(report["score"]) > 0
+
+
+def test_evaluation_splits_list_only_gradeable_challenges():
+    import inspect
+
+    registry = Registry()
+    for split in sorted(registry.get_splits_dir().glob("*.txt")):
+        for competition_id in split.read_text().split():
+            grade_fn = registry.get_competition(competition_id).grader.grade_fn
+            source = inspect.getsource(grade_fn)
+            # the CSDI graders are stubs, and all.txt listed both CSDI challenges
+            assert "raise NotImplementedError" not in source, (split.name, competition_id)

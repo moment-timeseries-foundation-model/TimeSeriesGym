@@ -3,8 +3,6 @@ ashrae-energy-prediction
 child-mind-institute-detect-sleep-states
 context-is-key-moirai
 context-is-key-nn5-chronos
-csdi-implement-model-pm25
-csdi-reproduce-pm25
 g2net-gravitational-wave-detection
 gift-eval-short-horizon
 hms-harmful-brain-activity-classification
