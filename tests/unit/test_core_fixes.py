@@ -7,6 +7,8 @@ import pickle
 import re
 import subprocess
 import sys
+import threading
+import time
 import types
 from collections import defaultdict
 from pathlib import Path
@@ -482,3 +484,47 @@ def test_torchscript_models_compare_their_layer_hyperparameters(tmp_path):
 )
 def test_default_hyperparameter_search_apis(code, expected):
     assert have_hyperparameter_searching_attempt(code) is expected
+
+
+# ---------------------------------------------------------------- LLM judges
+
+
+def test_judge_json_output_survives_parallel_evaluations(tmp_path, monkeypatch, capsys):
+    judge = importlib.import_module("timeseriesgym.judge")
+    a_running, b_running = threading.Event(), threading.Event()
+
+    class FakeGEval:  # forces the interleaving: A starts, B starts, A ends, B ends
+        def __init__(self, name, threshold, **kwargs):
+            self.name, self.threshold, self.score, self.reason = name, threshold, None, "r"
+            if name == "b":
+                assert a_running.wait(5)
+
+        def measure(self, test_case):
+            print(f"deepeval noise from {self.name}")
+            if self.name == "a":
+                a_running.set()
+                assert b_running.wait(5)
+            else:
+                b_running.set()
+                time.sleep(0.2)
+            self.score = 1.0
+
+    monkeypatch.setattr(judge, "GEval", FakeGEval)
+    monkeypatch.setattr(judge, "load_dotenv", lambda: None)
+    monkeypatch.setenv("OPENAI_API_KEY", "unused")
+    artifacts = []
+    for name in ("a", "b"):
+        (tmp_path / name).write_text("code")
+        criteria = [{"name": name, "description": "d"}]
+        artifacts.append({"path": str(tmp_path / name), "type": "code", "criteria": criteria})
+    config = tmp_path / "config.yaml"
+    config.write_text(json.dumps({"artifacts": artifacts}))  # JSON is YAML
+
+    stdout = sys.stdout
+    try:
+        judge.llm_judge(str(config), "model", json_output=True)
+        assert sys.stdout is stdout  # was left pointing at a worker's buffer
+    finally:
+        sys.stdout = stdout
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["summary"] == {"total_artifacts": 2, "total_criteria": 2, "passed_criteria": 2}

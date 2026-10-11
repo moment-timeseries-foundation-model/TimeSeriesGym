@@ -1,4 +1,3 @@
-import builtins
 import concurrent.futures
 import json
 import logging
@@ -13,11 +12,11 @@ import yaml
 # (setting the variable after the import, as before, had no effect).
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
-from deepeval.metrics import GEval  # noqa: E402
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams  # noqa: E402
-from dotenv import load_dotenv  # noqa: E402
+from deepeval.metrics import GEval
+from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+from dotenv import load_dotenv
 
-from timeseriesgym.utils import get_logger  # noqa: E402
+from timeseriesgym.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -42,17 +41,6 @@ def llm_judge(config_path, model_name, json_output=False):
     if not artifacts:
         logger.error("Config file must contain 'artifacts' section")
         return
-
-    original_print = builtins.print
-
-    def silent_print(*args, **kwargs):
-        if (
-            args
-            and isinstance(args[0], str)
-            and not args[0].startswith("✨")
-            and "False !!!!!!!!!!!!" not in args[0]
-        ):
-            original_print(*args, **kwargs)
 
     def evaluate_artifact(artifact):
         path = artifact.get("path")
@@ -93,25 +81,17 @@ def llm_judge(config_path, model_name, json_output=False):
                     logger.info(f"Evaluating artifact: {path}")
                 results = []
 
-                builtins.print = silent_print
+                for criterion in criteria_list:
+                    criterion.measure(test_case)
 
-                try:
-                    for criterion in criteria_list:
-                        stdout_capture = StringIO()
-                        stderr_capture = StringIO()
-                        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                            criterion.measure(test_case)
-
-                        results.append(
-                            {
-                                "name": criterion.name,
-                                "score": criterion.score,
-                                "reason": criterion.reason,
-                                "passed": criterion.score >= criterion.threshold,
-                            }
-                        )
-                finally:
-                    builtins.print = original_print
+                    results.append(
+                        {
+                            "name": criterion.name,
+                            "score": criterion.score,
+                            "reason": criterion.reason,
+                            "passed": criterion.score >= criterion.threshold,
+                        }
+                    )
 
                 return {"path": path, "type": artifact_type, "results": results}
 
@@ -123,26 +103,28 @@ def llm_judge(config_path, model_name, json_output=False):
     if not json_output:
         logger.info("Starting evaluations with deepeval in parallel...")
 
-    builtins.print = silent_print
+    # deepeval prints while it evaluates; silence it here, once. redirect_stdout/redirect_stderr
+    # swap the process-wide sys.stdout/sys.stderr: entered and left in overlapping worker
+    # threads, they can leave sys.stdout pointing at a dead buffer and lose the `--json` output.
+    with (
+        redirect_stdout(StringIO()),
+        redirect_stderr(StringIO()),
+        concurrent.futures.ThreadPoolExecutor() as executor,
+    ):
+        future_to_artifact = {
+            executor.submit(evaluate_artifact, artifact): artifact for artifact in artifacts
+        }
+        evaluation_results = []
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_artifact = {
-                executor.submit(evaluate_artifact, artifact): artifact for artifact in artifacts
-            }
-            evaluation_results = []
-
-            for future in concurrent.futures.as_completed(future_to_artifact):
-                artifact = future_to_artifact[future]
-                try:
-                    result = future.result()
-                    if result:
-                        evaluation_results.append(result)
-                except Exception as e:
-                    if not json_output:
-                        logger.error(f"Error evaluating {artifact.get('path')}: {e}")
-    finally:
-        builtins.print = original_print
+        for future in concurrent.futures.as_completed(future_to_artifact):
+            artifact = future_to_artifact[future]
+            try:
+                result = future.result()
+                if result:
+                    evaluation_results.append(result)
+            except Exception as e:
+                if not json_output:
+                    logger.error(f"Error evaluating {artifact.get('path')}: {e}")
 
     if json_output:
         final_results = {
