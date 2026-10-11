@@ -70,22 +70,11 @@ class Competition:
             missingness_simulator = MissingnessSimulator.from_dict(data["missingness_simulator"])
         else:
             missingness_simulator = None
-        parent_id = data["parent_id"] if "parent_id" in data else None
-
-        if "hyperparameter_search_config" in data:
-            hyperparameter_search_config = data["hyperparameter_search_config"]
-        else:
-            hyperparameter_search_config = None
-
-        if "coding_config" in data:
-            coding_config = data["coding_config"]
-        else:
-            coding_config = None
 
         try:
             return Competition(
                 id=data["id"],
-                parent_id=parent_id,
+                parent_id=data.get("parent_id"),
                 name=data["name"],
                 description=data["description"],
                 grader=grader,
@@ -95,8 +84,8 @@ class Competition:
                 competition_type=data["competition_type"],
                 prepare_fn=data["prepare_fn"],
                 missingness_simulator=missingness_simulator,
-                hyperparameter_search_config=hyperparameter_search_config,
-                coding_config=coding_config,
+                hyperparameter_search_config=data.get("hyperparameter_search_config"),
+                coding_config=data.get("coding_config"),
                 feature_enhancement_config=data.get("feature_enhancement_config"),
                 raw_dir=data["raw_dir"],
                 public_dir=data["public_dir"],
