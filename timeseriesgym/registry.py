@@ -193,8 +193,10 @@ class Registry:
     def list_competition_ids(self) -> list[str]:
         """List all competition IDs available in the registry, sorted alphabetically."""
 
-        competition_configs = self.get_competitions_dir().rglob("config.yaml")
-        competition_ids = [f.parent.stem for f in sorted(competition_configs)]
+        # only direct children: rglob also found example/conf/config.yaml (a Hydra config in
+        # the feature-enhancement example) and listed a competition `conf`
+        competition_configs = self.get_competitions_dir().glob("*/config.yaml")
+        competition_ids = [f.parent.name for f in sorted(competition_configs)]
 
         return competition_ids
 

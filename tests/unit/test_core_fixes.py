@@ -287,3 +287,15 @@ def test_openhands_root_build_script_is_not_agent_writable():
     # it builds from /home/agent, which nonroot can change: only the first call may build
     build = (openhands / "build.sh").read_text()
     assert build.index("mkdir /root/.agent_build_started") < build.index("make build")
+
+
+# ---------------------------------------------------------------- registry and environment
+
+
+def test_competition_ids_are_the_competition_directories():
+    registry = Registry()
+    ids = registry.list_competition_ids()
+    expected = sorted(p.parent.name for p in registry.get_competitions_dir().glob("*/config.yaml"))
+    assert ids == expected and "conf" not in ids  # was listed from the FE example's Hydra config
+    for competition_id in ids:  # `prepare --all` and `cleanup --all` load every id
+        assert registry.get_competition(competition_id).id == competition_id
