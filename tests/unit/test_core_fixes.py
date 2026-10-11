@@ -381,3 +381,40 @@ def test_dict_scores_are_reported_as_json_objects():
     plain = CompetitionReport(competition_id="x", score=0.5, submission_path="s", **fields)
     assert plain.to_dict()["score"] == "0.5"  # unchanged for numeric scores
     assert CompetitionReport.from_dict(plain.to_dict()).score == 0.5
+
+
+def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
+    runs = {}
+    for competition_id in (
+        "spaceship-titanic",
+        "ptb-xl-classification-challenge-feature-enhancement",
+        HPS_ID,
+    ):
+        submission_dir = tmp_path / competition_id / "submission"
+        submission_dir.mkdir(parents=True)
+        (submission_dir / "submission.csv").write_text("id,label\n")
+        run = {"competition_id": competition_id, "run_dir": str(submission_dir.parent)}
+        runs[competition_id] = {**run, "success": True}
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(json.dumps({"runs": runs}))
+    output = tmp_path / "submission.jsonl"
+    args = ["--metadata", metadata, "--output", output, "--data-dir", tmp_path / "data"]
+    subprocess.run(
+        [sys.executable, "experiments/make_submission.py", *map(str, args)],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        check=True,
+        capture_output=True,
+    )
+    lines = {line["competition_id"]: line for line in map(json.loads, output.open())}
+    root = {cid: tmp_path / cid / "submission" for cid in runs}
+    assert lines["spaceship-titanic"]["submission_path"] == str(
+        root["spaceship-titanic"] / "submission.csv"
+    )
+    fe = lines["ptb-xl-classification-challenge-feature-enhancement"]  # was .../submission.csv
+    assert fe["submission_path"] == str(root[fe["competition_id"]])
+    assert lines[HPS_ID] == {  # the search script was never passed, so never checked
+        "competition_id": HPS_ID,
+        "submission_path": str(root[HPS_ID]),
+        "solution_file_path": str(root[HPS_ID] / "solution.py"),
+    }
