@@ -9,6 +9,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
+from sklearn.metrics import accuracy_score, root_mean_squared_error
+
+from timeseriesgym.metrics import root_mean_squared_log_error
+from timeseriesgym.utils import InvalidSubmissionError
 
 
 def _module(competition_id: str, name: str = "grade"):
@@ -17,6 +22,105 @@ def _module(competition_id: str, name: str = "grade"):
 
 def _grade_fn(competition_id: str):
     return _module(competition_id).grade
+
+
+# ---------------------------------------------------------------- id-matched CSV graders
+
+ID_MATCHED = {
+    # competition: (id columns, target column, metric(y_true, y_pred))
+    "ashrae-energy-prediction": (
+        ["building_id", "meter", "timestamp"],
+        "meter_reading",
+        root_mean_squared_log_error,
+    ),
+    "recruit-restaurant-visitor-forecasting": (["id"], "visitors", root_mean_squared_log_error),
+    "sberbank-russian-housing-market": (["id"], "price_doc", root_mean_squared_log_error),
+    "time-series-exam-1-1": (["question_id"], "answer", accuracy_score),
+}
+
+
+def _id_frame(id_columns, n=12):
+    rng = np.random.default_rng(0)
+    if id_columns == ["building_id", "meter", "timestamp"]:
+        ids = {
+            "building_id": np.repeat([0, 1, 2], 4),
+            "meter": np.tile([0, 0, 1, 1], 3),
+            "timestamp": np.tile(["2016-10-31 00:00:00", "2016-10-31 01:00:00"], 6),
+        }
+    elif id_columns == ["id"]:
+        ids = {"id": [f"air_{i:04d}_2017-03-01" for i in range(n)]}
+    else:
+        ids = {id_columns[0]: np.arange(1, n + 1)}
+    frame = pd.DataFrame(ids)
+    return frame, rng
+
+
+@pytest.mark.parametrize("competition_id", ID_MATCHED)
+def test_id_matched_graders_align_rows_by_id(competition_id):
+    id_columns, target, metric = ID_MATCHED[competition_id]
+    grade = _grade_fn(competition_id)
+    answers, rng = _id_frame(id_columns)
+    answers[target] = rng.integers(0, 4, len(answers))
+    submission = answers.copy()
+    submission[target] = rng.integers(0, 4, len(answers))
+
+    # valid, correctly ordered: the positional score, as before
+    expected = metric(answers[target].to_numpy(), submission[target].to_numpy())
+    assert grade(submission.copy(), answers.copy()) == expected
+
+    # the same predictions in another row order: same score (was scored against other rows)
+    shuffled = submission.sample(frac=1, random_state=1).reset_index(drop=True)
+    assert not shuffled[id_columns].equals(submission[id_columns])
+    assert grade(shuffled, answers.copy()) == pytest.approx(expected)
+
+    # a repeated id in place of another, same length: rejected (was scored)
+    repeated = submission.copy()
+    repeated.loc[1, id_columns] = repeated.loc[0, id_columns].to_numpy()
+    with pytest.raises(InvalidSubmissionError, match="duplicate"):
+        grade(repeated, answers.copy())
+
+    # an unknown id: rejected
+    unknown = submission.copy()
+    column = id_columns[-1]
+    unknown[column] = unknown[column].astype(object)
+    unknown.loc[0, column] = "unknown"
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(unknown, answers.copy())
+
+    # no id column: rejected (was scored by position)
+    with pytest.raises(InvalidSubmissionError, match=f"`{id_columns[0]}`"):
+        grade(submission.drop(columns=id_columns[0]), answers.copy())
+
+
+def test_ashrae_length_message_is_formatted():
+    grade = _grade_fn("ashrae-energy-prediction")
+    answers, _ = _id_frame(["building_id", "meter", "timestamp"])
+    answers["meter_reading"] = 1.0
+    with pytest.raises(InvalidSubmissionError, match=r"answer length 12$"):
+        grade(answers.iloc[:5].copy(), answers.copy())
+
+
+def test_nyc_rejects_keys_that_do_not_match():
+    grade = _grade_fn("new-york-city-taxi-fare-prediction")
+    keys = [f"2010-10-0{i} 21:26:11.0000001" for i in range(1, 7)]
+    answers = pd.DataFrame({"key": keys, "fare_amount": [5.0, 8.0, 3.5, 12.0, 7.0, 9.5]})
+    submission = pd.DataFrame({"key": keys, "fare_amount": [6.0, 8.0, 4.0, 10.0, 7.5, 9.0]})
+
+    expected = root_mean_squared_error(answers.fare_amount, submission.fare_amount)
+    assert grade(submission.copy(), answers.copy()) == pytest.approx(expected)
+    shuffled = submission.sample(frac=1, random_state=0)
+    assert grade(shuffled, answers.copy()) == pytest.approx(expected)
+
+    reformatted = submission.copy()
+    reformatted["key"] = reformatted["key"].str.replace(".0000001", "")  # was scored by position
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(reformatted, answers.copy())
+    repeated = submission.copy()
+    repeated.loc[1, "key"] = repeated.loc[0, "key"]
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(repeated, answers.copy())
+    with pytest.raises(InvalidSubmissionError, match="length"):
+        grade(submission.iloc[:-1], answers.copy())
 
 
 # ---------------------------------------------------------------- amp prepare

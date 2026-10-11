@@ -158,6 +158,43 @@ def prepare_for_accuracy_metric(
     return {"y_true": y_true, "y_pred": y_pred}
 
 
+def prepare_for_id_matched_metric(
+    submission: pd.DataFrame,
+    answers: pd.DataFrame,
+    target_column: str,
+    id_columns: list[str],
+) -> dict:
+    """
+    Pairs each answer row with the submission row that has the same ids, in the answers' order,
+    so that a correct submission gets the same score in any row order.
+
+    The submission must contain exactly the answers' ids, each once.
+    """
+    for column in [*id_columns, target_column]:
+        assert column in answers.columns, f"Answers must have a `{column}` column"
+        if column not in submission.columns:
+            raise InvalidSubmissionError(f"Submission must have a `{column}` column")
+    if len(submission) != len(answers):
+        raise InvalidSubmissionError(
+            f"Submission length {len(submission)} does not match answer length {len(answers)}"
+        )
+
+    submission_ids = pd.MultiIndex.from_frame(submission[id_columns])
+    if submission_ids.has_duplicates:
+        raise InvalidSubmissionError(f"Submission has duplicate {id_columns} values")
+    rows = submission_ids.get_indexer(pd.MultiIndex.from_frame(answers[id_columns]))
+    if (rows < 0).any():
+        raise InvalidSubmissionError(
+            f"Submission and answers {id_columns} values do not match: "
+            f"{(rows < 0).sum()} answer rows have no submission row"
+        )
+
+    y_pred = submission[target_column].to_numpy()[rows]
+    y_true = answers[target_column].to_numpy()
+
+    return {"y_true": y_true, "y_pred": y_pred}
+
+
 def prepare_for_auroc_metric(
     submission: pd.DataFrame,
     answers: pd.DataFrame,
