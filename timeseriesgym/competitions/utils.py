@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -5,7 +6,15 @@ import pandas as pd
 from numpy import ndarray
 from scipy.special import softmax
 
-from timeseriesgym.utils import InvalidSubmissionError, get_logger
+from timeseriesgym.utils import (
+    InvalidSubmissionError,
+    get_logger,
+    have_different_hyperparameters,
+    have_hyperparameter_searching_attempt,
+    load_models,
+    load_scripts,
+    load_submissions,
+)
 
 logger = get_logger(__name__)
 
@@ -194,3 +203,61 @@ def prepare_for_auroc_metric(
     }
 
     return roc_auc_inputs
+
+
+def grade_relative_improvement(
+    submission_folder_path: Path,
+    answers: pd.DataFrame,
+    hyperparameter_search_config: dict,
+    solution_file_path: Path | None,
+    grade_fn: Callable[[pd.DataFrame, pd.DataFrame], float],
+    lower_is_better: bool,
+    packages_to_look_for: list[str] | None = None,
+) -> float:
+    """
+    Grades a hyperparameter search as the relative improvement of the improved submission's
+    score over the baseline submission's score, negated when lower scores are better.
+
+    Returns -inf if the two models have the same hyperparameters, or if a solution file is
+    given and it shows no hyperparameter search with one of `packages_to_look_for` (see
+    `have_hyperparameter_searching_attempt` for the default list).
+    """
+    baseline_model = load_models(
+        submission_folder_path / hyperparameter_search_config["baseline_model_name"]
+    )
+    improved_model = load_models(
+        submission_folder_path / hyperparameter_search_config["improved_model_name"]
+    )
+    baseline_submission = load_submissions(
+        submission_folder_path / hyperparameter_search_config["baseline_submission_name"]
+    )
+    improved_submission = load_submissions(
+        submission_folder_path / hyperparameter_search_config["improved_submission_name"]
+    )
+    has_solution_file = solution_file_path is not None
+    solution_file = load_scripts(solution_file_path) if has_solution_file else None
+
+    if not have_different_hyperparameters(baseline_model, improved_model):
+        logger.info("[INFO] The hyperparameters are the same as the baseline model.")
+        return np.inf * -1
+
+    baseline_score = grade_fn(baseline_submission, answers)
+    improved_score = grade_fn(improved_submission, answers)
+
+    sign = -1 if lower_is_better else 1
+    improvement = sign * (improved_score - baseline_score) / baseline_score
+    logger.info(f"[INFO] Baseline score: {baseline_score}")
+    logger.info(f"[INFO] Improved score: {improved_score}")
+    logger.info(f"[INFO] Improvement: {improvement}")
+
+    if solution_file is not None:
+        logger.info(
+            "[INFO] Solution file is provided, searching for hyperparameter searching attempt."
+        )
+        if not have_hyperparameter_searching_attempt(
+            solution_file, packages_to_look_for=packages_to_look_for
+        ):
+            logger.info("[INFO] Hyperparameter searching attempt not found.")
+            return np.inf * -1
+
+    return improvement
