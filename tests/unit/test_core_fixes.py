@@ -360,3 +360,24 @@ def test_grading_report_directory_is_created_with_its_parents(tmp_path):
     out = tmp_path / "new" / "results"  # failed after grading: `new` did not exist
     grade_jsonl(_jsonl(tmp_path / "s.jsonl", [entry]), out, Registry(data))
     assert len(list(out.glob("*_grading_report.json"))) == 1
+
+
+def test_dict_scores_are_reported_as_json_objects():
+    from datetime import datetime
+
+    from timeseriesgym.grade_helpers import CompetitionReport
+    from timeseriesgym.utils import get_null_rank_info
+
+    rank = {k: v for k, v in get_null_rank_info().items() if not k.endswith("_medal")}
+    medals = dict.fromkeys(["any_medal", "gold_medal", "silver_medal", "bronze_medal"], False)
+    fields = {**rank, **medals, "above_median": False, "is_lower_better": False}
+    fields.update(submission_exists=True, valid_submission=True, created_at=datetime.now())
+    score = {"accuracy": np.float64(0.5), "ETTh1": np.float32(0.25), "overall_score": 0.75}
+    report = CompetitionReport(competition_id="x", score=score, submission_path="s", **fields)
+    as_dict = json.loads(json.dumps(report.to_dict()))
+    assert as_dict["score"] == {"accuracy": 0.5, "ETTh1": 0.25, "overall_score": 0.75}  # was a repr
+    assert CompetitionReport.from_dict(as_dict).score == as_dict["score"]  # was float(dict)
+
+    plain = CompetitionReport(competition_id="x", score=0.5, submission_path="s", **fields)
+    assert plain.to_dict()["score"] == "0.5"  # unchanged for numeric scores
+    assert CompetitionReport.from_dict(plain.to_dict()).score == 0.5
