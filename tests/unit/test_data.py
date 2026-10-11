@@ -45,8 +45,8 @@ def test_downloading_competition_dataset_downloads_a_zip_file(
     assert zipfile.suffix == ".zip"
 
 
-# @pytest.mark.skipif(in_ci(), reason="Avoid rate limits in CI.")
-# @pytest.mark.parametrize("competition_id", fast_competitions)
+@pytest.mark.skipif(in_ci(), reason="Avoid rate limits in CI.")
+@pytest.mark.parametrize("competition_id", fast_competitions)
 def test_preparing_competition_dataset_creates_non_empty_public_and_private_directories(
     competition_id: str,
     no_cache: bool,
