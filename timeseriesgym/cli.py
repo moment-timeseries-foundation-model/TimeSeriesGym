@@ -516,16 +516,15 @@ def main():
         # imported here for the same reason as the judge: deepeval is only needed for this command
         from timeseriesgym.reasonableness import evaluate_reasonableness
 
-        result = evaluate_reasonableness(
-            str(code_folder), model=args.model, verbose=args.verbose
-        )
+        result = evaluate_reasonableness(str(code_folder), model=args.model, verbose=args.verbose)
 
         if args.json:
             print(json.dumps(result.to_dict(), indent=2))
         else:
             logger.info("Reasonableness evaluation results:")
             logger.info(f"  Is Reasonable: {result.is_reasonable}")
-            logger.info(f"  Score: {result.score:.4f}")
+            score = "not evaluated" if result.score is None else f"{result.score:.4f}"
+            logger.info(f"  Score: {score}")
             logger.info(f"  Threshold: {result.threshold:.4f}")
             logger.info(f"  Has Suspicious Patterns: {result.has_suspicious_patterns}")
             logger.info(f"  Has Modeling Patterns: {result.has_modeling_patterns}")

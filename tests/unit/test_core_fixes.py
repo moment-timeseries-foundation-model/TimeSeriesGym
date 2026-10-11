@@ -528,3 +528,21 @@ def test_judge_json_output_survives_parallel_evaluations(tmp_path, monkeypatch, 
         sys.stdout = stdout
     printed = json.loads(capsys.readouterr().out)
     assert printed["summary"] == {"total_artifacts": 2, "total_criteria": 2, "passed_criteria": 2}
+
+
+def test_reasonableness_without_an_api_key_is_not_a_pass(tmp_path, monkeypatch, capsys):
+    reasonableness = importlib.import_module("timeseriesgym.reasonableness")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(reasonableness, "load_dotenv", lambda: None)
+    (tmp_path / "copy.py").write_text("import shutil\nshutil.copy('sample_submission.csv', 's')\n")
+    result = reasonableness.evaluate_reasonableness(str(tmp_path))
+    assert result.is_reasonable is None and result.score is None  # was True and 1.0
+    assert "OPENAI_API_KEY" in result.reason
+
+    from timeseriesgym import cli
+
+    for extra in ([], ["--json"]):  # the CLI formatted the score with :.4f
+        argv = ["timeseriesgym", "evaluate-reasonableness", str(tmp_path), *extra]
+        monkeypatch.setattr(sys, "argv", argv)
+        cli.main()
+    assert json.loads(capsys.readouterr().out)["is_reasonable"] is None
