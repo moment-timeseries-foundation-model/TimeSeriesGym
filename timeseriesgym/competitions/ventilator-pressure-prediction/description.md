@@ -14,12 +14,12 @@ Photo by [Nino Liverani](https://unsplash.com/@ninoliverani?utm_source=unsplash
 
 ## Evaluation
 
-The competition will be scored as the mean absolute error between the predicted and actual pressures during the inspiratory phase of each breath. The expiratory phase is not scored. The score is given by:
+The competition will be scored as the mean absolute error between the predicted and actual pressures during the inspiratory phase of each breath, that is the time steps whose `u_out` is 0. The expiratory phase is not scored, but you must still predict a pressure for every `id`. The score is given by:
 
 $$
-|X-Y|
+\frac{1}{n}\sum_{i=1}^{n}|X_i-Y_i|
 $$
-where $X$ is the vector of predicted pressure and $Y$ is the vector of actual pressures across all breaths in the test set.
+where the sum runs over the $n$ scored time steps of all breaths in the test set, $X_i$ is the predicted pressure and $Y_i$ is the actual pressure.
 
 ## Submission File
 
