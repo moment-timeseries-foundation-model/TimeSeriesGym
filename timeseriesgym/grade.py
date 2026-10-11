@@ -1,5 +1,6 @@
 """High-level grading functionality"""
 
+import ast
 import json
 from datetime import datetime
 from pathlib import Path
@@ -268,11 +269,27 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
     )
 
 
+def _validate_python_source(submission: Path) -> tuple[bool, str]:
+    try:
+        ast.parse(submission.read_bytes(), filename=submission.name)
+    except Exception as e:  # SyntaxError, ValueError (null bytes), RecursionError, ...
+        return False, f"Submission invalid! {submission.name} is not valid Python: {e}"
+    return (
+        True,
+        "Submission is valid. (It was only parsed: its classes and functions are run and "
+        "checked when the submission is graded.)",
+    )
+
+
 def validate_submission(submission: Path, competition: Competition) -> tuple[bool, str]:
     """
     Validates a submission for the given competition by actually running the competition grader.
     This is designed for end users, not developers (we assume that the competition grader is
     correctly implemented and use that for validating the submission, not the other way around).
+
+    The in-container grading server runs this as root on files the agent uploads, so agent code
+    is never imported here: code submissions are only parsed, and pickles are decoded with an
+    allowlist of plain types (see `load_submissions`).
     """
     if not submission.is_file():
         return False, f"Submission invalid! Submission file {submission} does not exist."
@@ -286,18 +303,16 @@ def validate_submission(submission: Path, competition: Competition) -> tuple[boo
 
     _ensure_prepared(competition)
 
+    if competition.coding_config is not None:
+        # importing the submission (as the code grader does) would run it as root
+        return _validate_python_source(submission)
+
     try:
         if competition.hyperparameter_search_config is not None and submission.is_dir():
             grading_input = GradingInput(
                 submission_folder_path=submission,
                 answers=load_answers(competition.answers),
                 hyperparameter_search_config=competition.hyperparameter_search_config,
-            )
-        elif competition.coding_config is not None and submission.is_file():
-            grading_input = GradingInput(
-                submission_file_path=submission,
-                answers=load_answers(competition.answers),
-                coding_config=competition.coding_config,
             )
         elif submission.is_file():
             grading_input = GradingInput(

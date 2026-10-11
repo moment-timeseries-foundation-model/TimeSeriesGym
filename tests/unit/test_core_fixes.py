@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from timeseriesgym.grade import validate_submission
+from timeseriesgym.registry import Registry
 from timeseriesgym.utils import (
     InvalidSubmissionError,
     load_models,
@@ -62,3 +64,28 @@ def test_pickled_submissions_cannot_run_code(tmp_path):
     with pytest.raises(InvalidSubmissionError, match="references"):
         load_submissions(path)
     assert not marker.exists()
+
+
+# ---------------------------------------------------------------- validation (grading server)
+
+
+def _prepared(data_dir: Path, competition_id: str, answers: bytes):
+    """A competition whose private answers are `answers`, as `is_dataset_prepared` expects."""
+    competition = Registry(data_dir).get_competition(competition_id)
+    competition.answers.parent.mkdir(parents=True, exist_ok=True)
+    competition.answers.write_bytes(answers)
+    return competition
+
+
+def test_validation_only_parses_code_submissions(tmp_path):
+    competition = _prepared(tmp_path / "data", "stomp-R-to-python", b"a,b\n1,2\n")
+    marker = tmp_path / "pwned"
+    submission = tmp_path / "submission.py"
+    submission.write_text(f"import pathlib\npathlib.Path({str(marker)!r}).touch()\n")
+    valid, message = validate_submission(submission, competition)
+    assert valid and "Submission is valid." in message
+    assert not marker.exists()  # the grading server runs as root: importing it ran this
+
+    submission.write_text("def stomp(:\n")
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "not valid Python" in message
