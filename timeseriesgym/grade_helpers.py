@@ -21,6 +21,7 @@ class GradingInput:
     submission_folder_path: Path | None = None
     hyperparameter_search_config: dict | None = None
     solution_file_path: Path | None = None
+    sample_submission_path: Path | None = None
     submission_file_path: Path | None = None
     coding_config: dict | None = None
     feature_enhancement_config: dict | None = None

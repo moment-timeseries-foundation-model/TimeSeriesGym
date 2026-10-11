@@ -267,20 +267,29 @@ def grade_relative_improvement(
     answers: pd.DataFrame,
     hyperparameter_search_config: dict,
     solution_file_path: Path | None,
+    sample_submission_path: Path | None,
     grade_fn: Callable[[pd.DataFrame, pd.DataFrame], float],
     lower_is_better: bool,
     packages_to_look_for: list[str] | None = None,
 ) -> float:
     """
     Grades a hyperparameter search as the relative improvement of the improved submission's
-    score over the baseline submission's score, negated when lower scores are better.
+    score over the score of the challenge's sample submission, negated when lower scores are
+    better. The baseline files are written by the agent, so they only decide whether the
+    submission is valid: the baseline's score does not count. Raises ValueError if the sample
+    submission (`sample_submission_path`, the challenge's own file) is missing.
 
     The solution code is required: `solution_file_path` is a script, or a directory whose `.py`
-    files are searched. Raises InvalidSubmissionError without it. Returns -inf if the solution
-    shows no hyperparameter search with one of `packages_to_look_for` (see
-    `have_hyperparameter_searching_attempt` for the default list), or if the two models have
-    the same hyperparameters.
+    files are searched. Raises InvalidSubmissionError without it, or if the baseline or improved
+    submission cannot be graded. Returns -inf if the solution shows no hyperparameter search
+    with one of `packages_to_look_for` (see `have_hyperparameter_searching_attempt` for the
+    default list), or if the two models have the same hyperparameters.
     """
+    if sample_submission_path is None or not Path(sample_submission_path).is_file():
+        raise ValueError(
+            "The sample submission is required to grade a hyperparameter search, but none was "
+            f"found at {sample_submission_path}."
+        )
     # Checked first, before any submitted model is loaded.
     if solution_file_path is None or not Path(solution_file_path).exists():
         raise InvalidSubmissionError(
@@ -316,13 +325,15 @@ def grade_relative_improvement(
         logger.info("[INFO] The hyperparameters are the same as the baseline model.")
         return np.inf * -1
 
-    baseline_score = grade_fn(baseline_submission, answers)
+    baseline_score = grade_fn(baseline_submission, answers)  # must be gradable; does not count
+    sample_score = grade_fn(load_submissions(Path(sample_submission_path)), answers)
     improved_score = grade_fn(improved_submission, answers)
 
     sign = -1 if lower_is_better else 1
-    improvement = sign * (improved_score - baseline_score) / baseline_score
-    logger.info(f"[INFO] Baseline score: {baseline_score}")
+    improvement = sign * (improved_score - sample_score) / sample_score
+    logger.info(f"[INFO] Baseline score (not counted): {baseline_score}")
+    logger.info(f"[INFO] Sample submission score: {sample_score}")
     logger.info(f"[INFO] Improved score: {improved_score}")
-    logger.info(f"[INFO] Improvement: {improvement}")
+    logger.info(f"[INFO] Improvement over the sample submission: {improvement}")
 
     return improvement
