@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 
 
 def main():
+    competition_ids = registry.list_competition_ids()  # listed in the --competition-id help texts
     parser = argparse.ArgumentParser(description="Runs agents on Kaggle competitions.")
     subparsers = parser.add_subparsers(dest="command", help="Sub-command to run.")
 
@@ -33,7 +34,7 @@ def main():
     parser_prepare.add_argument(
         "-c",
         "--competition-id",
-        help=f"ID of the competition to prepare. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to prepare. Valid options: {competition_ids}",
         type=str,
         required=False,
     )
@@ -149,7 +150,7 @@ def main():
     )
     parser_grade_sample.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_sample.add_argument(
@@ -171,7 +172,7 @@ def main():
     )
     parser_grade_model.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_model.add_argument(
@@ -200,7 +201,7 @@ def main():
     )
     parser_grade_code.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_code.add_argument(
@@ -222,7 +223,7 @@ def main():
     )
     parser_grade_fe.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_fe.add_argument(
@@ -252,7 +253,7 @@ def main():
         "--competition-id",
         help=(
             "Name of the competition to download the leaderboard for. Valid options: "
-            f"{registry.list_competition_ids()}"
+            f"{competition_ids}"
         ),
         type=str,
         required=False,
@@ -276,7 +277,7 @@ def main():
     parser_cleanup.add_argument(
         "-c",
         "--competition-id",
-        help=f"ID of the competition to clean up. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to clean up. Valid options: {competition_ids}",
         type=str,
         required=False,
     )
