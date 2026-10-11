@@ -25,6 +25,43 @@ from timeseriesgym.utils import (
 logger = get_logger(__name__)
 
 
+def _ensure_prepared(competition: Competition) -> None:
+    if not is_dataset_prepared(competition, grading_only=True):
+        raise ValueError(
+            f"Dataset for competition `{competition.id}` is not prepared! "
+            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
+        )
+
+
+def _competition_report(
+    competition: Competition,
+    score,
+    rank_info: dict,
+    submission_path: Path,
+    submission_exists: bool,
+    valid_submission: bool,
+    is_lower_better: bool | None,
+) -> CompetitionReport:
+    return CompetitionReport(
+        competition_id=competition.id,
+        score=score,
+        gold_threshold=rank_info["gold_threshold"],
+        silver_threshold=rank_info["silver_threshold"],
+        bronze_threshold=rank_info["bronze_threshold"],
+        median_threshold=rank_info["median_threshold"],
+        any_medal=rank_info["gold_medal"] or rank_info["silver_medal"] or rank_info["bronze_medal"],
+        gold_medal=rank_info["gold_medal"],
+        silver_medal=rank_info["silver_medal"],
+        bronze_medal=rank_info["bronze_medal"],
+        above_median=rank_info["above_median"],
+        submission_exists=submission_exists,
+        valid_submission=valid_submission,
+        is_lower_better=is_lower_better,
+        created_at=datetime.now(),
+        submission_path=str(submission_path),
+    )
+
+
 def grade_jsonl(
     path_to_submissions: Path,
     output_dir: Path,
@@ -73,11 +110,7 @@ def grade_jsonl(
 def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
     """Grades a submission for the given competition."""
 
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
 
     if competition.sample_submission.suffix != path_to_submission.suffix:
         raise InvalidSubmissionError(
@@ -85,7 +118,6 @@ def grade_sample(path_to_submission: Path, competition: Competition) -> Competit
             f"the expected file extension {competition.sample_submission.suffix}"
         )
 
-    score = None
     submission_exists = path_to_submission.is_file()
     submission_file = load_submissions(path_to_submission)
     answers = load_answers(competition.answers)
@@ -102,23 +134,14 @@ def grade_sample(path_to_submission: Path, competition: Competition) -> Competit
         rank_info = get_null_rank_info()
         is_lower_better = None
 
-    return CompetitionReport(
-        competition_id=competition.id,
-        score=score,
-        gold_threshold=rank_info["gold_threshold"],
-        silver_threshold=rank_info["silver_threshold"],
-        bronze_threshold=rank_info["bronze_threshold"],
-        median_threshold=rank_info["median_threshold"],
-        any_medal=rank_info["gold_medal"] or rank_info["silver_medal"] or rank_info["bronze_medal"],
-        gold_medal=rank_info["gold_medal"],
-        silver_medal=rank_info["silver_medal"],
-        bronze_medal=rank_info["bronze_medal"],
-        above_median=rank_info["above_median"],
+    return _competition_report(
+        competition,
+        score,
+        rank_info,
+        submission_path=path_to_submission,
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         is_lower_better=is_lower_better,
-        created_at=datetime.now(),
-        submission_path=str(path_to_submission),
     )
 
 
@@ -132,13 +155,8 @@ def grade_hyperparameter_search(
     specified in description
     competition: Competition object
     """
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
 
-    score = None
     answers = load_answers(competition.answers)
     hyperparameter_search_config = competition.hyperparameter_search_config
 
@@ -164,23 +182,14 @@ def grade_hyperparameter_search(
     rank_info = get_null_rank_info()
     is_lower_better = False
 
-    return CompetitionReport(
-        competition_id=competition.id,
-        score=score,
-        gold_threshold=rank_info["gold_threshold"],
-        silver_threshold=rank_info["silver_threshold"],
-        bronze_threshold=rank_info["bronze_threshold"],
-        median_threshold=rank_info["median_threshold"],
-        any_medal=rank_info["gold_medal"] or rank_info["silver_medal"] or rank_info["bronze_medal"],
-        gold_medal=rank_info["gold_medal"],
-        silver_medal=rank_info["silver_medal"],
-        bronze_medal=rank_info["bronze_medal"],
-        above_median=rank_info["above_median"],
+    return _competition_report(
+        competition,
+        score,
+        rank_info,
+        submission_path=path_to_submission_folder,
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         is_lower_better=is_lower_better,
-        created_at=datetime.now(),
-        submission_path=str(path_to_submission_folder),
     )
 
 
@@ -192,11 +201,7 @@ def grade_feature_enhancement(
     """Grades a feature-enhancement submission folder (submission.csv plus the code, config
     and TensorBoard logs it was produced with). The solution files default to the submission
     folder. The score is a dict of sub-scores including `overall_score`."""
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
     if competition.feature_enhancement_config is None:
         raise ValueError(f"`{competition.id}` has no feature_enhancement_config")
 
@@ -207,35 +212,21 @@ def grade_feature_enhancement(
         solution_files_path=Path(path_to_solution_files or path_to_submission_folder),
     )
     score = competition.grader(grading_input)
-    rank_info = get_null_rank_info()  # dict scores are not on a leaderboard's scale
-    return CompetitionReport(
-        competition_id=competition.id,
-        score=score,
-        gold_threshold=rank_info["gold_threshold"],
-        silver_threshold=rank_info["silver_threshold"],
-        bronze_threshold=rank_info["bronze_threshold"],
-        median_threshold=rank_info["median_threshold"],
-        any_medal=False,
-        gold_medal=False,
-        silver_medal=False,
-        bronze_medal=False,
-        above_median=False,
+    return _competition_report(
+        competition,
+        score,
+        get_null_rank_info(),  # dict scores are not on a leaderboard's scale
+        submission_path=path_to_submission_folder,
         submission_exists=path_to_submission_folder.is_dir(),
         valid_submission=score is not None,
         is_lower_better=False,
-        created_at=datetime.now(),
-        submission_path=str(path_to_submission_folder),
     )
 
 
 def grade_code(path_to_submission: Path, competition: Competition) -> CompetitionReport:
     """Grades a code submission for the given competition."""
 
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
 
     if competition.sample_submission.suffix != path_to_submission.suffix:
         raise InvalidSubmissionError(
@@ -243,7 +234,6 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
             f"the expected file extension {competition.sample_submission.suffix}"
         )
 
-    scores = None
     submission_exists = path_to_submission.is_file()
     answers = load_answers(competition.answers)
     coding_config = competition.coding_config
@@ -294,11 +284,7 @@ def validate_submission(submission: Path, competition: Competition) -> tuple[boo
             f"extension.",
         )
 
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
 
     try:
         if competition.hyperparameter_search_config is not None and submission.is_dir():
