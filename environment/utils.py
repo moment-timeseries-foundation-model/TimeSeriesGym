@@ -92,12 +92,16 @@ def extract_from_container_sysbox(container: Container, container_file_path: str
                 self.leftover = b""
 
             def readinto(self, b):
-                try:
-                    chunk = next(self.generator)
-                except StopIteration:
-                    return 0  # EOF
-                n = len(chunk)
-                b[:n] = chunk
+                # docker's chunks can be larger than the buffer tarfile reads into: keep the
+                # rest for the next call (and skip empty chunks, which would read as EOF)
+                while not self.leftover:
+                    try:
+                        self.leftover = next(self.generator)
+                    except StopIteration:
+                        return 0  # EOF
+                n = min(len(b), len(self.leftover))
+                b[:n] = self.leftover[:n]
+                self.leftover = self.leftover[n:]
                 return n
 
         stream_wrapper = StreamWrapper(exec_result.output)

@@ -634,3 +634,26 @@ def test_runs_whose_agent_fails_are_not_successful(tmp_path, monkeypatch, exit_c
             run()
     assert saved == [tmp_path]  # outputs are still extracted
     assert api.created[0][2] == "nonroot"
+
+
+# ---------------------------------------------------------------- container output extraction
+
+
+def test_sysbox_extraction_handles_large_stream_chunks(tmp_path):
+    import io
+    import tarfile
+
+    from environment.utils import extract_from_container_sysbox
+
+    buf = io.BytesIO()
+    payload = bytes(range(256)) * 200  # 51 kB, larger than tarfile's 10 kB reads
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        info = tarfile.TarInfo("submission/submission.csv")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    data = buf.getvalue()
+    chunks = [b"", data[:7], data[7:]]  # an empty chunk, a small one, then one large chunk
+    container = SimpleNamespace(exec_run=lambda **kw: SimpleNamespace(output=iter(chunks)))
+    extract_from_container_sysbox(container, "/home/submission", tmp_path)
+    # a chunk larger than the read buffer raised ValueError, which the caller swallowed
+    assert (tmp_path / "submission" / "submission.csv").read_bytes() == payload
