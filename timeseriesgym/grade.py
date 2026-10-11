@@ -2,6 +2,8 @@
 
 import ast
 import json
+import numbers
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -281,16 +283,73 @@ def _validate_python_source(submission: Path) -> tuple[bool, str]:
     )
 
 
+def _prediction_grader(competition: Competition):
+    """The function that scores a single prediction file. Hyperparameter-search and
+    feature-enhancement graders take a whole folder; their modules score each of its prediction
+    files with `grade`."""
+    if (
+        competition.hyperparameter_search_config is None
+        and competition.feature_enhancement_config is None
+    ):
+        return competition.grader.grade_fn
+    return getattr(sys.modules[competition.grader.grade_fn.__module__], "grade", None)
+
+
+def _validate_prediction_file(submission: Path, competition: Competition) -> tuple[bool, str]:
+    grade_fn = _prediction_grader(competition)
+    if grade_fn is None:
+        return True, "Submission is valid. (It is checked when the submission folder is graded.)"
+    try:
+        score = grade_fn(
+            submission=load_submissions(submission), answers=load_answers(competition.answers)
+        )
+    except Exception as e:
+        return (
+            False,
+            f"Submission invalid! The attempt to grade the submission has resulted in the "
+            f"following error message:\n{e}",
+        )
+    if score is None or (isinstance(score, numbers.Real) and not np.isfinite(score)):
+        return False, f"Submission invalid! The grader could not score it (score: {score})."
+    return True, "Submission is valid."
+
+
+def _validate_hyperparameter_search_folder(
+    folder: Path, competition: Competition
+) -> tuple[bool, str]:
+    config = competition.hyperparameter_search_config
+    submissions = [config["baseline_submission_name"], config["improved_submission_name"]]
+    models = [config["baseline_model_name"], config["improved_model_name"]]
+    missing = [name for name in submissions + models if not (folder / name).is_file()]
+    if missing:
+        return False, f"Submission invalid! {folder} is missing {', '.join(missing)}."
+    for name in submissions:
+        valid, message = _validate_prediction_file(folder / name, competition)
+        if not valid:
+            return False, f"{name}: {message}"
+    # the models are agent-written pickles / TorchScript: never loaded here
+    return (
+        True,
+        "Submission is valid. (The models are loaded and compared when the submission is graded.)",
+    )
+
+
 def validate_submission(submission: Path, competition: Competition) -> tuple[bool, str]:
     """
     Validates a submission for the given competition by actually running the competition grader.
     This is designed for end users, not developers (we assume that the competition grader is
     correctly implemented and use that for validating the submission, not the other way around).
+    For challenges whose submission is a folder, a single file is validated as one of its
+    prediction files.
 
     The in-container grading server runs this as root on files the agent uploads, so agent code
-    is never imported here: code submissions are only parsed, and pickles are decoded with an
-    allowlist of plain types (see `load_submissions`).
+    is never imported here: code submissions are only parsed, models are not loaded, and pickles
+    are decoded with an allowlist of plain types (see `load_submissions`).
     """
+    if competition.hyperparameter_search_config is not None and submission.is_dir():
+        _ensure_prepared(competition)
+        return _validate_hyperparameter_search_folder(submission, competition)
+
     if not submission.is_file():
         return False, f"Submission invalid! Submission file {submission} does not exist."
 
@@ -307,33 +366,7 @@ def validate_submission(submission: Path, competition: Competition) -> tuple[boo
         # importing the submission (as the code grader does) would run it as root
         return _validate_python_source(submission)
 
-    try:
-        if competition.hyperparameter_search_config is not None and submission.is_dir():
-            grading_input = GradingInput(
-                submission_folder_path=submission,
-                answers=load_answers(competition.answers),
-                hyperparameter_search_config=competition.hyperparameter_search_config,
-            )
-        elif submission.is_file():
-            grading_input = GradingInput(
-                submission_file=load_submissions(submission),
-                answers=load_answers(competition.answers),
-            )
-        else:
-            return (
-                False,
-                "Submission invalid! If the submission is a directory "
-                "only for hyperparameter search tasks",
-            )
-        competition.grader(grading_input)
-    except Exception as e:
-        return (
-            False,
-            f"Submission invalid! The attempt to grade the submission has resulted in the "
-            f"following error message:\n{e}",
-        )
-
-    return True, "Submission is valid."
+    return _validate_prediction_file(submission, competition)
 
 
 def aggregate_reports(competition_reports: list[CompetitionReport]) -> dict:

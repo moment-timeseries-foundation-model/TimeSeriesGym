@@ -44,17 +44,19 @@ def _cik_like_result():
     for task in ("TaskA", "TaskB"):
         for seed in range(1, 4):
             result[task].append({"seed": seed, "score": np.float64(seed / 7)})
-    result["arrays"] = [np.arange(3.0), np.ones((2, 2), dtype=np.int32), {1, 2}, (1.5, None)]
     return result
 
 
 @pytest.mark.parametrize("protocol", [2, 3, 4, 5])
 def test_pickled_submissions_of_plain_data_load(tmp_path, protocol):
     path = tmp_path / "submission.pkl"
-    path.write_bytes(pickle.dumps(_cik_like_result(), protocol=protocol))
+    result = _cik_like_result()
+    result["other"] = [np.arange(3.0), np.ones((2, 2), dtype=np.int32), {1, 2}, (1.5, None)]
+    path.write_bytes(pickle.dumps(result, protocol=protocol))
     loaded = load_submissions(path)
-    assert isinstance(loaded, defaultdict) and loaded["TaskA"] == _cik_like_result()["TaskA"]
-    assert np.array_equal(loaded["arrays"][0], np.arange(3.0))
+    assert isinstance(loaded, defaultdict) and loaded["TaskA"] == result["TaskA"]
+    assert np.array_equal(loaded["other"][1], result["other"][1])
+    assert loaded["other"][2:] == [{1, 2}, (1.5, None)]
 
 
 def test_pickled_submissions_cannot_run_code(tmp_path):
@@ -89,3 +91,78 @@ def test_validation_only_parses_code_submissions(tmp_path):
     submission.write_text("def stomp(:\n")
     valid, message = validate_submission(submission, competition)
     assert not valid and "not valid Python" in message
+
+
+def test_validation_does_not_unpickle_code(tmp_path):
+    answers = pickle.dumps(_cik_like_result())
+    competition = _prepared(tmp_path / "data", "context-is-key-moirai", answers)
+    submission = tmp_path / "submission.pkl"
+    submission.write_bytes(answers)
+    assert validate_submission(submission, competition) == (True, "Submission is valid.")
+
+    marker = tmp_path / "pwned"
+    submission.write_bytes(pickle.dumps({"TaskA": [_Payload(marker)]}))
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "references" in message
+    assert not marker.exists()
+
+
+SPACESHIP_ANSWERS = b"PassengerId,Transported\n0001_01,True\n0002_01,False\n0003_01,True\n"
+
+
+def test_validation_reports_the_grader_result(tmp_path, monkeypatch):
+    competition = _prepared(tmp_path / "data", "spaceship-titanic", SPACESHIP_ANSWERS)
+    submission = tmp_path / "submission.csv"
+    submission.write_bytes(SPACESHIP_ANSWERS)
+    # was "unexpected keyword argument 'submission_file'" for every file
+    assert validate_submission(submission, competition) == (True, "Submission is valid.")
+
+    submission.write_text("PassengerId,Prediction\n0001_01,True\n0002_01,False\n0003_01,True\n")
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "Transported" in message
+
+    for score in (None, float("nan")):  # was ignored: everything that loaded was "valid"
+        monkeypatch.setattr(competition.grader, "grade_fn", lambda submission, answers, s=score: s)
+        valid, message = validate_submission(submission, competition)
+        assert not valid and "could not score" in message
+
+
+HPS_ID = "optiver-realized-volatility-prediction-hyperparameter-search"
+OPTIVER_ANSWERS = b"row_id,target\n0-1,0.002\n0-2,0.003\n"
+
+
+def test_validation_of_hyperparameter_search_folders(tmp_path):
+    competition = _prepared(tmp_path / "data", HPS_ID, OPTIVER_ANSWERS)
+    folder = tmp_path / "submission"
+    folder.mkdir()
+    for name in ("baseline_submission.csv", "submission.csv"):
+        (folder / name).write_bytes(OPTIVER_ANSWERS)
+    marker = tmp_path / "pwned"
+    (folder / "baseline_model.pkl").write_bytes(pickle.dumps(_Payload(marker)))
+    valid, message = validate_submission(folder, competition)
+    assert not valid and "model.pkl" in message  # was "does not exist" for every folder
+
+    (folder / "model.pkl").write_bytes(pickle.dumps(_Payload(marker)))
+    valid, message = validate_submission(folder, competition)
+    assert valid and "Submission is valid." in message
+    assert not marker.exists()  # models are not unpickled by the root server
+
+    (folder / "submission.csv").write_text("row_id,target\n0-1,0.002\n")
+    valid, message = validate_submission(folder, competition)
+    assert not valid and message.startswith("submission.csv: Submission invalid!")
+
+    # the grading server receives single files: validated as one of the prediction files
+    assert validate_submission(folder / "baseline_submission.csv", competition)[0]
+    assert not validate_submission(folder / "submission.csv", competition)[0]
+
+
+def test_validation_of_feature_enhancement_prediction_files(tmp_path):
+    answers = b"ecg_id,label\n1,NORM\n2,MI\n"
+    competition = _prepared(
+        tmp_path / "data", "ptb-xl-classification-challenge-feature-enhancement", answers
+    )
+    submission = tmp_path / "submission.csv"
+    submission.write_bytes(answers)
+    assert validate_submission(submission, competition) == (True, "Submission is valid.")
+    submission.write_text("ecg_id,prediction\n1,NORM\n2,MI\n")
+    assert not validate_submission(submission, competition)[0]
