@@ -53,17 +53,17 @@ Your submission directory must contain exactly these four files:
 | `baseline_model.pt`        | TorchScript file for baseline model    |
 | `model.pt`                 | TorchScript file for improved model    |
 
-> **Important:** You are required to conduct hyperparameter optimization, or the submission will result in an **invalid submission**. The grader compares the two TorchScript models by their architecture (such as their layers and the shapes of their parameters), so the improved model must differ from the baseline in its architecture: models that differ only in training settings (such as learning rate, number of epochs, batch size or optimizer) count as having the same hyperparameters.
+> **Important:** You are required to conduct hyperparameter optimization, or the submission will result in an **invalid submission**. Keep the code of your hyperparameter search in `.py` files in `/home/code`: this solution code is required, and the grader checks it for the search. The grader compares the two TorchScript models by their architecture (such as their layers and the shapes of their parameters), so the improved model must differ from the baseline in its architecture: models that differ only in training settings (such as learning rate, number of epochs, batch size or optimizer) count as having the same hyperparameters.
 
 ## Evaluation
 
 ### Metric
 
-Submissions are evaluated based on the relative improvement in classification accuracy (the fraction of predicted labels that are correct) of your improved model over your baseline model, both computed on the test set from `submission.csv` and `baseline_submission.csv`:
+Submissions are evaluated based on the relative improvement in classification accuracy (the fraction of predicted labels that are correct) of your improved model over the sample submission, both computed on the test set from `submission.csv` and `sample_submission.csv`:
 
-$$\text{score} = \frac{\text{accuracy}_{improved} - \text{accuracy}_{baseline}}{\text{accuracy}_{baseline}}$$
+$$\text{score} = \frac{\text{accuracy}_{improved} - \text{accuracy}_{sample}}{\text{accuracy}_{sample}}$$
 
-The submission is invalid if the grader finds that the two models have the same hyperparameters, or finds no hyperparameter search in your solution file.
+The sample submission predicts class 0 for every ECG, so its accuracy is the share of test ECGs in class 0. Higher scores are better. Your baseline model and `baseline_submission.csv` do not change the score, but they are required: the submission is invalid if the grader finds that the two models have the same hyperparameters, if `baseline_submission.csv` or `submission.csv` is not a valid submission, or if your solution code (the `.py` files in `/home/code`) is missing or shows no hyperparameter search.
 
 ### Submission Format
 

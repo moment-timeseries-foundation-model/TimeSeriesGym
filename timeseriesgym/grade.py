@@ -183,12 +183,13 @@ def grade_hyperparameter_search(
         answers=answers,
         hyperparameter_search_config=hyperparameter_search_config,
         solution_file_path=Path(path_to_solution) if path_to_solution else None,
+        sample_submission_path=competition.sample_submission,
     )
     score = competition.grader(grading_input)
 
     submission_exists = path_to_submission_folder.is_dir()
     valid_submission = score is not None and np.isfinite(score)
-    # The score is a relative improvement over the submitted baseline, not a value on the
+    # The score is a relative improvement over the sample submission, not a value on the
     # (inherited) competition leaderboard's scale, so it is not ranked: ranking it against an
     # RMSPE leaderboard counted -inf (an invalid search) as a gold medal.
     rank_info = get_null_rank_info()
