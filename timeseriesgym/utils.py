@@ -146,21 +146,17 @@ def load_answers(path_to_answers: Path) -> Any:
         )
 
 
-# The only globals a pickled submission may reference: containers, numbers and numpy arrays
-# (both numpy 1.x and 2.x module paths). Unpickling anything else can run arbitrary code.
+# The only globals a pickled submission may reference: containers and numbers, including numpy
+# scalars (numpy 1.x and 2.x module paths). Unpickling anything else can run arbitrary code;
+# numpy arrays are left out too, as their shape (and so their memory) is set by the file.
 _PLAIN_PICKLE_GLOBALS = {
     *(("builtins", name) for name in ("list", "dict", "tuple", "set", "frozenset", "complex")),
     ("collections", "defaultdict"),
     ("collections", "OrderedDict"),
     ("_codecs", "encode"),  # bytes in protocol 2 pickles
     ("numpy", "dtype"),
-    ("numpy", "ndarray"),
-    *(
-        (f"numpy.{core}.multiarray", name)
-        for core in ("core", "_core")
-        for name in ("scalar", "_reconstruct")
-    ),
-    *((f"numpy.{core}.numeric", "_frombuffer") for core in ("core", "_core")),
+    ("numpy.core.multiarray", "scalar"),
+    ("numpy._core.multiarray", "scalar"),
 }
 
 
@@ -171,7 +167,7 @@ class _PlainPickleUnpickler(pickle.Unpickler):
         if (module, name) not in _PLAIN_PICKLE_GLOBALS:
             raise InvalidSubmissionError(
                 f"Submission invalid! The pickle references `{module}.{name}`; submissions may "
-                "only contain plain containers, numbers, strings and numpy arrays."
+                "only contain plain containers, strings and numbers (numpy scalars included)."
             )
         return super().find_class(module, name)
 

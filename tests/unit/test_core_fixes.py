@@ -66,12 +66,18 @@ def _cik_like_result():
 def test_pickled_submissions_of_plain_data_load(tmp_path, protocol):
     path = tmp_path / "submission.pkl"
     result = _cik_like_result()
-    result["other"] = [np.arange(3.0), np.ones((2, 2), dtype=np.int32), {1, 2}, (1.5, None)]
+    result["other"] = [np.float32(2.5), np.int64(3), {1, 2}, frozenset("a"), (1.5, None, "s", b"b")]
     path.write_bytes(pickle.dumps(result, protocol=protocol))
     loaded = load_submissions(path)
-    assert isinstance(loaded, defaultdict) and loaded["TaskA"] == result["TaskA"]
-    assert np.array_equal(loaded["other"][1], result["other"][1])
-    assert loaded["other"][2:] == [{1, 2}, (1.5, None)]
+    assert isinstance(loaded, defaultdict) and loaded == result
+    assert type(loaded["TaskA"][0]["score"]) is np.float64
+
+
+def test_pickled_submissions_cannot_hold_arrays(tmp_path):
+    path = tmp_path / "submission.pkl"
+    path.write_bytes(pickle.dumps({"TaskA": [np.zeros(3)]}))
+    with pytest.raises(InvalidSubmissionError, match="references"):  # sized by the file
+        load_submissions(path)
 
 
 def test_pickled_submissions_cannot_run_code(tmp_path):
