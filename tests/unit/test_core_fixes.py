@@ -2,6 +2,7 @@
 
 import functools
 import importlib
+import importlib.util
 import json
 import os
 import pickle
@@ -657,3 +658,61 @@ def test_sysbox_extraction_handles_large_stream_chunks(tmp_path):
     extract_from_container_sysbox(container, "/home/submission", tmp_path)
     # a chunk larger than the read buffer raised ValueError, which the caller swallowed
     assert (tmp_path / "submission" / "submission.csv").read_bytes() == payload
+
+
+# ---------------------------------------------------------------- familiarity experiment
+
+
+@pytest.fixture
+def relevant_content(monkeypatch):
+    """experiments/familiarity/get_relevant_content.py, with its scraping libraries stubbed."""
+    page = SimpleNamespace(close=lambda: None)
+    browser = SimpleNamespace(new_page=lambda: page, close=lambda: None)
+    playwright = SimpleNamespace(chromium=SimpleNamespace(launch=lambda headless: browser))
+
+    class SyncPlaywright:
+        def __enter__(self):
+            return playwright
+
+        def __exit__(self, *exc):
+            return False
+
+    stubs = {
+        "git": {"Repo": object},
+        "newspaper": {"Article": object},
+        "readability": {"Document": object},
+        "playwright": {},
+        "playwright.sync_api": {"sync_playwright": SyncPlaywright},
+        "get_discussion_posts": {"extract_text_from_div": lambda page, url: f"posts of {url}"},
+    }
+    for name, attrs in stubs.items():
+        monkeypatch.setitem(sys.modules, name, SimpleNamespace(**attrs))
+    path = REPO / "experiments" / "familiarity" / "get_relevant_content.py"
+    spec = importlib.util.spec_from_file_location("get_relevant_content", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_arxiv_sources_cannot_write_outside_their_directory(
+    tmp_path, monkeypatch, relevant_content
+):
+    import io
+    import tarfile
+
+    archive = tmp_path / "source.tar"
+    with tarfile.open(archive, "w") as tar:
+        info = tarfile.TarInfo("../escaped.tex")
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"x"))
+    handler = relevant_content.ArxivHandler("https://arxiv.org/abs/1234.5678")
+    monkeypatch.setattr(handler, "fetch_tex", lambda: str(archive))
+    monkeypatch.setattr(relevant_content.tempfile, "mkdtemp", lambda: str(tmp_path / "extract"))
+    assert handler.extract_text() == ""  # extraction refused; the handler falls back to ""
+    assert not (tmp_path / "escaped.tex").exists()
+
+
+def test_kaggle_resources_are_scraped_from_the_given_url(relevant_content):
+    url = "https://www.kaggle.com/competitions/x/discussion/1"
+    # used the script's global loop variable `link`: NameError when imported
+    assert relevant_content.process_resource(url) == f"posts of {url}"
