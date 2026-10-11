@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from timeseriesgym.utils import InvalidSubmissionError
+
 
 ## evaluation metric
 ## from https://www.kaggle.com/c/m5-forecasting-accuracy/discussion/133834 and edited to get
@@ -142,7 +144,14 @@ def grade(submission: pd.DataFrame, answers: list) -> float:
     df_train = entire_df.iloc[:, :-28]
     df_valid = entire_df.iloc[:, -28:]
 
-    # pre-process submission
+    # pre-process submission: the inner merge below would silently drop unknown ids and keep
+    # repeated ones, shifting rows onto other series
+    if "id" not in submission.columns:
+        raise InvalidSubmissionError("Submission must have an `id` column")
+    if submission["id"].duplicated().any() or set(submission["id"]) != set(
+        df_sample_submission["id"]
+    ):
+        raise InvalidSubmissionError("Submission ids must be the sample's ids, each once")
     submission = (
         submission.merge(df_sample_submission[["id", "order"]], on="id")
         .sort_values("order")

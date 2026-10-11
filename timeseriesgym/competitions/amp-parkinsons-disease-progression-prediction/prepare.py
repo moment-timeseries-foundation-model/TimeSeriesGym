@@ -75,8 +75,18 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
         visit_month = int(parts[1]) + int(parts[5])  # Extract the visit month
         return f"{patient_id}_{visit_month}"
 
+    def extract_updrs_test(prediction_id):
+        # `{patient}_{month}_updrs_{k}_plus_{m}_months` asks for UPDRS part k
+        return "updrs_" + prediction_id.split("_")[3]
+
     predictions["visit_id"] = predictions["prediction_id"].apply(extract_visit_id)
-    test_and_submission = test.merge(predictions, on=["visit_id"], how="left")
+    predictions["updrs_test"] = predictions["prediction_id"].apply(extract_updrs_test)
+    # Join on the target visit *and* the UPDRS part: on visit_id alone, each prediction id was
+    # paired with the ratings of every part at the target visit
+    assert not test.duplicated(["visit_id", "updrs_test"]).any(), "one rating per visit and part"
+    test_and_submission = test.merge(
+        predictions, on=["visit_id", "updrs_test"], how="left", validate="one_to_many"
+    )
 
     # Create the test dataframe
     test_clinical_data = test_and_submission[
@@ -112,6 +122,8 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     assert len(sample_submission) == len(grount_truth)
     assert set(sample_submission.columns) == set(grount_truth.columns)
+    assert grount_truth.prediction_id.is_unique, "one answer per prediction id"
+    assert sample_submission.prediction_id.tolist() == grount_truth.prediction_id.tolist()
 
     # Save train files
     train_peptides.to_csv(public / "train_peptides.csv", index=False)
