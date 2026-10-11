@@ -4,6 +4,7 @@ Each test shows the fixed case and that a valid, correctly ordered submission (o
 prepare) is unaffected.
 """
 
+import ast
 import importlib
 import pickle
 import shutil
@@ -332,6 +333,108 @@ def test_hyperparameter_search_requires_the_solution_code(tmp_path):
         submission_folder_path=folder, answers=answers, hyperparameter_search_config=config
     )
     assert grader(inputs) is None
+
+
+# ---------------------------------------------------------------- feature-enhancement rubric
+
+
+def _fe():
+    return _module("ptb-xl-classification-challenge-feature-enhancement")
+
+
+def test_feature_rubric_judges_every_function_and_class():
+    fe = _fe()
+    full = "def f(x: int, *a: int, k: int = 1, **kw: int) -> int:\n    return x\n"
+    method = "class A:\n    '''A.'''\n\n    def m(self, x: int) -> int:\n        return x\n"
+    partial = full + "def g(y):\n    return y\n"  # one annotated function used to suffice
+    assert fe.has_type_hints(ast.parse(full)) and fe.has_type_hints(ast.parse(method))
+    assert not fe.has_type_hints(ast.parse(partial))
+    assert not fe.has_type_hints(ast.parse("def h(z: int):\n    return z\n"))
+
+    documented = "class A:\n    '''A.'''\n\nclass B:\n    '''B.'''\n"
+    assert fe.has_class_docstrings(ast.parse(documented))
+    assert not fe.has_class_docstrings(ast.parse(documented + "\nclass C:\n    pass\n"))
+
+    body = "    x = 1\n    y = 2\n    z = 3\n    return x + y + z\n"
+    doc = "def d():\n    '''Doc.'''\n" + body
+    assert fe.has_function_docstrings(ast.parse(doc))
+    # an undocumented function starting with an assignment used to be skipped
+    assert not fe.has_function_docstrings(ast.parse(doc + "def u():\n" + body))
+
+
+DOCUMENTED = '''
+def f(x: int) -> int:
+    """F.
+
+    Args:
+        x: x.
+
+    Returns:
+        x.
+    """
+    return x
+'''
+
+
+def test_feature_rubric_needs_both_sections_in_docstrings():
+    fe = _fe()
+    both = DOCUMENTED
+    assert fe.has_docstring_sections([ast.parse(both)], ["Args", "Returns"])
+    args_only = both.replace("Returns:", "Gives:")
+    assert not fe.has_docstring_sections([ast.parse(args_only)], ["Args", "Returns"])
+    in_comments = "# Args:\n# Returns:\nx = 1\n"
+    assert not fe.has_docstring_sections([ast.parse(in_comments)], ["Args", "Returns"])
+    # one section per file still counts, as both appear in the submission's docstrings
+    split = [ast.parse(args_only), ast.parse(both.replace("Args:", "Params:"))]
+    assert fe.has_docstring_sections(split, ["Args", "Returns"])
+
+
+TRAIN = """
+import hydra
+from omegaconf import DictConfig
+from torch.utils.tensorboard import SummaryWriter
+
+
+@hydra.main(config_path="conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    writer = SummaryWriter(log_dir="runs/x")
+    writer.add_scalar("loss", 1.0, 0)
+    writer.add_graph(cfg.model, None)
+"""
+
+
+def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
+    fe = _fe()
+    commented = "\n".join(f"# {line}" for line in TRAIN.splitlines()) + "\nx = 1\n"
+    config = "model:\n  hidden: 8\n"
+    assert fe.evaluate_hydra_usage(TRAIN, config) == pytest.approx(1.0)
+    assert fe.evaluate_hydra_usage(commented, "# model:\nother: 1\n") == 0.0
+    assert fe.evaluate_tensorboard_usage(commented, tmp_path) == 0.0
+
+    assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(0.8)
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "x").write_text("not a log")  # any file used to count as a log
+    assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(0.8)
+    (tmp_path / "runs" / "events.out.tfevents.1.host").write_bytes(b"\0")
+    assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(1.0)
+
+    assert ast.dump(ast.parse(fe.strip_comments(TRAIN + "  # note\n"))) == ast.dump(
+        ast.parse(TRAIN)
+    )
+    assert "#" not in fe.strip_comments("def broken(:  # comment\n")
+
+
+def test_feature_rubric_scores_the_shipped_example_as_before():
+    fe = _fe()
+    example = Path(fe.__file__).parent / "example"
+    model, train = (example / "model.py").read_text(), (example / "train.py").read_text()
+    trees = [ast.parse(model), ast.parse(train)]
+    assert all(fe.has_type_hints(tree) and fe.has_function_docstrings(tree) for tree in trees)
+    assert fe.has_class_docstrings(trees[0])
+    assert fe.has_docstring_sections(trees, ["Args", "Returns"])
+    config = (example / "conf" / "config.yaml").read_text()
+    assert fe.evaluate_hydra_usage(train, config) == pytest.approx(1.0)
+    assert fe.evaluate_tensorboard_usage(train, example) == pytest.approx(0.8)  # no runs/ shipped
 
 
 # ---------------------------------------------------------------- amp prepare
