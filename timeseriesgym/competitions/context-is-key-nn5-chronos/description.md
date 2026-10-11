@@ -22,7 +22,7 @@ In this challenge, you will evaluate the time-series foundation model [Chronos](
 3. **Use Chronos**
    - The `experiment_chronos` function in `run_baselines.py` demonstrates how to evaluate the full CiK benchmark. Refer to its implementation to understand the repository structure.
 
-4. **Run the evaluation on Chronous-small and save result**
+4. **Run the evaluation on Chronos-small and save result**
    ```python
    import pickle
    from pathlib import Path
