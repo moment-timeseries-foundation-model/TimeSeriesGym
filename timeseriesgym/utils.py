@@ -146,6 +146,42 @@ def load_answers(path_to_answers: Path) -> Any:
         )
 
 
+# The only globals a pickled submission may reference: containers, numbers and numpy arrays
+# (both numpy 1.x and 2.x module paths). Unpickling anything else can run arbitrary code.
+_PLAIN_PICKLE_GLOBALS = {
+    *(("builtins", name) for name in ("list", "dict", "tuple", "set", "frozenset", "complex")),
+    ("collections", "defaultdict"),
+    ("collections", "OrderedDict"),
+    ("_codecs", "encode"),  # bytes in protocol 2 pickles
+    ("numpy", "dtype"),
+    ("numpy", "ndarray"),
+    *(
+        (f"numpy.{core}.multiarray", name)
+        for core in ("core", "_core")
+        for name in ("scalar", "_reconstruct")
+    ),
+    *((f"numpy.{core}.numeric", "_frombuffer") for core in ("core", "_core")),
+}
+
+
+class _PlainPickleUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "__builtin__":  # the name in protocol 0-2 pickles
+            module = "builtins"
+        if (module, name) not in _PLAIN_PICKLE_GLOBALS:
+            raise InvalidSubmissionError(
+                f"Submission invalid! The pickle references `{module}.{name}`; submissions may "
+                "only contain plain containers, numbers, strings and numpy arrays."
+            )
+        return super().find_class(module, name)
+
+
+def load_plain_pickle(file) -> Any:
+    """Unpickles an agent-written file without running its code: only the globals in
+    `_PLAIN_PICKLE_GLOBALS` can be loaded."""
+    return _PlainPickleUnpickler(file).load()
+
+
 def load_submissions(path_to_submission: Path) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
@@ -163,7 +199,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
     elif path_to_submission.suffix.lower() == ".pkl":
         with open(path_to_submission, "rb") as f:
-            return pickle.load(f)
+            return load_plain_pickle(f)
 
     elif path_to_submission.suffix == ".npy":
         return np.load(path_to_submission)
