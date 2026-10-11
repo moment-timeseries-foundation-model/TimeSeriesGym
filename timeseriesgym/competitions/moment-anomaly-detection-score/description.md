@@ -20,7 +20,7 @@ Anomaly detection is commonly approached by reconstructing the input time series
    * `momentfm/models/moment.py` – contains the model implementation.
 
 3. **Load the data and compute reconstructions**
-   Use the MOMENT model to reconstruct the provided input time series. These reconstructions will be used to calculate the anomaly scores. The anomaly score we will use is mean quared error (MSE) between original time series and the reconstruction.
+   Use the MOMENT model to reconstruct the provided input time series. These reconstructions will be used to calculate the anomaly scores. The anomaly score we will use is the squared error between the original time series and the reconstruction, computed at each time step (as in `tutorials/anomaly_detection.ipynb`), so the scores have the same shape as the input data.
 
 ## Files
 
@@ -38,5 +38,5 @@ Submit a NumPy array named `anomaly_score.npy` containing the anomaly scores for
 
 Your submission will be evaluated as follows:
 
-* **Score = 1**: Output matches the reference exactly and is correctly saved.
+* **Score = 1**: Every element of the output matches the reference within the default tolerances of `numpy.isclose`, and the output is correctly saved.
 * **Score = 0**: Output is missing, incorrectly formatted, or manually altered.

@@ -1,7 +1,7 @@
 # UCR Anomaly Detection
 
 ## Overview
-This competition focuses on univariate time series anomaly detection using the UCR Time Series Anomaly Datasets. The collection includes 250 distinct datasets spanning various domains, each presenting a unique anomaly detection challenge.
+This competition focuses on univariate time series anomaly detection using the UCR Time Series Anomaly Datasets. The collection includes 250 distinct datasets spanning various domains, each presenting a unique anomaly detection challenge; this competition uses the five datasets listed in `datasets.txt`.
 
 **IMPORTANT:**
 You have to solve datasets one by one, as they are provided in `datasets.txt` file. Each line is a dataset name. You can pass this name to the `UCRAnomalyDataset` class to load the dataset.
@@ -23,10 +23,11 @@ Submissions are evaluated using the adjusted F1 score, which balances precision 
 The adjusted F1 score addresses a common challenge in time series anomaly detection: the exact boundaries of anomalies are often ambiguous. The evaluation metric works as follows:
 
 1. For each dataset, your model provides an anomaly score for each data point (higher values indicate higher likelihood of anomaly)
-2. The evaluation divides the range of scores into multiple thresholds
-3. At each threshold, predictions are converted to binary (anomaly/not anomaly)
-4. Before calculating the F1 score, predictions are adjusted to account for slight misalignments in anomaly boundaries
+2. The evaluation divides the range of scores (from their minimum to their maximum) into 100 evenly spaced thresholds
+3. At each threshold, predictions are converted to binary (anomaly/not anomaly): points with a score at or above the threshold are anomalies
+4. Before calculating the F1 score, predictions are adjusted to account for slight misalignments in anomaly boundaries: if any point of the true anomalous segment is predicted as an anomaly, the whole segment counts as detected
 5. The F1 score is calculated for each threshold, and the maximum F1 score is used as the final score for that dataset
+6. The overall score is the mean of the dataset scores over all datasets in `datasets.txt`
 
 This adjustment ensures that your model is rewarded for correctly identifying anomalous regions, even if the exact points of anomaly onset/offset are slightly misaligned.
 
@@ -73,7 +74,7 @@ class UCRAnomalyDataset:
 
     def _load_sample_submission(self) -> np.ndarray:
         """Load sample submission for this dataset
-        Contains the anomaly labels for the test set
+        Contains zero-filled placeholder anomaly scores for the test set (the submission format)
         """
         sample_sub_path = self.data_path / "sample_submission.h5"
 
@@ -84,7 +85,7 @@ class UCRAnomalyDataset:
 Here is an example of how to load a single dataset:
 ```python
 # Load a single dataset
-dataset = UCRAnomalyDataset(name="187_UCR_Anomaly_resperation2")
+dataset = UCRAnomalyDataset(name="001_UCR_Anomaly_DISTORTED1sddb40")
 
 # Access the data
 train_data = dataset.train_data  # Normal patterns (no anomalies)

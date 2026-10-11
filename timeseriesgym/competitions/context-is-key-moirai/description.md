@@ -29,7 +29,7 @@ In this challenge you will evaluate the time-series foundation model [MOIRAI](ht
    ```python
    from run_baselines import experiment_moirai
 
-   result, _ = experiment_moirai(model_size="small", n_samples=50)
+   result, _ = experiment_moirai(model_size="small", n_samples=50, output_folder="<output_folder_path>")
    ```
 
 5. **Save your results**

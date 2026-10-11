@@ -129,7 +129,7 @@ def train_epoch(
 # config.yaml (simple model configuration)
 model:
   in_channels: 12
-  seq_length: 512
+  seq_length: 1000
   num_classes: 5
   hidden_dims: [32, 64, 128, 256]
   dropout_rate: 0.5
@@ -138,7 +138,7 @@ model:
 
 ```python
 # Model accepting config
-def __init__(self, config=None, in_channels=12, seq_length=512, ...):
+def __init__(self, config=None, in_channels=12, seq_length=1000, ...):
     if config is not None:
         # Use parameters from config
         in_channels = getattr(config.model, 'in_channels', in_channels)
@@ -171,7 +171,7 @@ Your solution will be evaluated on three dimensions:
 1. **Traceability**: Proper implementation of TensorBoard logging
 2. **Code Quality**: Documentation, linting adherence, and code organization
 3. **Configuration**: Proper use of Hydra for experiment configuration
-4. **Feasibility**: Your model should simply work and whole workflow should be complete and output valide `submission.csv` file.
+4. **Feasibility**: Your model should simply work and whole workflow should be complete and output a valid `submission.csv` file.
 
 The final score will combine these engineering criteria with the model's classification accuracy.
 
@@ -201,10 +201,10 @@ In this competition your task is to predict the superclass of ECG recordings. To
     - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
     - `labels` - zero-indexed encoded label
 
-- **test_df.csv** - The actual test set for your model
+- **test_df.h5** - The actual test set for your model
     - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
 
-- **sample_submission.csv** - A submission file in the correct format.
+- **sample_submission.csv** - A submission file in the correct format, with one row per ECG in `test_df.h5`, in the same order (rows are matched by position).
     - `label` - The target. For each ECG record, predict one of the five classes with zero-indexed encoding, i.e. 0-4.
 
 ### Loading the Data
@@ -219,13 +219,13 @@ import pandas as pd
 # Load training data
 with h5py.File('train_df.h5', 'r') as f:
     train_signal = f['signals'][:] #of shape (num_samples x num_leads x timestamps)
-    train_labels = f['labels'][:] #of shape (num_samples x 1)
+    train_labels = f['labels'][:] #of shape (num_samples,)
 
 
 # Load validation data
 with h5py.File('val_df.h5', 'r') as f:
     val_signal = f['signals'][:] #of shape (num_samples x num_leads x timestamps)
-    val_labels = f['labels'][:] #of shape (num_samples x 1)
+    val_labels = f['labels'][:] #of shape (num_samples,)
 
 # Load test data
 with h5py.File('test_df.h5', 'r') as f:

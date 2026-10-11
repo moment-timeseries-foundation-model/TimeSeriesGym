@@ -135,7 +135,7 @@ The following resources are provided to help you effectively use Snorkel for lab
 
 #### Documentation
 - **snorkel-docs.pdf/txt**: Complete Snorkel documentation in both formats
-- **snorkel-labeling-docs.txt**: Focused documentation specifically on Snorkel's labeling package, which is the primary component needed for this challenge
+- **snorkel-labeling-doc.txt**: Focused documentation specifically on Snorkel's labeling package, which is the primary component needed for this challenge
 
 *Tip: We recommend starting with the spam tutorial to understand Snorkel's fundamentals before applying similar techniques to ECG classification.*
 
