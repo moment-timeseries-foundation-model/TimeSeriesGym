@@ -276,17 +276,9 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
             return score
 
         # Check for module-level docstrings
-        model_docstring = False
-        if len(model_ast.body) > 0 and isinstance(model_ast.body[0], ast.Expr):
-            if hasattr(model_ast.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                if isinstance(model_ast.body[0].value, ast.Constant) and isinstance(
-                    model_ast.body[0].value.value, str
-                ):
-                    model_docstring = True
-                    score += 0.1
-            elif isinstance(model_ast.body[0].value, ast.Str):  # Older Python versions
-                model_docstring = True
-                score += 0.1
+        model_docstring = ast.get_docstring(model_ast) is not None
+        if model_docstring:
+            score += 0.1
 
         max_score += 0.1
         if model_docstring:
@@ -294,17 +286,9 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
         else:
             logger.info("[CODE QUALITY] ✗ Model file missing module docstring: 0.0/0.1")
 
-        training_docstring = False
-        if len(training_ast.body) > 0 and isinstance(training_ast.body[0], ast.Expr):
-            if hasattr(training_ast.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                if isinstance(training_ast.body[0].value, ast.Constant) and isinstance(
-                    training_ast.body[0].value.value, str
-                ):
-                    training_docstring = True
-                    score += 0.1
-            elif isinstance(training_ast.body[0].value, ast.Str):  # Older Python versions
-                training_docstring = True
-                score += 0.1
+        training_docstring = ast.get_docstring(training_ast) is not None
+        if training_docstring:
+            score += 0.1
 
         max_score += 0.1
         if training_docstring:
@@ -414,16 +398,8 @@ def has_type_hints(tree):
 def has_class_docstrings(tree):
     """Check if classes have docstrings."""
     for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            # Check if first statement in class body is a docstring
-            if node.body and isinstance(node.body[0], ast.Expr):
-                if hasattr(node.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                    if isinstance(node.body[0].value, ast.Constant) and isinstance(
-                        node.body[0].value.value, str
-                    ):
-                        return True
-                elif isinstance(node.body[0].value, ast.Str):  # Older Python versions
-                    return True
+        if isinstance(node, ast.ClassDef) and ast.get_docstring(node) is not None:
+            return True
     return False
 
 
@@ -436,21 +412,13 @@ def has_function_docstrings(tree):
             if len(node.body) <= 2:
                 continue
 
-            # Check if first statement in function body is a docstring
-            if node.body and isinstance(node.body[0], ast.Expr):
-                if hasattr(node.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                    if isinstance(node.body[0].value, ast.Constant) and isinstance(
-                        node.body[0].value.value, str
-                    ):
-                        has_docs = True
-                    elif len(node.body) > 3:  # More than a tiny function without docs
-                        return False
-                elif isinstance(node.body[0].value, ast.Str):  # Older Python versions
-                    has_docs = True
-                else:
-                    # If we find a substantial function without docs, return False
-                    if len(node.body) > 3:  # More than a tiny function
-                        return False
+            # Only functions whose first statement is an expression are judged
+            if not isinstance(node.body[0], ast.Expr):
+                continue
+            if ast.get_docstring(node) is not None:
+                has_docs = True
+            elif len(node.body) > 3:  # More than a tiny function without docs
+                return False
     return has_docs
 
 
