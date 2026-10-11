@@ -126,7 +126,14 @@ Create a JSONL file with submission entries:
 ```json
 {"competition_id": "amp-parkinsons-disease-progression-prediction", "submission_path": "predictions1.csv"}
 {"competition_id": "ashrae-energy-prediction", "submission_path": "predictions2.csv"}
+{"competition_id": "optiver-realized-volatility-prediction-hyperparameter-search", "submission_path": "run/submission", "solution_file_path": "run/code"}
 ```
+
+For hyperparameter-search and feature-enhancement challenges, `submission_path` is the submission
+folder. Hyperparameter-search entries also need `solution_file_path`: the solution code, a script
+or a directory of `.py` files, which the graders require and check for a hyperparameter search.
+`experiments/make_submission.py` writes these entries for a run group, with the run's `code/`
+directory (the agent's `/home/code`) as `solution_file_path`.
 
 Then run:
 
@@ -143,8 +150,13 @@ timeseriesgym grade-sample predictions.csv amp-parkinsons-disease-progression-pr
 #### Evaluating Hyperparameter Search Results
 
 ```bash
-timeseriesgym grade-hyperparameter-search search_results/ optiver-realized-volatility-prediction-hyperparameter-search
+timeseriesgym grade-hyperparameter-search run/submission/ \
+  optiver-realized-volatility-prediction-hyperparameter-search \
+  --solution-file-path run/code/
 ```
+
+`--solution-file-path` is required: without the solution code (a script or a directory of `.py`
+files) the submission is graded as invalid.
 
 #### Evaluating Code Submissions
 
@@ -207,7 +219,8 @@ resnet-tensorflow-to-pytorch
 
 ### Full Competition Set
 
-The complete set of 33 challenges is available in `TimeSeriesGym/experiments/splits/all.txt`.
+The complete set of 31 gradeable challenges is available in
+`TimeSeriesGym/experiments/splits/all.txt` (the two CSDI challenges have no grader yet).
 
 ## Docker Environment
 
@@ -220,6 +233,13 @@ docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfi
 # Run the environment
 docker run timeseriesgym-env
 ```
+
+The image is the agent's container, and everything copied into it is readable by the agent.
+`.dockerignore` therefore limits the build context to the `timeseriesgym` package, `environment/`,
+`pyproject.toml`, `README.md` and `LICENSE`, without `timeseriesgym/data/` (the Git LFS archive of
+raw challenge data, which holds test answers). Everything else in the checkout, such as `runs/`,
+prepared data and `.env` files, stays out of the image. Do not rely on other repository files
+inside it.
 
 ### Environment Features
 
