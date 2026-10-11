@@ -265,6 +265,5 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    logger = get_logger(__name__)
 
     asyncio.run(main(args))

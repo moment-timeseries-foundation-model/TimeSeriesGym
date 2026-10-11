@@ -156,7 +156,5 @@ def run_in_container(
         time_end = time.monotonic()
         logger.info(f"Run completed in {time_end - time_start:.2f} seconds.")
         return run_dir
-    except Exception as e:
-        raise e
     finally:
         clean_up(container, logger, retain_container)
