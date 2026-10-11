@@ -28,9 +28,8 @@ def prepare(raw: Path, public: Path, private: Path):
     shutil.copy(raw / "GCP-Coupons-Instructions.rtf", public / "GCP-Coupons-Instructions.rtf")
 
     # Checks
-    assert set(new_train["key"]).isdisjoint(
-        set(new_test["key"])
-    ), "Train and test sets share samples!"
+    # build the set from the (small) test split; isdisjoint streams the train keys
+    assert set(new_test["key"]).isdisjoint(new_train["key"]), "Train and test sets share samples!"
     assert new_test.shape[1] == 8, f"Test set should have 8 columns, but has {new_test.shape[1]}"
     assert (
         new_test_without_labels.shape[1] == 7
