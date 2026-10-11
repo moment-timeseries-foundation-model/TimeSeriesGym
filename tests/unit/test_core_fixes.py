@@ -805,3 +805,78 @@ def test_competition_with_own_grader_can_inherit_the_description(tmp_path, monke
     registry = Registry(tmp_path / "data")
     monkeypatch.setattr(registry, "get_competitions_dir", lambda: competitions)
     assert registry.get_competition("child").description == "parent description"
+
+
+# ---------------------------------------------------------------- HDF5 submissions
+
+
+def _h5_bytes(tmp_path: Path, name: str, datasets: dict) -> bytes:
+    import h5py
+
+    path = tmp_path / f"{name}.h5"
+    with h5py.File(path, "w") as f:
+        for key, data in datasets.items():
+            f.create_dataset(key, data=data)
+    return path.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "how", ["external", "soft", "dangling", "virtual", "external_storage", "datatype", "cycle"]
+)
+def test_h5_submissions_must_be_self_contained(tmp_path, how):
+    import h5py
+
+    answers = tmp_path / "answers.h5"  # stands in for the private answers
+    answers.write_bytes(_h5_bytes(tmp_path, "a", {"labels": np.arange(20.0)}))
+    raw = tmp_path / "raw.bin"
+    np.arange(20.0).tofile(raw)
+    path = tmp_path / "submission.h5"
+    with h5py.File(path, "w") as f:
+        group = f.create_group("submission")
+        group.create_dataset("easy", data=np.ones(10))
+        if how == "external":  # used to be read, as root in the grading server
+            group["hard"] = h5py.ExternalLink(str(answers), "labels")
+        elif how == "soft":
+            f.create_dataset("elsewhere", data=np.ones(20))
+            group["hard"] = h5py.SoftLink("/elsewhere")
+        elif how == "dangling":
+            group["hard"] = h5py.SoftLink("/does/not/exist")
+        elif how == "virtual":
+            layout = h5py.VirtualLayout(shape=(20,), dtype="f8")
+            layout[:] = h5py.VirtualSource(str(answers), "labels", shape=(20,))
+            group.create_virtual_dataset("hard", layout)
+        elif how == "external_storage":
+            group.create_dataset("hard", shape=(20,), dtype="f8", external=[(str(raw), 0, 160)])
+        elif how == "datatype":
+            group["hard"] = np.dtype("f8")  # a committed datatype, not a dataset
+        else:
+            group["hard"] = group  # hard-link cycle: load_arbitrary_h5 never returned
+    with pytest.raises(InvalidSubmissionError, match="Link|virtual|groups and datasets|deeper"):
+        load_submissions(path)
+
+
+def test_self_contained_h5_submissions_load(tmp_path):
+    import h5py
+
+    path = tmp_path / "submission.h5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("submission/easy", data=np.ones(10))
+        f.create_dataset("submission/nested/hard", data=np.zeros(3))
+    loaded = load_submissions(path)
+    assert np.array_equal(loaded["easy"], np.ones(10))
+    assert np.array_equal(loaded["nested"]["hard"], np.zeros(3))
+
+
+def test_validation_does_not_follow_h5_links_to_the_answers(tmp_path):
+    import h5py
+
+    labels = np.zeros(50)
+    labels[20:25] = 1
+    competition = _prepared(
+        tmp_path / "data", "ucr-anomaly-detection", _h5_bytes(tmp_path, "a", {"labels/x": labels})
+    )
+    submission = tmp_path / "submission.h5"
+    with h5py.File(submission, "w") as f:
+        f["submission"] = h5py.ExternalLink(str(competition.answers), "labels")
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "ExternalLink" in message  # was valid: the answers graded themselves

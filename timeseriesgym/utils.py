@@ -178,6 +178,52 @@ def load_plain_pickle(file) -> Any:
     return _PlainPickleUnpickler(file).load()
 
 
+MAX_H5_OBJECTS = 1_000_000
+MAX_H5_DEPTH = 32
+
+
+def check_h5_self_contained(h5_file: h5py.File) -> None:
+    """Raises InvalidSubmissionError unless every object in the agent-written file is a group or
+    a dataset, reached by a hard link, with its data stored in the file itself.
+
+    Soft and external links, virtual datasets and external raw storage make HDF5 read other
+    files (as root, in the grading server), e.g. the private answers. Walks the link names
+    without following them; the caps also stop hard-link cycles.
+    """
+    stack, count = [(h5_file, "", 0)], 0
+    while stack:
+        group, prefix, depth = stack.pop()
+        if depth > MAX_H5_DEPTH:
+            raise InvalidSubmissionError(
+                f"Submission invalid! HDF5 groups are nested deeper than {MAX_H5_DEPTH} levels."
+            )
+        for key in group:
+            name = f"{prefix}/{key}"
+            count += 1
+            if count > MAX_H5_OBJECTS:
+                raise InvalidSubmissionError(
+                    f"Submission invalid! More than {MAX_H5_OBJECTS} HDF5 objects."
+                )
+            link = group.get(key, getlink=True)
+            if not isinstance(link, h5py.HardLink):
+                raise InvalidSubmissionError(
+                    f"Submission invalid! {name} is an HDF5 {type(link).__name__}; store the "
+                    "data in the file itself."
+                )
+            obj = group.get(key)
+            if isinstance(obj, h5py.Group):
+                stack.append((obj, name, depth + 1))
+            elif not isinstance(obj, h5py.Dataset):
+                raise InvalidSubmissionError(
+                    f"Submission invalid! {name}: only HDF5 groups and datasets are allowed."
+                )
+            elif obj.is_virtual or obj.external:
+                raise InvalidSubmissionError(
+                    f"Submission invalid! {name}: virtual or externally stored HDF5 datasets "
+                    "are not allowed."
+                )
+
+
 def load_submissions(path_to_submission: Path) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
@@ -191,6 +237,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
     elif path_to_submission.suffix.lower() == ".h5" or path_to_submission.suffix.lower() == ".hdf5":
         with h5py.File(path_to_submission, "r") as submission_file:
+            check_h5_self_contained(submission_file)
             return load_arbitrary_h5(submission_file["submission"])
 
     elif path_to_submission.suffix.lower() == ".pkl":
