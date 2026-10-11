@@ -1,5 +1,6 @@
 """Regression tests for fixes in the core package, the container environment and the runners."""
 
+import functools
 import importlib
 import json
 import os
@@ -577,3 +578,59 @@ def test_run_agent_rejects_zero_workers(tmp_path):
         timeout=120,
     )
     assert out.returncode == 2 and "--n-workers must be at least 1" in out.stderr
+
+
+class _FakeExecAPI:
+    def __init__(self, exit_code: int):
+        self.exit_code, self.created = exit_code, []
+
+    def exec_create(self, container_id, cmd, user):
+        self.created.append((container_id, cmd, user))
+        return {"Id": "exec-1"}
+
+    def exec_start(self, exec_id, stream):
+        assert stream
+        yield b"agent output\n"
+
+    def exec_inspect(self, exec_id):
+        return {"ExitCode": self.exit_code}
+
+
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_runs_whose_agent_fails_are_not_successful(tmp_path, monkeypatch, exit_code):
+    import logging
+
+    agents_run = importlib.import_module("agents.run")
+    api = _FakeExecAPI(exit_code)
+    container = SimpleNamespace(
+        id="c1",
+        name="competition-x",
+        client=SimpleNamespace(api=api),
+        start=lambda: None,
+        exec_run=lambda cmd: (0, b""),  # the grading server's health check
+        stop=lambda: None,
+        remove=lambda: None,
+    )
+    saved = []
+    monkeypatch.setattr(agents_run, "create_competition_container", lambda **kw: container)
+    monkeypatch.setattr(agents_run, "save_output", lambda c, run_dir, cfg: saved.append(run_dir))
+    competition = SimpleNamespace(id="x", public_dir=tmp_path, private_dir=tmp_path)
+    agent = SimpleNamespace(kwargs_type=None, kwargs={}, env_vars={}, privileged=False)
+    run = functools.partial(
+        agents_run.run_in_container,
+        client=None,
+        competition=competition,
+        agent=agent,
+        image="img",
+        container_config={},
+        retain_container=False,
+        run_dir=tmp_path,
+        logger=logging.getLogger("test"),
+    )
+    if exit_code == 0:
+        assert run() == tmp_path
+    else:  # run_agent.py records a raised run as failed; it was recorded as successful
+        with pytest.raises(RuntimeError, match="exited with code 3"):
+            run()
+    assert saved == [tmp_path]  # outputs are still extracted
+    assert api.created[0][2] == "nonroot"
