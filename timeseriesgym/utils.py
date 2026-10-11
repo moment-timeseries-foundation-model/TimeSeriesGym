@@ -150,7 +150,7 @@ def load_submissions(path_to_submission: Path) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
     if not path_to_submission.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! Submission file {path_to_submission} does not exist."
         )
 
@@ -177,7 +177,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
 def load_scripts(path_to_scripts: Path) -> str:
     if not path_to_scripts.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! script file {path_to_scripts} does not exist."
         )
 
@@ -189,7 +189,7 @@ def load_scripts(path_to_scripts: Path) -> str:
 
 def load_models(path_to_models: Path) -> Model:
     if not path_to_models.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! model file {path_to_models} does not exist."
         )
 
@@ -547,7 +547,7 @@ def have_different_hyperparameters(baseline_model: Model, improved_model: Model)
     """
     Check if two models have different hyperparameters.
     """
-    if type(baseline_model) != type(improved_model):
+    if type(baseline_model) is not type(improved_model):
         raise InvalidSubmissionError(
             f"Models are of different types: {type(baseline_model)} and {type(improved_model)}"
         )
