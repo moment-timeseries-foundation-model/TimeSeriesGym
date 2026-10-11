@@ -529,31 +529,18 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
     a1 = extract_architecture(m1)
     a2 = extract_architecture(m2)
 
-    # find layers present in one but not the other
-    only_in_1 = set(a1) - set(a2)
-    only_in_2 = set(a2) - set(a1)
-
-    if not (not only_in_1 and not only_in_2):
+    # layers present in one model but not the other
+    if set(a1) != set(a2):
         return True
 
-    # for layers in common, compare layer-type, hyperparams, shapes
-    diffs = {}
-
-    for name in set(a1).intersection(a2):
-        t1, p1, s1 = a1[name]
-        t2, p2, s2 = a2[name]
-        layer_diffs = {}
-        if t1 != t2:
-            layer_diffs["type"] = (t1, t2)
-        if s1 != s2:
-            layer_diffs["param_shapes"] = (s1, s2)
-        if layer_diffs:
-            diffs[name] = layer_diffs
-
-    if diffs == {}:
-        return False
-    else:
-        return True
+    # for layers in common, compare layer type and parameter shapes (the hyperparameters
+    # collected above are not compared)
+    for name in a1:
+        t1, _, s1 = a1[name]
+        t2, _, s2 = a2[name]
+        if t1 != t2 or s1 != s2:
+            return True
+    return False
 
 
 def have_different_hyperparameters(baseline_model: Model, improved_model: Model) -> bool:
