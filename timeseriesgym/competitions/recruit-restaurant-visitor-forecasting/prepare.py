@@ -37,10 +37,10 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     train_df = df[df["visit_date"] < stop_date].reset_index(drop=True)
     test_df = df[df["visit_date"] >= stop_date].reset_index(drop=True)
 
-    new_restaurants = []
-    for store_id in test_df["air_store_id"].unique():
-        if store_id not in train_df["air_store_id"].unique():
-            new_restaurants.append(store_id)
+    train_store_ids = train_df["air_store_id"].unique()
+    new_restaurants = [
+        store_id for store_id in test_df["air_store_id"].unique() if store_id not in train_store_ids
+    ]
 
     test_df = test_df[~test_df["air_store_id"].isin(new_restaurants)].reset_index(drop=True)
 
