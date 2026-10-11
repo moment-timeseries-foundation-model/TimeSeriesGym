@@ -778,3 +778,22 @@ def test_preparing_an_uncategorised_competition_says_why_it_fails(tmp_path):
     unlisted = dataclasses.replace(listed, id="new-challenge")
     with pytest.raises(ValueError, match="constants.py"):  # was UnboundLocalError: zipfile
         download_and_prepare_dataset(unlisted, skip_leaderboard=True)
+
+
+def test_competition_with_own_grader_can_inherit_the_description(tmp_path, monkeypatch):
+    # fixed by 4b9de66 (parent_id was only bound where the grader is inherited); no test then
+    competitions = tmp_path / "competitions"
+    for competition_id in ("parent", "child"):
+        (competitions / competition_id).mkdir(parents=True)
+    (competitions / "parent" / "description.md").write_text("parent description")
+    grader = "grader:\n  name: g\n  grade_fn: timeseriesgym.metrics:root_mean_squared_log_error\n"
+    common = "competition_type: simple\ndataset:\n  answers: a.csv\n  sample_submission: s.csv\n"
+    (competitions / "parent" / "config.yaml").write_text(
+        f"id: parent\nname: P\ndescription: x.md\n{common}{grader}"
+    )
+    (competitions / "child" / "config.yaml").write_text(
+        f"id: child\nname: C\nparent_id: parent\n{common}{grader}"
+    )
+    registry = Registry(tmp_path / "data")
+    monkeypatch.setattr(registry, "get_competitions_dir", lambda: competitions)
+    assert registry.get_competition("child").description == "parent description"
