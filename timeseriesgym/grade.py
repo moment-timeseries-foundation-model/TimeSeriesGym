@@ -1,6 +1,9 @@
 """High-level grading functionality"""
 
+import ast
 import json
+import numbers
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -101,28 +104,37 @@ def grade_jsonl(
         )
     )
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     with open(save_path, "w") as f:
         json.dump(aggregated_report, f, indent=2)
     logger.info(purple(f"Saved summary report to {save_path}"))
 
 
-def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
-    """Grades a submission for the given competition."""
-
-    _ensure_prepared(competition)
-
+def _check_suffix(path_to_submission: Path, competition: Competition) -> None:
     if competition.sample_submission.suffix != path_to_submission.suffix:
         raise InvalidSubmissionError(
             f"Submission invalid! Submission file {path_to_submission.suffix} is different from "
             f"the expected file extension {competition.sample_submission.suffix}"
         )
 
+
+def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
+    """Grades a submission for the given competition. A submission that is missing, has the
+    wrong file type or cannot be read is graded as invalid."""
+
+    _ensure_prepared(competition)
+
     submission_exists = path_to_submission.is_file()
-    submission_file = load_submissions(path_to_submission)
-    answers = load_answers(competition.answers)
-    grading_input = GradingInput(submission=submission_file, answers=answers)
-    score = competition.grader(grading_input)
+    try:
+        _check_suffix(path_to_submission, competition)
+        submission_file = load_submissions(path_to_submission)
+    except Exception as e:  # e.g. a ragged CSV: invalid, rather than aborting a whole batch
+        logger.warning(f"Invalid submission {path_to_submission}: {e}")
+        score = None
+    else:
+        answers = load_answers(competition.answers)
+        grading_input = GradingInput(submission=submission_file, answers=answers)
+        score = competition.grader(grading_input)
 
     valid_submission = score is not None
     competition_leaderboard = get_leaderboard(competition)
@@ -224,15 +236,10 @@ def grade_feature_enhancement(
 
 
 def grade_code(path_to_submission: Path, competition: Competition) -> CompetitionReport:
-    """Grades a code submission for the given competition."""
+    """Grades a code submission for the given competition. A submission with the wrong file
+    type, or one the grader rejects (e.g. it does not import), is graded as invalid."""
 
     _ensure_prepared(competition)
-
-    if competition.sample_submission.suffix != path_to_submission.suffix:
-        raise InvalidSubmissionError(
-            f"Submission invalid! Submission file {path_to_submission.suffix} is different from "
-            f"the expected file extension {competition.sample_submission.suffix}"
-        )
 
     submission_exists = path_to_submission.is_file()
     answers = load_answers(competition.answers)
@@ -244,23 +251,30 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
             f"Please define the coding config in the competition config file"
         )
 
-    grading_input = GradingInput(
-        submission_file_path=path_to_submission,
-        answers=answers,
-        coding_config=coding_config,
-    )
-    scores = competition.grader(grading_input)
+    try:
+        _check_suffix(path_to_submission, competition)
+    except InvalidSubmissionError as e:
+        logger.warning(str(e))
+        scores = None
+    else:
+        grading_input = GradingInput(
+            submission_file_path=path_to_submission,
+            answers=answers,
+            coding_config=coding_config,
+        )
+        scores = competition.grader(grading_input)
 
     valid_submission = scores is not None
+    scores = scores or {}  # the Grader returns None for a rejected submission
     return CodeCompetitionReport(
         competition_id=competition.id,
-        defined_classes=scores["defined_classes"],
-        initialized_classes=scores["initialized_classes"],
-        defined_class_methods=scores["defined_class_methods"],
-        executed_class_methods=scores["executed_class_methods"],
-        defined_functions=scores["defined_functions"],
-        executed_functions=scores["executed_functions"],
-        test_metric=scores["test_metric"],
+        defined_classes=scores.get("defined_classes"),
+        initialized_classes=scores.get("initialized_classes"),
+        defined_class_methods=scores.get("defined_class_methods"),
+        executed_class_methods=scores.get("executed_class_methods"),
+        defined_functions=scores.get("defined_functions"),
+        executed_functions=scores.get("executed_functions"),
+        test_metric=scores.get("test_metric"),
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         created_at=datetime.now(),
@@ -268,12 +282,91 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
     )
 
 
-def validate_submission(submission: Path, competition: Competition) -> tuple[bool, str]:
+def _validate_python_source(submission: Path) -> tuple[bool, str]:
+    try:
+        ast.parse(submission.read_bytes(), filename=submission.name)
+    except Exception as e:  # SyntaxError, ValueError (null bytes), RecursionError, ...
+        return False, f"Submission invalid! {submission.name} is not valid Python: {e}"
+    return (
+        True,
+        "Submission is valid. (It was only parsed: its classes and functions are run and "
+        "checked when the submission is graded.)",
+    )
+
+
+def _prediction_grader(competition: Competition):
+    """The function that scores a single prediction file. Hyperparameter-search and
+    feature-enhancement graders take a whole folder; their modules score each of its prediction
+    files with `grade`."""
+    if (
+        competition.hyperparameter_search_config is None
+        and competition.feature_enhancement_config is None
+    ):
+        return competition.grader.grade_fn
+    return getattr(sys.modules[competition.grader.grade_fn.__module__], "grade", None)
+
+
+def _validate_prediction_file(submission: Path, competition: Competition) -> tuple[bool, str]:
+    grade_fn = _prediction_grader(competition)
+    if grade_fn is None:
+        return True, "Submission is valid. (It is checked when the submission folder is graded.)"
+    try:
+        score = grade_fn(
+            submission=load_submissions(submission), answers=load_answers(competition.answers)
+        )
+    except Exception as e:
+        return (
+            False,
+            f"Submission invalid! The attempt to grade the submission has resulted in the "
+            f"following error message:\n{e}",
+        )
+    if score is None or (isinstance(score, numbers.Real) and not np.isfinite(score)):
+        return False, f"Submission invalid! The grader could not score it (score: {score})."
+    return True, "Submission is valid."
+
+
+def _validate_hyperparameter_search_folder(
+    folder: Path, competition: Competition, solution_file_path: Path | None
+) -> tuple[bool, str]:
+    config = competition.hyperparameter_search_config
+    submissions = [config["baseline_submission_name"], config["improved_submission_name"]]
+    models = [config["baseline_model_name"], config["improved_model_name"]]
+    missing = [name for name in submissions + models if not (folder / name).is_file()]
+    if missing:
+        return False, f"Submission invalid! {folder} is missing {', '.join(missing)}."
+    if solution_file_path is not None and not Path(solution_file_path).exists():
+        return False, f"Submission invalid! The solution code {solution_file_path} does not exist."
+    for name in submissions:
+        valid, message = _validate_prediction_file(folder / name, competition)
+        if not valid:
+            return False, f"{name}: {message}"
+    # the models are agent-written pickles / TorchScript: never loaded here
+    return (
+        True,
+        "Submission is valid. (When it is graded, the solution code, which is required, is "
+        "checked for a hyperparameter search, and the models are loaded and compared.)",
+    )
+
+
+def validate_submission(
+    submission: Path, competition: Competition, solution_file_path: Path | None = None
+) -> tuple[bool, str]:
     """
     Validates a submission for the given competition by actually running the competition grader.
     This is designed for end users, not developers (we assume that the competition grader is
     correctly implemented and use that for validating the submission, not the other way around).
+    For challenges whose submission is a folder, a single file is validated as one of its
+    prediction files. `solution_file_path` is the solution code of a hyperparameter-search
+    folder (a script or a directory, as for `grade_hyperparameter_search`).
+
+    The in-container grading server runs this as root on files the agent uploads, so agent code
+    is never imported here: code submissions are only parsed, models are not loaded, and pickles
+    are decoded with an allowlist of plain types (see `load_submissions`).
     """
+    if competition.hyperparameter_search_config is not None and submission.is_dir():
+        _ensure_prepared(competition)
+        return _validate_hyperparameter_search_folder(submission, competition, solution_file_path)
+
     if not submission.is_file():
         return False, f"Submission invalid! Submission file {submission} does not exist."
 
@@ -286,39 +379,11 @@ def validate_submission(submission: Path, competition: Competition) -> tuple[boo
 
     _ensure_prepared(competition)
 
-    try:
-        if competition.hyperparameter_search_config is not None and submission.is_dir():
-            grading_input = GradingInput(
-                submission_folder_path=submission,
-                answers=load_answers(competition.answers),
-                hyperparameter_search_config=competition.hyperparameter_search_config,
-            )
-        elif competition.coding_config is not None and submission.is_file():
-            grading_input = GradingInput(
-                submission_file_path=submission,
-                answers=load_answers(competition.answers),
-                coding_config=competition.coding_config,
-            )
-        elif submission.is_file():
-            grading_input = GradingInput(
-                submission_file=load_submissions(submission),
-                answers=load_answers(competition.answers),
-            )
-        else:
-            return (
-                False,
-                "Submission invalid! If the submission is a directory "
-                "only for hyperparameter search tasks",
-            )
-        competition.grader(grading_input)
-    except Exception as e:
-        return (
-            False,
-            f"Submission invalid! The attempt to grade the submission has resulted in the "
-            f"following error message:\n{e}",
-        )
+    if competition.coding_config is not None:
+        # importing the submission (as the code grader does) would run it as root
+        return _validate_python_source(submission)
 
-    return True, "Submission is valid."
+    return _validate_prediction_file(submission, competition)
 
 
 def aggregate_reports(competition_reports: list[CompetitionReport]) -> dict:

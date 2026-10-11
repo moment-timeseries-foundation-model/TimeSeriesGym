@@ -126,7 +126,8 @@ class ArxivHandler:
             tar_path = self.fetch_tex()
             extract_dir = tempfile.mkdtemp()
             with tarfile.open(tar_path, "r") as tf:
-                tf.extractall(extract_dir)
+                # downloaded archive: refuse paths and links outside extract_dir, device files
+                tf.extractall(extract_dir, filter="data")
             # Find main .tex file
             main = None
             for root, _, files in os.walk(extract_dir):
@@ -179,7 +180,7 @@ def process_resource(resource: str, chunk_size=1000, overlap=200):
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
 
-            text = extract_text_from_div(page, link)
+            text = extract_text_from_div(page, resource)
             page.close()
             browser.close()
     else:

@@ -54,11 +54,20 @@ def safe_extractall(tar: tarfile.TarFile, local_dir: Path) -> None:
     The archive comes from directories the agent writes (/home/submission, logs, code). A plain
     extractall() recreates symlinks pointing anywhere on the host, which grading would then
     follow. The "data" filter rejects absolute paths, members or links that leave local_dir,
-    and device files (Python >= 3.11.4).
+    and device files (Python >= 3.11.4). Rejected members are skipped with a warning; the
+    rest of the archive is extracted (a rejection used to abort the whole extraction).
     """
     if not hasattr(tarfile, "data_filter"):
         raise RuntimeError("Python >= 3.11.4 is required for safe archive extraction")
-    tar.extractall(path=local_dir, filter="data")
+
+    def skip_unsafe(member: tarfile.TarInfo, dest_path: str) -> tarfile.TarInfo | None:
+        try:
+            return tarfile.data_filter(member, dest_path)
+        except tarfile.FilterError as e:
+            logger.warning(f"Skipped unsafe archive member {member.name!r}: {e}")
+            return None
+
+    tar.extractall(path=local_dir, filter=skip_unsafe)
 
 
 def extract_from_container_sysbox(container: Container, container_file_path: str, local_dir: Path):
@@ -83,12 +92,16 @@ def extract_from_container_sysbox(container: Container, container_file_path: str
                 self.leftover = b""
 
             def readinto(self, b):
-                try:
-                    chunk = next(self.generator)
-                except StopIteration:
-                    return 0  # EOF
-                n = len(chunk)
-                b[:n] = chunk
+                # docker's chunks can be larger than the buffer tarfile reads into: keep the
+                # rest for the next call (and skip empty chunks, which would read as EOF)
+                while not self.leftover:
+                    try:
+                        self.leftover = next(self.generator)
+                    except StopIteration:
+                        return 0  # EOF
+                n = min(len(b), len(self.leftover))
+                b[:n] = self.leftover[:n]
+                self.leftover = self.leftover[n:]
                 return n
 
         stream_wrapper = StreamWrapper(exec_result.output)

@@ -198,15 +198,25 @@ def test_container_archives_cannot_escape_on_extraction(tmp_path):
 
     from environment.utils import safe_extractall
 
+    def regular(name: str) -> tuple[tarfile.TarInfo, io.BytesIO]:
+        info = tarfile.TarInfo(name)
+        info.size = 3
+        return info, io.BytesIO(b"1,2")
+
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
+        tar.addfile(*regular("code/train.py"))
         link = tarfile.TarInfo("submission/submission.csv")
         link.type, link.linkname = tarfile.SYMTYPE, "/etc/passwd"  # planted by an agent
         tar.addfile(link)
+        tar.addfile(*regular("submission/other.csv"))
     buf.seek(0)
-    with tarfile.open(fileobj=buf, mode="r") as tar, pytest.raises(tarfile.FilterError):
+    with tarfile.open(fileobj=buf, mode="r") as tar:
         safe_extractall(tar, tmp_path)
     assert not (tmp_path / "submission" / "submission.csv").exists()
+    # the unsafe member is skipped, not the rest of the archive (it used to abort)
+    assert (tmp_path / "code" / "train.py").read_bytes() == b"1,2"
+    assert (tmp_path / "submission" / "other.csv").read_bytes() == b"1,2"
 
 
 def test_cli_does_not_import_deepeval():

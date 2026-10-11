@@ -146,11 +146,43 @@ def load_answers(path_to_answers: Path) -> Any:
         )
 
 
+# The only globals a pickled submission may reference: containers and numbers, including numpy
+# scalars (numpy 1.x and 2.x module paths). Unpickling anything else can run arbitrary code;
+# numpy arrays are left out too, as their shape (and so their memory) is set by the file.
+_PLAIN_PICKLE_GLOBALS = {
+    *(("builtins", name) for name in ("list", "dict", "tuple", "set", "frozenset", "complex")),
+    ("collections", "defaultdict"),
+    ("collections", "OrderedDict"),
+    ("_codecs", "encode"),  # bytes in protocol 2 pickles
+    ("numpy", "dtype"),
+    ("numpy.core.multiarray", "scalar"),
+    ("numpy._core.multiarray", "scalar"),
+}
+
+
+class _PlainPickleUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "__builtin__":  # the name in protocol 0-2 pickles
+            module = "builtins"
+        if (module, name) not in _PLAIN_PICKLE_GLOBALS:
+            raise InvalidSubmissionError(
+                f"Submission invalid! The pickle references `{module}.{name}`; submissions may "
+                "only contain plain containers, strings and numbers (numpy scalars included)."
+            )
+        return super().find_class(module, name)
+
+
+def load_plain_pickle(file) -> Any:
+    """Unpickles an agent-written file without running its code: only the globals in
+    `_PLAIN_PICKLE_GLOBALS` can be loaded."""
+    return _PlainPickleUnpickler(file).load()
+
+
 def load_submissions(path_to_submission: Path) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
     if not path_to_submission.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! Submission file {path_to_submission} does not exist."
         )
 
@@ -163,7 +195,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
     elif path_to_submission.suffix.lower() == ".pkl":
         with open(path_to_submission, "rb") as f:
-            return pickle.load(f)
+            return load_plain_pickle(f)
 
     elif path_to_submission.suffix == ".npy":
         return np.load(path_to_submission)
@@ -177,7 +209,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
 def load_scripts(path_to_scripts: Path) -> str:
     if not path_to_scripts.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! script file {path_to_scripts} does not exist."
         )
 
@@ -189,7 +221,7 @@ def load_scripts(path_to_scripts: Path) -> str:
 
 def load_models(path_to_models: Path) -> Model:
     if not path_to_models.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! model file {path_to_models} does not exist."
         )
 
@@ -502,7 +534,9 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
             if name == "":
                 continue
 
-            layer_type = type(module).__name__
+            # loaded TorchScript modules are all RecursiveScriptModule; the layer kind (Conv1d,
+            # ReLU, ...) is kept in `original_name`
+            layer_type = getattr(module, "original_name", type(module).__name__)
             # pull out the usual hyperparams for this layer
             params = {}
             for attr in (
@@ -516,7 +550,10 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
                 "bias",  # Conv2d, Linear
             ):
                 if hasattr(module, attr):
-                    params[attr] = getattr(module, attr)
+                    value = getattr(module, attr)
+                    if value is None or isinstance(value, torch.Tensor):
+                        value = value is not None  # `bias`: whether there is one
+                    params[attr] = value
 
             # capture shapes of any weight/bias tensors
             shapes = {}
@@ -533,12 +570,9 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
     if set(a1) != set(a2):
         return True
 
-    # for layers in common, compare layer type and parameter shapes (the hyperparameters
-    # collected above are not compared)
+    # for layers in common, compare layer type, hyperparameters and parameter shapes
     for name in a1:
-        t1, _, s1 = a1[name]
-        t2, _, s2 = a2[name]
-        if t1 != t2 or s1 != s2:
+        if a1[name] != a2[name]:
             return True
     return False
 
@@ -547,7 +581,7 @@ def have_different_hyperparameters(baseline_model: Model, improved_model: Model)
     """
     Check if two models have different hyperparameters.
     """
-    if type(baseline_model) != type(improved_model):
+    if type(baseline_model) is not type(improved_model):
         raise InvalidSubmissionError(
             f"Models are of different types: {type(baseline_model)} and {type(improved_model)}"
         )
@@ -592,12 +626,15 @@ def _values_differ(a: Any, b: Any) -> bool:
 
 def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_for=None) -> bool:
     """
-    Check if the solution code imports a hyperparameter search library and uses it.
+    Check if the solution code uses a hyperparameter search library or API.
 
     The previous string heuristic required the literal `import optuna` to appear twice, and
     for `from optuna import ...` it split on commas across the rest of the file, so common,
-    honest scripts were rejected. This version parses the code: a library counts as used when
-    a name it was imported as is referenced again.
+    honest scripts were rejected. This version parses the code: each entry of
+    `packages_to_look_for` is a module (`optuna`) or an API inside one
+    (`sklearn.model_selection.GridSearchCV`), and it counts as used when the code refers to it,
+    or to something inside it, through the names it was imported as. Importing alone does not
+    count, nor does using another part of the same module (e.g. `train_test_split`).
     """
     import ast
 
@@ -605,10 +642,13 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
         hyperparameter_searching_libraries = [
             "optuna",
             "ray.tune",
-            "wandb",
-            "mlflow",
+            "wandb.sweep",
+            "wandb.agent",
             "hyperopt",
-            "sklearn.model_selection",
+            "sklearn.model_selection.GridSearchCV",
+            "sklearn.model_selection.RandomizedSearchCV",
+            "sklearn.model_selection.HalvingGridSearchCV",
+            "sklearn.model_selection.HalvingRandomSearchCV",
             "bayes_opt",
             "sigopt",
             "nevergrad",
@@ -618,9 +658,9 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
     else:
         hyperparameter_searching_libraries = packages_to_look_for
 
-    def from_library(module: str | None) -> bool:
-        return module is not None and any(
-            module == lib or module.startswith(lib + ".")
+    def is_search_api(dotted: str) -> bool:
+        return any(
+            dotted == lib or dotted.startswith(lib + ".")
             for lib in hyperparameter_searching_libraries
         )
 
@@ -629,20 +669,34 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
     except SyntaxError:
         return False
 
-    bound_names = set()
+    # local name -> the dotted path it was imported as
+    imported = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if from_library(alias.name):
-                    bound_names.add(alias.asname or alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom) and from_library(node.module):
-            bound_names.update(alias.asname or alias.name for alias in node.names)
+                if alias.asname:
+                    imported[alias.asname] = alias.name
+                else:  # `import a.b` binds `a`
+                    top = alias.name.split(".")[0]
+                    imported[top] = top
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                imported[alias.asname or alias.name] = f"{node.module}.{alias.name}"
 
-    if not bound_names:
-        return False
+    def dotted_name(node) -> str | None:
+        attrs = []
+        while isinstance(node, ast.Attribute):
+            attrs.append(node.attr)
+            node = node.value
+        if not isinstance(node, ast.Name) or node.id not in imported:
+            return None
+        return ".".join([imported[node.id], *reversed(attrs)])
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in bound_names:
-            return True
+        if isinstance(node, ast.Name | ast.Attribute):
+            dotted = dotted_name(node)
+            if dotted is not None and is_search_api(dotted):
+                return True
     return False
 
 

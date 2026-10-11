@@ -181,10 +181,30 @@ class Grader:
         }
 
 
+def _score_to_json(score):
+    """Scores are written as strings (or None); dict scores (feature enhancement's sub-scores,
+    per-dataset errors) stay JSON objects instead of becoming their Python repr."""
+    if isinstance(score, dict):
+        return {str(k): _plain(v) for k, v in score.items()}
+    return str(score) if score is not None else None  # TODO: support non-float output better
+
+
+def _plain(value):
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _score_from_json(score):
+    if isinstance(score, dict) or score is None:
+        return score
+    return float(score)
+
+
 @dataclass(frozen=True)
 class CompetitionReport:
     competition_id: str
-    score: float | None
+    score: float | dict | None
     gold_threshold: float | None
     silver_threshold: float | None
     bronze_threshold: float | None
@@ -204,9 +224,7 @@ class CompetitionReport:
         # Convert all values to JSON-compatible types explicitly
         return {
             "competition_id": self.competition_id,
-            "score": (
-                str(self.score) if self.score is not None else None
-            ),  # TODO: find a better way to support none-float output
+            "score": _score_to_json(self.score),
             "gold_threshold": float(self.gold_threshold),
             "silver_threshold": float(self.silver_threshold),
             "bronze_threshold": float(self.bronze_threshold),
@@ -228,7 +246,7 @@ class CompetitionReport:
         data = data.copy()  # Avoid accidentally mutating the original dictionary
         typed_data = {
             "competition_id": data["competition_id"],
-            "score": float(data["score"]) if data["score"] is not None else None,
+            "score": _score_from_json(data["score"]),
             "gold_threshold": float(data["gold_threshold"]),
             "silver_threshold": float(data["silver_threshold"]),
             "bronze_threshold": float(data["bronze_threshold"]),
