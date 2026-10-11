@@ -546,3 +546,16 @@ def test_reasonableness_without_an_api_key_is_not_a_pass(tmp_path, monkeypatch, 
         monkeypatch.setattr(sys, "argv", argv)
         cli.main()
     assert json.loads(capsys.readouterr().out)["is_reasonable"] is None
+
+
+# ---------------------------------------------------------------- code grading helpers
+
+
+def test_code_grading_data_of_unsupported_type_is_an_error(tmp_path):
+    from timeseriesgym.grade_code_helper import load_dataset_for_function
+
+    np.save(tmp_path / "x.npy", np.arange(3))
+    (tmp_path / "y.csv").write_text("a\n1\n")
+    config = {"required_args": {"x": {"file_name": "x.npy"}, "y": {"file_name": "y.csv"}}}
+    with pytest.raises(ValueError, match="Unsupported file type"):  # y silently got x's array
+        load_dataset_for_function(config, tmp_path)
