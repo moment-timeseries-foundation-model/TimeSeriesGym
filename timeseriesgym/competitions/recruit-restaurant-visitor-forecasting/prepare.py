@@ -1,8 +1,7 @@
-import zipfile
 from copy import deepcopy
 from pathlib import Path
 
-from timeseriesgym.utils import get_logger, read_csv
+from timeseriesgym.utils import extract, get_logger, read_csv
 
 logger = get_logger(__name__)
 
@@ -13,8 +12,7 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     # first, for all file that ends with .zip, unzip it
     for file in raw.glob("*.zip"):
         logger.info(f"Unzipping {file}")
-        with zipfile.ZipFile(file, "r") as zip_ref:
-            zip_ref.extractall(raw)
+        extract(file, raw)
         # remove the zip file
         file.unlink()
 

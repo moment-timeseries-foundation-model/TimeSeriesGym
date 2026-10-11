@@ -1,13 +1,12 @@
 import logging
 import sys
-import zipfile
 from pathlib import Path
 
 import gdown
 import h5py
 import numpy as np
 
-from timeseriesgym.utils import clone_repository
+from timeseriesgym.utils import clone_repository, extract
 
 
 def prepare(raw: Path, public: Path, private: Path):
@@ -25,8 +24,7 @@ def prepare(raw: Path, public: Path, private: Path):
         extract_dir = zip_dir  # Create folder with same name as zip (without .zip)
 
         logging.info(f"Unzipping {zip_path.name} to {extract_dir}...")
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_dir)
+        extract(zip_path, extract_dir)
 
         # move the folder to public
         extracted_folder = extract_dir / zip_path.stem
