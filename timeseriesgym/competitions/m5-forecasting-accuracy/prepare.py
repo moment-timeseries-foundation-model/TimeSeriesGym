@@ -36,19 +36,12 @@ def prepare(raw: Path, public: Path, private: Path):
     output_file = private / "test.jsonl"
 
     with open(output_file, "w", encoding="utf-8") as fout:
-        # Process entire_dataset
-        for record in entire_dataset.to_dict(orient="records"):
-            record["source"] = "test"
-            fout.write(json.dumps(record) + "\n")
-        # Process calendar
-        for record in calendar.to_dict(orient="records"):
-            record["source"] = "calendar"
-            fout.write(json.dumps(record) + "\n")
-        # Process sell_prices
-        for record in prices.to_dict(orient="records"):
-            record["source"] = "sell_prices"
-            fout.write(json.dumps(record) + "\n")
-        # process sample_submission
-        for record in sample_submission.to_dict(orient="records"):
-            record["source"] = "sample_submission"
-            fout.write(json.dumps(record) + "\n")
+        for source, df in [
+            ("test", entire_dataset),
+            ("calendar", calendar),
+            ("sell_prices", prices),
+            ("sample_submission", sample_submission),
+        ]:
+            for record in df.to_dict(orient="records"):
+                record["source"] = source
+                fout.write(json.dumps(record) + "\n")

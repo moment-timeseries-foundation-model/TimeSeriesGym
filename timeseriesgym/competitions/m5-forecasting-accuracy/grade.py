@@ -149,39 +149,8 @@ def grade(submission: pd.DataFrame, answers: list) -> float:
         .drop(["id", "order"], axis=1)
         .reset_index(drop=True)
     )
-    submission.rename(
-        columns={
-            "F1": "d_1914",
-            "F2": "d_1915",
-            "F3": "d_1916",
-            "F4": "d_1917",
-            "F5": "d_1918",
-            "F6": "d_1919",
-            "F7": "d_1920",
-            "F8": "d_1921",
-            "F9": "d_1922",
-            "F10": "d_1923",
-            "F11": "d_1924",
-            "F12": "d_1925",
-            "F13": "d_1926",
-            "F14": "d_1927",
-            "F15": "d_1928",
-            "F16": "d_1929",
-            "F17": "d_1930",
-            "F18": "d_1931",
-            "F19": "d_1932",
-            "F20": "d_1933",
-            "F21": "d_1934",
-            "F22": "d_1935",
-            "F23": "d_1936",
-            "F24": "d_1937",
-            "F25": "d_1938",
-            "F26": "d_1939",
-            "F27": "d_1940",
-            "F28": "d_1941",
-        },
-        inplace=True,
-    )
+    # forecast columns F1..F28 are days d_1914..d_1941
+    submission.rename(columns={f"F{i}": f"d_{1913 + i}" for i in range(1, 29)}, inplace=True)
 
     evaluator = WRMSSEEvaluator(df_train, df_valid, calendar, sell_prices)
     group_ids, scores = evaluator.score(submission)
