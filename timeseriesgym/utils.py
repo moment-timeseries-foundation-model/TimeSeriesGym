@@ -303,31 +303,25 @@ def compress(src: Path, compressed: Path, exist_ok: bool = False) -> None:
     file_paths = [path for path in src.rglob("*") if path.is_file()]
     total_files = len(file_paths)
 
-    def zip_compress(src: Path, compressed: Path):
-        with zipfile.ZipFile(compressed, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
-                zipf.write(file_path, arcname=file_path.relative_to(src))
-
-    def sevenz_compress(src: Path, compressed: Path):
-        with py7zr.SevenZipFile(compressed, "w") as archive:
-            for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
-                archive.write(file_path, arcname=file_path.relative_to(src))
-
     # Determine the compression format from the destination file suffix
     if compressed.suffix == ".zip":
-        zip_compress(src, compressed)
+        archive = zipfile.ZipFile(compressed, "w", zipfile.ZIP_DEFLATED)
     elif compressed.suffix == ".7z":
-        sevenz_compress(src, compressed)
+        archive = py7zr.SevenZipFile(compressed, "w")
     else:
         raise NotImplementedError(f"Unsupported compression format: `{compressed.suffix}`.")
+
+    with archive:
+        for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
+            archive.write(file_path, arcname=file_path.relative_to(src))
 
 
 def extract(
     compressed: Path, dst: Path, recursive: bool = False, already_extracted: set | None = None
 ) -> None:
+    """Extracts the contents of a compressed file to a destination directory."""
     if already_extracted is None:
         already_extracted = set()
-    """Extracts the contents of a compressed file to a destination directory."""
 
     # pre-conditions
     assert compressed.exists(), f"File `{compressed}` does not exist."
