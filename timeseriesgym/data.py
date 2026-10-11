@@ -549,10 +549,11 @@ def get_checksum(fpath: Path) -> str:
     # only show progress bar for large files (> ~5 GB)
     show_progress = file_size > 5_000_000_000
 
+    chunk_size = 1 << 20  # 1 MiB
     with open(fpath, "rb") as f:
         for chunk in tqdm(
-            iter(lambda: f.read(4_096), b""),
-            total=file_size // 4096,
+            iter(lambda: f.read(chunk_size), b""),
+            total=file_size // chunk_size,
             unit="B",
             unit_scale=True,
             disable=not show_progress,
