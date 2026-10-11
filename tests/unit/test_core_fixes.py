@@ -21,6 +21,7 @@ from timeseriesgym.utils import (
     InvalidSubmissionError,
     TorchModel,
     have_different_hyperparameters,
+    have_hyperparameter_searching_attempt,
     load_models,
     load_scripts,
     load_submissions,
@@ -453,3 +454,31 @@ def test_torchscript_models_compare_their_layer_hyperparameters(tmp_path):
     assert have_different_hyperparameters(baseline, _scripted(tmp_path, "stride", stride=2))
     assert have_different_hyperparameters(baseline, _scripted(tmp_path, "pad", padding=1))
     assert have_different_hyperparameters(baseline, _scripted(tmp_path, "gelu", act=nn.GELU()))
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        # common in any training script; each counted as a hyperparameter search
+        ("from sklearn.model_selection import train_test_split\ntrain_test_split(x, y)\n", False),
+        ("import sklearn.model_selection as ms\nms.KFold(5)\n", False),
+        ("import wandb\nwandb.init(project='p')\n", False),
+        ("import mlflow\nmlflow.log_metric('acc', 1.0)\n", False),
+        ("import ray.tune\nimport ray\nray.init()\n", False),
+        # searches
+        (
+            "from sklearn.model_selection import GridSearchCV\nGridSearchCV(m, grid).fit(x, y)\n",
+            True,
+        ),
+        ("import sklearn.model_selection as ms\nms.RandomizedSearchCV(m, d)\n", True),
+        ("from sklearn import model_selection\nmodel_selection.GridSearchCV(m, g)\n", True),
+        ("import wandb\nwandb.sweep(config)\n", True),
+        ("import ray\nray.tune.run(train)\n", True),
+        ("from ray import tune\ntune.Tuner(train)\n", True),
+        ("import optuna\nstudy = optuna.create_study()\n", True),
+        ("from optuna.samplers import TPESampler\nTPESampler()\n", True),
+        ("import optuna\n", False),
+    ],
+)
+def test_default_hyperparameter_search_apis(code, expected):
+    assert have_hyperparameter_searching_attempt(code) is expected
