@@ -538,7 +538,9 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
             if name == "":
                 continue
 
-            layer_type = type(module).__name__
+            # loaded TorchScript modules are all RecursiveScriptModule; the layer kind (Conv1d,
+            # ReLU, ...) is kept in `original_name`
+            layer_type = getattr(module, "original_name", type(module).__name__)
             # pull out the usual hyperparams for this layer
             params = {}
             for attr in (
@@ -552,7 +554,10 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
                 "bias",  # Conv2d, Linear
             ):
                 if hasattr(module, attr):
-                    params[attr] = getattr(module, attr)
+                    value = getattr(module, attr)
+                    if value is None or isinstance(value, torch.Tensor):
+                        value = value is not None  # `bias`: whether there is one
+                    params[attr] = value
 
             # capture shapes of any weight/bias tensors
             shapes = {}
@@ -569,12 +574,9 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
     if set(a1) != set(a2):
         return True
 
-    # for layers in common, compare layer type and parameter shapes (the hyperparameters
-    # collected above are not compared)
+    # for layers in common, compare layer type, hyperparameters and parameter shapes
     for name in a1:
-        t1, _, s1 = a1[name]
-        t2, _, s2 = a2[name]
-        if t1 != t2 or s1 != s2:
+        if a1[name] != a2[name]:
             return True
     return False
 

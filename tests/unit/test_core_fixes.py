@@ -19,6 +19,8 @@ from timeseriesgym.grade import grade_code, grade_jsonl, validate_submission
 from timeseriesgym.registry import Registry
 from timeseriesgym.utils import (
     InvalidSubmissionError,
+    TorchModel,
+    have_different_hyperparameters,
     load_models,
     load_scripts,
     load_submissions,
@@ -418,3 +420,36 @@ def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
         "submission_path": str(root[HPS_ID]),
         "solution_file_path": str(root[HPS_ID] / "solution.py"),
     }
+
+
+# ---------------------------------------------------------------- hyperparameter search
+
+
+def _scripted(tmp_path: Path, name: str, **kwargs) -> TorchModel:
+    import torch
+    from torch import nn
+
+    class Net(nn.Module):
+        def __init__(self, stride=1, padding=0, act=None):
+            super().__init__()
+            self.conv = nn.Conv1d(12, 8, 3, stride=stride, padding=padding)
+            self.act = act if act is not None else nn.ReLU()
+            self.fc = nn.Linear(8, 5)
+
+        def forward(self, x):
+            return self.fc(self.act(self.conv(x)).mean(-1))
+
+    path = tmp_path / f"{name}.pt"
+    torch.jit.script(Net(**kwargs)).save(str(path))  # as the PTB-XL description asks
+    return TorchModel.load(str(path))
+
+
+def test_torchscript_models_compare_their_layer_hyperparameters(tmp_path):
+    from torch import nn
+
+    baseline = _scripted(tmp_path, "baseline")
+    assert not have_different_hyperparameters(baseline, _scripted(tmp_path, "same"))
+    # same parameter shapes; these used to count as "same hyperparameters" (score -inf)
+    assert have_different_hyperparameters(baseline, _scripted(tmp_path, "stride", stride=2))
+    assert have_different_hyperparameters(baseline, _scripted(tmp_path, "pad", padding=1))
+    assert have_different_hyperparameters(baseline, _scripted(tmp_path, "gelu", act=nn.GELU()))
