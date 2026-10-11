@@ -137,33 +137,26 @@ class Grader:
             num_teams
         )
 
+        no_medal = {
+            "gold_medal": False,
+            "silver_medal": False,
+            "bronze_medal": False,
+            "above_median": False,
+            "gold_threshold": gold_threshold,
+            "silver_threshold": silver_threshold,
+            "bronze_threshold": bronze_threshold,
+            "median_threshold": median_threshold,
+        }
+
         if score is None:
-            return {
-                "gold_medal": False,
-                "silver_medal": False,
-                "bronze_medal": False,
-                "above_median": False,
-                "gold_threshold": gold_threshold,
-                "silver_threshold": silver_threshold,
-                "bronze_threshold": bronze_threshold,
-                "median_threshold": median_threshold,
-            }
+            return no_medal
 
         assert isinstance(
             score, float | int
         ), f"Expected `score` to be a `float` or `int` but got a {type(score)}."
 
         if not np.isfinite(score):  # e.g. -inf from an invalid hyperparameter search
-            return {
-                "gold_medal": False,
-                "silver_medal": False,
-                "bronze_medal": False,
-                "above_median": False,
-                "gold_threshold": gold_threshold,
-                "silver_threshold": silver_threshold,
-                "bronze_threshold": bronze_threshold,
-                "median_threshold": median_threshold,
-            }
+            return no_medal
 
         gold_medal = score <= gold_threshold if lower_is_better else score >= gold_threshold
         silver_medal = not gold_medal and (
