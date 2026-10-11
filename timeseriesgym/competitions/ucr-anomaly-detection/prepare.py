@@ -13,13 +13,7 @@ logger = logging.getLogger(__name__)
 def parse_ucr_anomaly_detection_dataset(datasets_name: str):
     underscore_split = datasets_name.split("_")
     dataset_dict = {
-        "name": underscore_split[0]
-        + "_"
-        + underscore_split[1]
-        + "_"
-        + underscore_split[2]
-        + "_"
-        + underscore_split[3],
+        "name": "_".join(underscore_split[:4]),
         "end_training_data": int(underscore_split[4]),
         "anomaly_begin": int(underscore_split[5]),
         "anomaly_end": int(underscore_split[6]),
