@@ -299,3 +299,11 @@ def test_competition_ids_are_the_competition_directories():
     assert ids == expected and "conf" not in ids  # was listed from the FE example's Hydra config
     for competition_id in ids:  # `prepare --all` and `cleanup --all` load every id
         assert registry.get_competition(competition_id).id == competition_id
+
+
+def test_agent_environment_has_the_packages_of_shipped_helpers():
+    requirements = (REPO / "environment" / "requirements.txt").read_text()
+    names = {re.split(r"[=<>~ ]", line)[0].lower() for line in requirements.splitlines() if line}
+    helper = REPO / "timeseriesgym/competitions/gift-eval-short-horizon/dataset.py"
+    assert "from dotenv import" in helper.read_text()  # copied to the agent's /home/data
+    assert "python-dotenv" in names
