@@ -5,6 +5,8 @@ prepare) is unaffected.
 """
 
 import importlib
+import pickle
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import accuracy_score, root_mean_squared_error
 
+from timeseriesgym.grade_helpers import Grader, GradingInput
 from timeseriesgym.metrics import root_mean_squared_log_error
 from timeseriesgym.utils import InvalidSubmissionError
 
@@ -266,6 +269,69 @@ def test_m5_rejects_repeated_or_unknown_ids():
         grade(repeated, answers)
     with pytest.raises(InvalidSubmissionError, match="ids"):
         grade(noisy.assign(id=noisy.id.str.replace("_validation", "_evaluation")), answers)
+
+
+# ---------------------------------------------------------------- hyperparameter search
+
+
+def _hps_folder(tmp_path):
+    from sklearn.linear_model import Ridge
+
+    folder = tmp_path / "submission"
+    folder.mkdir()
+    (folder / "baseline_model.pkl").write_bytes(pickle.dumps(Ridge(alpha=1.0)))
+    (folder / "model.pkl").write_bytes(pickle.dumps(Ridge(alpha=3.0)))
+    answers = pd.DataFrame({"row_id": ["0-5", "0-11", "1-5"], "target": [0.002, 0.001, 0.004]})
+    answers.assign(target=[0.003, 0.002, 0.002]).to_csv(
+        folder / "baseline_submission.csv", index=False
+    )
+    answers.assign(target=[0.0025, 0.001, 0.003]).to_csv(folder / "submission.csv", index=False)
+    return folder, answers
+
+
+def test_hyperparameter_search_requires_the_solution_code(tmp_path):
+    cid = "optiver-realized-volatility-prediction-hyperparameter-search"
+    module = _module(cid)
+    config = {
+        "baseline_submission_name": "baseline_submission.csv",
+        "improved_submission_name": "submission.csv",
+        "baseline_model_name": "baseline_model.pkl",
+        "improved_model_name": "model.pkl",
+    }
+    folder, answers = _hps_folder(tmp_path)
+    baseline = module.grade(pd.read_csv(folder / "baseline_submission.csv"), answers)
+    improved = module.grade(pd.read_csv(folder / "submission.csv"), answers)
+    expected = -(improved - baseline) / baseline
+
+    script = tmp_path / "search.py"
+    script.write_text("import optuna\nstudy = optuna.create_study()\n")
+    assert module.grade_hyperparameter_search(folder, answers, config, script) == pytest.approx(
+        expected
+    )
+    code_dir = tmp_path / "code"
+    code_dir.mkdir()
+    (code_dir / "train.py").write_text("print('train')\n")
+    shutil.copy(script, code_dir / "search.py")
+    assert module.grade_hyperparameter_search(folder, answers, config, code_dir) == pytest.approx(
+        expected
+    )
+
+    no_search = tmp_path / "manual.py"
+    no_search.write_text("from sklearn.linear_model import Ridge\nRidge(alpha=3.0)\n")
+    assert module.grade_hyperparameter_search(folder, answers, config, no_search) == -np.inf
+
+    # without the solution code: invalid (was graded), and before any pickle is loaded
+    (folder / "model.pkl").write_bytes(b"not a pickle")
+    for missing in [None, tmp_path / "absent.py"]:
+        with pytest.raises(InvalidSubmissionError, match="solution code is required"):
+            module.grade_hyperparameter_search(folder, answers, config, missing)
+    grader = Grader(
+        name="hps", grade_fn=f"timeseriesgym.competitions.{cid}.grade:grade_hyperparameter_search"
+    )
+    inputs = GradingInput(
+        submission_folder_path=folder, answers=answers, hyperparameter_search_config=config
+    )
+    assert grader(inputs) is None
 
 
 # ---------------------------------------------------------------- amp prepare

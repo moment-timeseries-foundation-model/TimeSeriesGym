@@ -265,10 +265,30 @@ def grade_relative_improvement(
     Grades a hyperparameter search as the relative improvement of the improved submission's
     score over the baseline submission's score, negated when lower scores are better.
 
-    Returns -inf if the two models have the same hyperparameters, or if a solution file is
-    given and it shows no hyperparameter search with one of `packages_to_look_for` (see
-    `have_hyperparameter_searching_attempt` for the default list).
+    The solution code is required: `solution_file_path` is a script, or a directory whose `.py`
+    files are searched. Raises InvalidSubmissionError without it. Returns -inf if the solution
+    shows no hyperparameter search with one of `packages_to_look_for` (see
+    `have_hyperparameter_searching_attempt` for the default list), or if the two models have
+    the same hyperparameters.
     """
+    # Checked first, before any submitted model is loaded.
+    if solution_file_path is None or not Path(solution_file_path).exists():
+        raise InvalidSubmissionError(
+            "Submission invalid! The solution code is required to grade a hyperparameter search, "
+            f"but none was found at {solution_file_path}."
+        )
+    solution_path = Path(solution_file_path)
+    scripts = sorted(solution_path.rglob("*.py")) if solution_path.is_dir() else [solution_path]
+    logger.info("[INFO] Searching the solution code for a hyperparameter searching attempt.")
+    if not any(
+        have_hyperparameter_searching_attempt(
+            load_scripts(script), packages_to_look_for=packages_to_look_for
+        )
+        for script in scripts
+    ):
+        logger.info("[INFO] Hyperparameter searching attempt not found.")
+        return np.inf * -1
+
     baseline_model = load_models(
         submission_folder_path / hyperparameter_search_config["baseline_model_name"]
     )
@@ -281,8 +301,6 @@ def grade_relative_improvement(
     improved_submission = load_submissions(
         submission_folder_path / hyperparameter_search_config["improved_submission_name"]
     )
-    has_solution_file = solution_file_path is not None
-    solution_file = load_scripts(solution_file_path) if has_solution_file else None
 
     if not have_different_hyperparameters(baseline_model, improved_model):
         logger.info("[INFO] The hyperparameters are the same as the baseline model.")
@@ -296,15 +314,5 @@ def grade_relative_improvement(
     logger.info(f"[INFO] Baseline score: {baseline_score}")
     logger.info(f"[INFO] Improved score: {improved_score}")
     logger.info(f"[INFO] Improvement: {improvement}")
-
-    if solution_file is not None:
-        logger.info(
-            "[INFO] Solution file is provided, searching for hyperparameter searching attempt."
-        )
-        if not have_hyperparameter_searching_attempt(
-            solution_file, packages_to_look_for=packages_to_look_for
-        ):
-            logger.info("[INFO] Hyperparameter searching attempt not found.")
-            return np.inf * -1
 
     return improvement
