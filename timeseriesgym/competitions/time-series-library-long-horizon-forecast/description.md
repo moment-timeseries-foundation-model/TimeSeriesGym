@@ -71,11 +71,12 @@ Your objective is to tackle the [Long Term Forecasting Challenge (LTF)](https://
 Your `data` directory includes the following:
 
 * **Time-Series-Library/** – the cloned TSL repository
-* **datanames/** – the raw time series data in `.csv` format. You will need these file to correctly load the dataset class in TSL.
+* **ETT-small/, electricity/, exchange_rate/, illness/, traffic/, weather/** – the raw time series data in `.csv` format (`ETTh1`, `ETTh2`, `ETTm1`, `ETTm2`, `electricity`, `exchange_rate`, `national_illness`, `traffic`, `weather`). You will need these files to correctly load the dataset class in TSL.
 * **sample\_submission.h5** – an example output for submission
 
 ## Evaluation
 
-* Your prediction will be evaluated base on Mean Squared Error (MSE) between prediction and ground truth at each time stamp.
+* Your prediction will be evaluated based on Mean Squared Error (MSE) between prediction and ground truth at each time stamp, computed separately for each dataset.
+* The ground truth is the target of TSL's data loader for the test split (all variables, as with `--features M`). The loader standardises each dataset with a scaler fitted on its training split, so predict on that standardised scale, not in raw units (do not inverse-transform your predictions).
 
 > ⚠ **Note:** Any attempt to hard-code or replicate the expected results without running the actual model is strictly prohibited.
