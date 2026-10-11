@@ -161,6 +161,48 @@ def test_mit_bih_weak_supervision_selects_classes_by_name():
         grade(other_ids, answers.copy())
 
 
+# ---------------------------------------------------------------- non-finite predictions
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_amp_optiver_osic_reject_non_finite_predictions(bad):
+    amp = _grade_fn("amp-parkinsons-disease-progression-prediction")
+    ids = [f"55_0_updrs_{k}_plus_0_months" for k in range(1, 5)]
+    answers = pd.DataFrame({"prediction_id": ids, "rating": [3.0, 0.0, 10.0, 1.0], "group_key": 0})
+    submission = answers.assign(rating=[4.0, 0.0, 8.0, 1.0])
+    expected = np.mean(200 * np.abs([1.0, 0.0, 2.0, 0.0]) / np.array([9.0, 2.0, 20.0, 4.0]))
+    assert amp(submission.copy(), answers.copy()) == pytest.approx(expected)
+    with pytest.raises(InvalidSubmissionError, match="finite"):
+        amp(submission.assign(rating=[4.0, bad, 8.0, 1.0]), answers.copy())
+
+    optiver = _grade_fn("optiver-realized-volatility-prediction")
+    answers = pd.DataFrame({"row_id": ["0-5", "0-11", "1-5"], "target": [0.002, 0.001, 0.004]})
+    submission = answers.assign(target=[0.0025, 0.001, 0.003])
+    rmspe = np.sqrt(np.mean(((answers.target - submission.target) / answers.target) ** 2))
+    assert optiver(submission.copy(), answers.copy()) == pytest.approx(rmspe)
+    with pytest.raises(InvalidSubmissionError, match="finite"):
+        optiver(submission.assign(target=[0.0025, bad, 0.003]), answers.copy())
+
+    osic = _grade_fn("osic-pulmonary-fibrosis-progression")
+    answers = pd.DataFrame({"Patient_Week": ["p_1", "p_2"], "FVC": [3000, 2500]})
+    submission = pd.DataFrame(
+        {"Patient_Week": ["p_0", "p_1", "p_2"], "FVC": [1, 3100, 2400], "Confidence": [1, 100, 200]}
+    )
+    sigma, delta = np.array([100, 200]), np.array([100, 100])
+    laplace = np.mean(-np.sqrt(2) * delta / sigma - np.log(np.sqrt(2) * sigma))
+    assert osic(submission.copy(), answers.copy()) == pytest.approx(laplace)
+    for column in ["FVC", "Confidence"]:
+        broken = submission.copy()
+        broken[column] = broken[column].astype(float)
+        broken.loc[1, column] = bad
+        with pytest.raises(InvalidSubmissionError, match="finite"):
+            osic(broken, answers.copy())  # NaN used to give a "valid" NaN score
+    # rows that are not scored may hold anything, as before
+    unscored = submission.copy()
+    unscored.loc[0, "FVC"] = np.nan
+    assert osic(unscored, answers.copy()) == pytest.approx(laplace)
+
+
 # ---------------------------------------------------------------- amp prepare
 
 

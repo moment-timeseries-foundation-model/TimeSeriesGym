@@ -1,6 +1,7 @@
 import numpy as np
 from pandas import DataFrame
 
+from timeseriesgym.competitions.utils import check_finite
 from timeseriesgym.utils import InvalidSubmissionError
 
 
@@ -30,6 +31,8 @@ def grade(submission: DataFrame, answers: DataFrame) -> float:
         raise InvalidSubmissionError(
             "Submission must include the final three visits for each patient"
         )
+    check_finite(submission["FVC"], "FVC")
+    check_finite(submission["Confidence"], "Confidence")
 
     return mean_laplace_log_likelihood(
         sigma_predicted=submission["Confidence"].values,

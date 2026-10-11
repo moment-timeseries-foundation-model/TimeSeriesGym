@@ -195,6 +195,16 @@ def prepare_for_id_matched_metric(
     return {"y_true": y_true, "y_pred": y_pred}
 
 
+def check_finite(values, name: str) -> None:
+    """Raises InvalidSubmissionError unless every value is a finite number."""
+    try:
+        finite = np.isfinite(np.asarray(values, dtype=float)).all()
+    except (TypeError, ValueError) as err:
+        raise InvalidSubmissionError(f"Submission `{name}` values must be numbers") from err
+    if not finite:
+        raise InvalidSubmissionError(f"Submission `{name}` values must be finite (no NaN or inf)")
+
+
 def prepare_for_auroc_metric(
     submission: pd.DataFrame,
     answers: pd.DataFrame,
