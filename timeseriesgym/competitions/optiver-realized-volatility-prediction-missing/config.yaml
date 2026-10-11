@@ -16,6 +16,8 @@ prizes:
 
 parent_id: optiver-realized-volatility-prediction
 
+description: timeseriesgym/competitions/optiver-realized-volatility-prediction-missing/description.md
+
 dataset:
   answers: optiver-realized-volatility-prediction-missing/prepared/private/test.csv
   sample_submission: optiver-realized-volatility-prediction-missing/prepared/public/sample_submission.csv

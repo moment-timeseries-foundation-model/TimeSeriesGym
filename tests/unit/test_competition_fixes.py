@@ -609,3 +609,37 @@ def test_long_horizon_prepare_does_not_swallow_failures(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "clone_repository", failing_clone)
     with pytest.raises(subprocess.CalledProcessError):
         module.prepare(tmp_path, tmp_path, tmp_path)
+
+
+# ---------------------------------------------------------------- missing-data variants
+
+
+@pytest.mark.parametrize(
+    "competition_id,parent_id,columns",
+    [
+        (
+            "optiver-realized-volatility-prediction-missing",
+            "optiver-realized-volatility-prediction",
+            "every column except `stock_id`, `time_id` and `seconds_in_bucket`",
+        ),
+        (
+            "ventilator-pressure-prediction-missing",
+            "ventilator-pressure-prediction",
+            "`R`, `C`, `u_in` and `u_out`",
+        ),
+    ],
+)
+def test_missing_data_variants_describe_the_missing_values(
+    tmp_path, competition_id, parent_id, columns
+):
+    from timeseriesgym.registry import Registry
+
+    registry = Registry(tmp_path)
+    competition = registry.get_competition(competition_id)
+    simulator = competition.missingness_simulator
+    assert (
+        f"{simulator.missingness_ratio:.0%} of the values of {columns}" in competition.description
+    )
+    # it used to inherit its parent's text, which does not mention the missing values
+    parent = registry.get_competition(parent_id).description
+    assert "### Missing Data" not in parent and "### Files" in competition.description
