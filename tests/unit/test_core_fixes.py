@@ -767,3 +767,14 @@ def test_evaluation_splits_list_only_gradeable_challenges():
             source = inspect.getsource(grade_fn)
             # the CSDI graders are stubs, and all.txt listed both CSDI challenges
             assert "raise NotImplementedError" not in source, (split.name, competition_id)
+
+
+def test_preparing_an_uncategorised_competition_says_why_it_fails(tmp_path):
+    import dataclasses
+
+    from timeseriesgym.data import download_and_prepare_dataset
+
+    listed = Registry(tmp_path).get_competition("spaceship-titanic")
+    unlisted = dataclasses.replace(listed, id="new-challenge")
+    with pytest.raises(ValueError, match="constants.py"):  # was UnboundLocalError: zipfile
+        download_and_prepare_dataset(unlisted, skip_leaderboard=True)
