@@ -559,3 +559,21 @@ def test_code_grading_data_of_unsupported_type_is_an_error(tmp_path):
     config = {"required_args": {"x": {"file_name": "x.npy"}, "y": {"file_name": "y.csv"}}}
     with pytest.raises(ValueError, match="Unsupported file type"):  # y silently got x's array
         load_dataset_for_function(config, tmp_path)
+
+
+# ---------------------------------------------------------------- runners
+
+
+def test_run_agent_rejects_zero_workers(tmp_path):
+    competitions = tmp_path / "split.txt"
+    competitions.write_text("spaceship-titanic\n")
+    args = ["--agent-id", "dummy", "--n-workers", "0", "--competition-set", str(competitions)]
+    out = subprocess.run(
+        [sys.executable, "run_agent.py", *args],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert out.returncode == 2 and "--n-workers must be at least 1" in out.stderr
