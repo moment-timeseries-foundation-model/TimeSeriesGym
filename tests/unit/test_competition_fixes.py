@@ -326,3 +326,36 @@ def test_amp_prepare_gives_each_prediction_id_its_own_part(tmp_path):
     test_clinical = pd.read_csv(public / "test_clinical_data.csv")
     assert len(test_clinical) == 9 * test_clinical.patient_id.nunique()
     assert test_clinical.row_id.is_unique
+
+
+# ---------------------------------------------------------------- M5 prepare
+
+
+def test_m5_prepare_keeps_prices_of_every_training_day(tmp_path):
+    prepare = _module("m5-forecasting-accuracy", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    for d in (raw, public, private):
+        d.mkdir()
+    records, test, sample = _m5_answers(np.random.default_rng(0))
+    test.to_csv(raw / "sales_train_evaluation.csv", index=False)
+    calendar = pd.DataFrame([r for r in records if r["source"] == "calendar"]).drop(
+        columns="source"
+    )
+    calendar.to_csv(raw / "calendar.csv", index=False)
+    prices = pd.DataFrame([r for r in records if r["source"] == "sell_prices"]).drop(
+        columns="source"
+    )
+    prices.to_csv(raw / "sell_prices.csv", index=False)
+    evaluation = sample.assign(id=sample.id.str.replace("_validation", "_evaluation"))
+    pd.concat([sample, evaluation]).to_csv(raw / "sample_submission.csv", index=False)
+
+    prepare(raw, public, private)
+
+    week = calendar.set_index("d")["wm_yr_wk"]
+    public_weeks = set(pd.read_csv(public / "sell_prices.csv").wm_yr_wk)
+    assert week["d_500"] in public_weeks  # "d_500" > "d_1913" as strings: was dropped
+    assert public_weeks == set(week[[f"d_{i}" for i in range(1, 1914)]])
+    assert week["d_1941"] not in public_weeks  # forecast-period prices stay out, as before
+    train = pd.read_csv(public / "train.csv")
+    assert train.columns[-1] == "d_1913" and len(train) == 4
+    assert pd.read_csv(public / "sample_submission.csv").id.tolist() == sample.id.tolist()
