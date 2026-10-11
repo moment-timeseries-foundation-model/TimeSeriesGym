@@ -1,8 +1,12 @@
 """Regression tests for fixes in the core package, the container environment and the runners."""
 
+import importlib
 import pickle
+import sys
+import types
 from collections import defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -166,3 +170,38 @@ def test_validation_of_feature_enhancement_prediction_files(tmp_path):
     assert validate_submission(submission, competition) == (True, "Submission is valid.")
     submission.write_text("ecg_id,prediction\n1,NORM\n2,MI\n")
     assert not validate_submission(submission, competition)[0]
+
+
+def test_grading_server_saves_each_upload_in_a_private_directory(tmp_path, monkeypatch):
+    # flask is not installed in the test image: stand in for the three names the server uses
+    flask = types.ModuleType("flask")
+    flask.Flask = lambda name: SimpleNamespace(route=lambda *a, **k: (lambda fn: fn))
+    flask.jsonify = lambda payload: payload
+    flask.request = SimpleNamespace(files={})
+    monkeypatch.setitem(sys.modules, "flask", flask)
+    monkeypatch.delitem(sys.modules, "environment.grading_server", raising=False)
+    server = importlib.import_module("environment.grading_server")
+
+    seen = []
+
+    def run_validation(path: Path) -> str:
+        seen.append((path, path.read_bytes(), oct(path.parent.stat().st_mode & 0o777)))
+        return "checked"
+
+    monkeypatch.setattr(server, "run_validation", run_validation)
+
+    def save(path):
+        Path(path).write_bytes(b"x,y\n")
+
+    upload = SimpleNamespace(filename="my_submission.CSV", save=save)
+    flask.request.files = {"file": upload}
+    assert server.validate() == {"result": "checked"}
+    assert server.validate() == {"result": "checked"}
+
+    (first, data, mode), (second, _, _) = seen
+    assert data == b"x,y\n" and first.suffix == ".csv" and mode == "0o700"
+    assert first.parent != second.parent  # was the fixed /tmp/submission_to_validate.csv
+    assert not first.exists() and not second.exists()
+
+    flask.request.files = {"file": SimpleNamespace(filename="run.sh", save=save)}
+    assert server.validate()[1] == 400
