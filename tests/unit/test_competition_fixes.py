@@ -203,6 +203,71 @@ def test_amp_optiver_osic_reject_non_finite_predictions(bad):
     assert osic(unscored, answers.copy()) == pytest.approx(laplace)
 
 
+# ---------------------------------------------------------------- M5: ids
+
+
+def _m5_answers(rng):
+    days = [f"d_{i}" for i in range(1, 1942)]
+    items = pd.DataFrame(
+        {
+            "item_id": ["A", "B", "C", "D"],
+            "dept_id": ["D1", "D1", "D2", "D2"],
+            "cat_id": ["C1", "C1", "C2", "C2"],
+            "store_id": ["S1", "S1", "S1", "S1"],
+            "state_id": ["CA", "CA", "CA", "CA"],
+        }
+    )
+    items.insert(0, "id", [f"{i}_S1_evaluation" for i in items.item_id])
+    sales = pd.DataFrame(rng.integers(1, 9, size=(4, len(days))), columns=days)
+    test = pd.concat([items, sales], axis=1)
+    calendar = pd.DataFrame({"d": [f"d_{i}" for i in range(1, 1970)]})
+    calendar["wm_yr_wk"] = 11101 + (np.arange(1969) // 7)
+    prices = pd.DataFrame(
+        [
+            (s, i, w, 1.0 + k)
+            for k, i in enumerate("ABCD")
+            for s in ["S1"]
+            for w in calendar.wm_yr_wk.unique()
+        ],
+        columns=["store_id", "item_id", "wm_yr_wk", "sell_price"],
+    )
+    sample = pd.DataFrame({"id": [f"{i}_S1_validation" for i in "ABCD"]})
+    for k in range(1, 29):
+        sample[f"F{k}"] = 0
+    records = []
+    for source, frame in [
+        ("test", test),
+        ("calendar", calendar),
+        ("sell_prices", prices),
+        ("sample_submission", sample),
+    ]:
+        records += [dict(r, source=source) for r in frame.to_dict(orient="records")]
+    return records, test, sample
+
+
+def test_m5_rejects_repeated_or_unknown_ids():
+    grade = _grade_fn("m5-forecasting-accuracy")
+    rng = np.random.default_rng(0)
+    answers, test, sample = _m5_answers(rng)
+    truth = test[[f"d_{1913 + k}" for k in range(1, 29)]].to_numpy()
+    perfect = sample.copy()
+    perfect.iloc[:, 1:] = truth
+    assert grade(perfect.copy(), answers) == pytest.approx(0.0)
+
+    noisy = sample.copy()
+    noisy.iloc[:, 1:] = truth + rng.integers(0, 3, truth.shape)
+    score = grade(noisy.copy(), answers)
+    assert score > 0
+    assert grade(noisy.sample(frac=1, random_state=0), answers) == pytest.approx(score)
+
+    repeated = noisy.copy()
+    repeated.loc[1, "id"] = repeated.loc[0, "id"]  # was scored with rows shifted onto other series
+    with pytest.raises(InvalidSubmissionError, match="ids"):
+        grade(repeated, answers)
+    with pytest.raises(InvalidSubmissionError, match="ids"):
+        grade(noisy.assign(id=noisy.id.str.replace("_validation", "_evaluation")), answers)
+
+
 # ---------------------------------------------------------------- amp prepare
 
 
