@@ -1,3 +1,4 @@
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -111,6 +112,15 @@ def is_one_hot_encoded(xs: ndarray) -> bool:
     assert isinstance(is_one_hot, bool), f"Expected a boolean, got {type(is_one_hot)}."
 
     return is_one_hot
+
+
+def download_file(url: str, destination: Path) -> Path:
+    """Downloads `url` to `destination`; raises on any HTTP or network error.
+
+    `curl -f` fails on an HTTP error instead of saving the error page as the file.
+    """
+    subprocess.run(["curl", "-fsSL", "-o", str(destination), url], check=True)
+    return destination
 
 
 def get_ids_from_tf_records(tf_record_path: Path, id_feature: str = "image_name") -> list[str]:

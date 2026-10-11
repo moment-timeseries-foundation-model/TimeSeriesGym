@@ -1,10 +1,11 @@
-import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
+
+from timeseriesgym.competitions.utils import download_file
 
 
 def generate_synthetic_timeseries(num_samples=1000, t=50, seed=42):
@@ -77,14 +78,17 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     torch.save(val_data, public / "val_data.pt")
 
     # Download the TensorFlow code files
-    os.system(
-        f"curl -L -o {public}/resnet.py https://raw.githubusercontent.com/moment-timeseries-foundation-model/dl-4-tsc/resnet-tensorflow/resnet_tensorflow/resnet.py"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/dl-4-tsc/resnet-tensorflow/resnet_tensorflow/resnet.py",
+        public / "resnet.py",
     )
-    os.system(
-        f"curl -L -o {public}/utils.py https://raw.githubusercontent.com/moment-timeseries-foundation-model/dl-4-tsc/resnet-tensorflow/resnet_tensorflow/utils.py"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/dl-4-tsc/resnet-tensorflow/resnet_tensorflow/utils.py",
+        public / "utils.py",
     )
 
     # Download the sample submission file
-    os.system(
-        f"curl -L -o {public}/sample_submission.py https://raw.githubusercontent.com/moment-timeseries-foundation-model/dl-4-tsc/resnet-tensorflow/resnet_pytorch/sample_submission.py"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/dl-4-tsc/resnet-tensorflow/resnet_pytorch/sample_submission.py",
+        public / "sample_submission.py",
     )

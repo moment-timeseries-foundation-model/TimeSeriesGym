@@ -12,11 +12,9 @@ from timeseriesgym.utils import clone_repository, extract
 def prepare(raw: Path, public: Path, private: Path):
     # Download the long-term forecast dataset from Google Drive by TSL authors
     url = "https://drive.google.com/drive/folders/1vE0ONyqPlym2JaaAoEe0XNDR8FS_d322"
-    try:
-        gdown.download_folder(url=url, output=str(raw), quiet=False, use_cookies=False)
-    except Exception as e:
-        logging.error(f"Failed to download the dataset from Google Drive: {e}")
-        return
+    # gdown returns None when it cannot list the folder; failures must stop the prepare
+    if not gdown.download_folder(url=url, output=str(raw), quiet=False, use_cookies=False):
+        raise RuntimeError(f"Failed to download the dataset from Google Drive: {url}")
 
     # Unzip the downloaded files in the long_term_forecast directory
     zip_dir = raw
@@ -31,16 +29,12 @@ def prepare(raw: Path, public: Path, private: Path):
         extracted_folder.rename(public / zip_path.stem)
 
     # Download the tsl GitHub repository
-    try:
-        clone_repository(
-            "https://github.com/raycai420/Time-Series-Library.git",
-            public / "Time-Series-Library",
-            branch="long-horizon-forecast",
-            commit="7f9820b0cc67c6ae12307df2cc0a348a7721b5ff",
-        )
-    except Exception as e:
-        logging.error(f"Failed to clone the Time-Series-Library repository: {e}")
-        return
+    clone_repository(
+        "https://github.com/raycai420/Time-Series-Library.git",
+        public / "Time-Series-Library",
+        branch="long-horizon-forecast",
+        commit="7f9820b0cc67c6ae12307df2cc0a348a7721b5ff",
+    )
 
     # Remove all .json and .csv files from the cloned repository
     for file in (public / "Time-Series-Library").rglob("*"):

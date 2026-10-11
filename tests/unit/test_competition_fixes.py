@@ -8,6 +8,7 @@ import ast
 import importlib
 import pickle
 import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import accuracy_score, root_mean_squared_error
 
+from timeseriesgym.competitions.utils import download_file
 from timeseriesgym.grade_helpers import Grader, GradingInput
 from timeseriesgym.metrics import root_mean_squared_log_error
 from timeseriesgym.utils import InvalidSubmissionError
@@ -528,3 +530,67 @@ def test_m5_prepare_keeps_prices_of_every_training_day(tmp_path):
     train = pd.read_csv(public / "train.csv")
     assert train.columns[-1] == "d_1913" and len(train) == 4
     assert pd.read_csv(public / "sample_submission.csv").id.tolist() == sample.id.tolist()
+
+
+# ---------------------------------------------------------------- checked downloads
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+def test_download_file_fails_instead_of_saving_an_error(tmp_path):
+    source = tmp_path / "source.csv"
+    source.write_text("a,b\n1,2\n")
+    dest = download_file(source.as_uri(), tmp_path / "copy.csv")
+    assert dest.read_text() == "a,b\n1,2\n"
+    with pytest.raises(subprocess.CalledProcessError):
+        download_file((tmp_path / "missing.csv").as_uri(), tmp_path / "missing_copy.csv")
+
+
+def test_stomp_prepare_files_and_failed_download(tmp_path, monkeypatch):
+    module = _module("stomp-R-to-python", "prepare")
+    public, private = tmp_path / "public", tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+
+    def fake_download(url, destination):
+        destination.write_text("x\n1.0\n2.0\n" if url.endswith(".csv") else "# code\n")
+        return destination
+
+    def fake_clone(url, destination, commit=None):
+        (destination / "R").mkdir(parents=True)
+        (destination / "R" / "stomp.R").write_text("stomp <- 1\n")
+        (destination / "README.md").write_text("tsmp\n")
+        return destination
+
+    monkeypatch.setattr(module, "download_file", fake_download)
+    monkeypatch.setattr(module, "clone_repository", fake_clone)
+    module.prepare(tmp_path / "raw", public, private)
+    assert sorted(p.name for p in public.iterdir()) == [
+        "R",
+        "query_data.npy",
+        "ref_data.npy",
+        "sample_submission.py",
+    ]
+    assert (public / "R" / "stomp.R").is_file() and (private / "test_results.csv").is_file()
+
+    def failing_download(url, destination):
+        raise subprocess.CalledProcessError(22, ["curl", url])  # was ignored by os.system
+
+    monkeypatch.setattr(module, "download_file", failing_download)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.prepare(tmp_path / "raw", tmp_path, tmp_path)
+
+
+def test_long_horizon_prepare_does_not_swallow_failures(tmp_path, monkeypatch):
+    pytest.importorskip("gdown")
+    module = _module("time-series-library-long-horizon-forecast", "prepare")
+    monkeypatch.setattr(module.gdown, "download_folder", lambda **kwargs: None)
+    with pytest.raises(RuntimeError, match="Google Drive"):  # used to log and return
+        module.prepare(tmp_path, tmp_path, tmp_path)
+
+    def failing_clone(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, ["git", "fetch"])
+
+    monkeypatch.setattr(module.gdown, "download_folder", lambda **kwargs: ["file"])
+    monkeypatch.setattr(module, "clone_repository", failing_clone)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.prepare(tmp_path, tmp_path, tmp_path)
