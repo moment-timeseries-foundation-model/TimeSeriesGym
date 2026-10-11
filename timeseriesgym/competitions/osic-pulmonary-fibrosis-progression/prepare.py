@@ -1,8 +1,9 @@
-import pandas as pd
 import shutil
-
 from pathlib import Path
+
+import pandas as pd
 from sklearn.model_selection import train_test_split
+
 from timeseriesgym.utils import read_csv
 
 
@@ -49,7 +50,7 @@ def prepare(raw: Path, public: Path, private: Path):
             src=raw / "train" / new_test_id,
             dst=public / "test" / new_test_id,
         )
-    
+
     # Construct new train and test ground truth csvs
     new_train_df.to_csv(public / "train.csv", index=False)
     # For the test set, only the initial FVC measurement is provided
@@ -57,21 +58,31 @@ def prepare(raw: Path, public: Path, private: Path):
     new_test_initial_df.to_csv(public / "test.csv", index=False)
 
     # For test ground truth, only the final three visits are used for grading
-    new_test_final_df = new_test_df.groupby("Patient", group_keys=False).apply(
-        lambda x: x.nlargest(3, "Weeks").sort_values("Weeks")).reset_index(drop=True)
-    new_test_final_df["Patient_Week"] = \
+    new_test_final_df = (
+        new_test_df.groupby("Patient", group_keys=False)
+        .apply(lambda x: x.nlargest(3, "Weeks").sort_values("Weeks"))
+        .reset_index(drop=True)
+    )
+    new_test_final_df["Patient_Week"] = (
         new_test_final_df["Patient"].astype(str) + "_" + new_test_final_df["Weeks"].astype(str)
+    )
     new_test_final_df = new_test_final_df[["Patient_Week", "FVC"]]
     new_test_final_df.to_csv(private / "test.csv", index=False)
-    
+
     # sample submission includes every patient's `FVC` measurement for every possible week
     all_weeks = sorted(
         read_csv(raw / "sample_submission.csv")["Patient_Week"].str.split("_").str[1].unique(),
-        key=int
+        key=int,
     )
-    sample_submission = pd.DataFrame({
-        "Patient_Week": [f"{patient}_{week}" for patient in new_test_df["Patient"].unique() for week in all_weeks],
-        "FVC": 2000,
-        "Confidence": 100,
-    })
+    sample_submission = pd.DataFrame(
+        {
+            "Patient_Week": [
+                f"{patient}_{week}"
+                for patient in new_test_df["Patient"].unique()
+                for week in all_weeks
+            ],
+            "FVC": 2000,
+            "Confidence": 100,
+        }
+    )
     sample_submission.to_csv(public / "sample_submission.csv", index=False)
