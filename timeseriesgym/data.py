@@ -73,6 +73,9 @@ def download_and_prepare_dataset(
     competition.raw_dir.mkdir(exist_ok=True, parents=True)
     create_prepared_dir(competition)
 
+    is_derived_competition = competition.id in derived_competitions
+    derived_competition_needs_preparation = False
+
     if competition.id in kaggle_original_competitions:
         # Kaggle competitions can be downloaded automatically using the Kaggle API, if the
         # user has accepted the competition rules.
@@ -102,7 +105,7 @@ def download_and_prepare_dataset(
                 f"{zipfile} not found. For non-kaggle competitions, a zip file containing "
                 f"necessary files for the prepare function should be created under {zipfile}"
             )
-    elif competition.id in derived_competitions:
+    elif is_derived_competition:
         # Some competitions are derived from parent competitions. While they might have to be
         # prepared and processed, they do not have to be downlaoded from the internet.
         # These competitions are derived from other downloaded and prepared competitions
@@ -115,18 +118,23 @@ def download_and_prepare_dataset(
         zipfile = None
         data_dir = competition.public_dir.parent.parent.parent  # `raw_dir` may not exist
         new_registry = registry.set_data_dir(data_dir)
-        if competition.parent_id is not None:
-            parent_competition = new_registry.get_competition(competition.parent_id)
-        else:
+        if competition.parent_id is None:
             raise ValueError(
                 f"Parent competition is set to `None` for `{competition.id}`. "
                 "All derived competitions must have a valid `parent_id`."
             )
+        parent_competition = new_registry.get_competition(competition.parent_id)
 
         # Check if the parent competition has already been prepared.
         parent_is_prepared = is_dataset_prepared(parent_competition, grading_only=True)
         derived_competition_needs_preparation = not is_dataset_prepared(competition)
-        if parent_is_prepared and derived_competition_needs_preparation:
+        if not parent_is_prepared:
+            # If the parent competition is not prepared, we cannot prepare the derived competition.
+            raise ValueError(
+                f"Parent competition `{parent_competition.id}` for `{competition.id}` "
+                "has not been prepared yet. Please prepare the parent competition first."
+            )
+        if derived_competition_needs_preparation:
             # Copy leaderboard and prepared files from the parent competition to the child
             # competition
             logger.info(f"Copying files from {parent_competition.name} to {competition.name}.")
@@ -134,17 +142,10 @@ def download_and_prepare_dataset(
             copy_leaderboard(from_competition=parent_competition, to_competition=competition)
             copy_prepared_files(from_competition=parent_competition, to_competition=competition)
         else:
-            # If the parent competition is not prepared, we cannot prepare the derived competition.
-            if not parent_is_prepared:
-                raise ValueError(
-                    f"Parent competition `{parent_competition.id}` for `{competition.id}` "
-                    "has not been prepared yet. Please prepare the parent competition first."
-                )
-            elif not derived_competition_needs_preparation:
-                logger.info(
-                    f"The derived competition `{competition.id}` does not require preparation "
-                    "as it is already prepared."
-                )
+            logger.info(
+                f"The derived competition `{competition.id}` does not require preparation "
+                "as it is already prepared."
+            )
     elif competition.id in coding_competitions:
         # Coding competitions only include reference implementations in another coding language.
         logger.info(
@@ -189,7 +190,7 @@ def download_and_prepare_dataset(
     )
     needs_preparation = not is_prepared or overwrite_checksums
     has_valid_prepare_fn = is_valid_prepare_fn(competition.prepare_fn)
-    original_competition = competition.id not in derived_competitions
+    original_competition = not is_derived_competition
 
     if needs_preparation and has_valid_prepare_fn and original_competition:
         if competition.public_dir.parent.exists() and overwrite_checksums:
@@ -224,11 +225,6 @@ def download_and_prepare_dataset(
             )
 
     # Some scenarios can be orchestrated after the dataset has been prepared.
-    is_derived_competition = competition.id in derived_competitions
-    derived_competition_needs_preparation = (
-        is_derived_competition and derived_competition_needs_preparation
-    )
-
     # If the competition is derived from another competition, and has a prepare function, we must
     # invoke the prepare function again. This is useful for competitions that are derived from other
     # competitions, and have a prepare function that is not the same as the parent competition's
