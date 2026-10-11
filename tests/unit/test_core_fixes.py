@@ -2,6 +2,7 @@
 
 import importlib
 import pickle
+import re
 import sys
 import types
 from collections import defaultdict
@@ -205,3 +206,50 @@ def test_grading_server_saves_each_upload_in_a_private_directory(tmp_path, monke
 
     flask.request.files = {"file": SimpleNamespace(filename="run.sh", save=save)}
     assert server.validate()[1] == 400
+
+
+# ---------------------------------------------------------------- agent image build context
+
+
+def _dockerignored(path: str, patterns: list[str]) -> bool:
+    """Docker's .dockerignore rule: the last pattern matching the path or one of its parent
+    directories decides; `!` re-includes; `*` stays within one path segment, `**` does not."""
+
+    def regex(pattern: str) -> str:
+        out = pattern.strip("/").replace(".", r"\.").replace("?", "[^/]")
+        return out.replace("**/", "\0").replace("*", "[^/]*").replace("\0", "(.*/)?")
+
+    parts = path.split("/")
+    candidates = ["/".join(parts[: i + 1]) for i in range(len(parts))]
+    excluded = False
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        if any(re.fullmatch(regex(pattern.lstrip("!")), c) for c in candidates):
+            excluded = not negated
+    return excluded
+
+
+def test_agent_image_context_excludes_answers_and_history():
+    lines = (REPO / ".dockerignore").read_text().splitlines()
+    patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    leaked = [
+        "timeseriesgym/data/additional_competition_data.zip",  # raw data incl. test answers
+        "timeseriesgym/competitions/ptb-xl-classification-challenge-feature-enhancement/"
+        "example/model.py",
+        ".git/HEAD",
+        "runs/run-group/run/submission/submission.csv",
+        "data/spaceship-titanic/prepared/private/test.csv",
+        ".env",
+        "timeseriesgym/__pycache__/grade.cpython-311.pyc",
+    ]
+    needed = [
+        "pyproject.toml",
+        "README.md",  # pyproject's readme
+        "environment/grading_server.py",
+        "environment/entrypoint.sh",
+        "timeseriesgym/grade.py",
+        "timeseriesgym/competitions/spaceship-titanic/grade.py",
+        "timeseriesgym/competitions/spaceship-titanic/description.md",
+    ]
+    assert [p for p in leaked if not _dockerignored(p, patterns)] == []
+    assert [p for p in needed if _dockerignored(p, patterns)] == []
