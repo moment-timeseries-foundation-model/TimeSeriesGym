@@ -104,7 +104,7 @@ def grade_jsonl(
         )
     )
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     with open(save_path, "w") as f:
         json.dump(aggregated_report, f, indent=2)
     logger.info(purple(f"Saved summary report to {save_path}"))

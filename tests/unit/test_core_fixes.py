@@ -351,3 +351,12 @@ def test_rejected_code_submissions_get_an_invalid_report(tmp_path):
     other = tmp_path / "submission.txt"
     other.write_text("def stomp(): pass\n")
     assert not grade_code(other, competition).valid_submission  # raised before
+
+
+def test_grading_report_directory_is_created_with_its_parents(tmp_path):
+    data = tmp_path / "data"
+    competition = _prepared(data, "spaceship-titanic", SPACESHIP_ANSWERS)
+    entry = {"competition_id": competition.id, "submission_path": str(tmp_path / "none.csv")}
+    out = tmp_path / "new" / "results"  # failed after grading: `new` did not exist
+    grade_jsonl(_jsonl(tmp_path / "s.jsonl", [entry]), out, Registry(data))
+    assert len(list(out.glob("*_grading_report.json"))) == 1
