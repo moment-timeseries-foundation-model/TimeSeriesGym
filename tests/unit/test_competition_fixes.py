@@ -123,6 +123,44 @@ def test_nyc_rejects_keys_that_do_not_match():
         grade(submission.iloc[:-1], answers.copy())
 
 
+# ---------------------------------------------------------------- MIT-BIH
+
+
+def test_mit_bih_requires_one_column_per_class():
+    grade = _grade_fn("MIT-BIH-Arrhythmia")
+    classes = np.array([0, 1, 5, 2, 0, 3, 4, 0])
+    answers = np.eye(6)[classes]
+    prediction = np.eye(6)[[0, 1, 5, 2, 0, 3, 0, 1]]
+    assert grade(prediction, answers) == pytest.approx(
+        accuracy_score(classes, [0, 1, 5, 2, 0, 3, 0, 1])
+    )
+    for shape in [(8, 5), (8, 1), (8, 7), (7, 6)]:
+        with pytest.raises(InvalidSubmissionError, match="shape"):
+            grade(np.zeros(shape), answers)  # (8, 1) used to score as "class 0 everywhere"
+
+
+def test_mit_bih_weak_supervision_selects_classes_by_name():
+    grade = _grade_fn("MIT-BIH-Arrhythmia-Weak-Supervision")
+    pvc = np.array([0, 1, 0, 0, 1, 0])
+    answers = pd.DataFrame({"Id": range(6), "normal": 1 - pvc, "pvc": pvc})
+    guess = np.array([0, 1, 1, 0, 1, 0])
+    submission = pd.DataFrame({"Id": range(6), "normal": 1 - guess, "pvc": guess})
+    expected = accuracy_score(pvc, guess)
+    assert grade(submission.copy(), answers.copy()) == pytest.approx(expected)
+
+    # the same labels with the class columns in the other order: same score (were all flipped)
+    swapped = submission[["Id", "pvc", "normal"]]
+    assert grade(swapped, answers.copy()) == pytest.approx(expected)
+    shuffled = submission.sample(frac=1, random_state=0)
+    assert grade(shuffled, answers.copy()) == pytest.approx(expected)
+
+    with pytest.raises(InvalidSubmissionError, match="missing columns"):
+        grade(submission.rename(columns={"pvc": "PVC"}), answers.copy())
+    other_ids = submission.assign(Id=range(1, 7))
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(other_ids, answers.copy())
+
+
 # ---------------------------------------------------------------- amp prepare
 
 
