@@ -53,13 +53,17 @@ Your submission directory must contain exactly these four files:
 | `baseline_model.pt`        | TorchScript file for baseline model    |
 | `model.pt`                 | TorchScript file for improved model    |
 
-> **Important:** You are required to conduct hyperparameter optimization, or the submission will result in an **invalid submission**.
+> **Important:** You are required to conduct hyperparameter optimization, or the submission will result in an **invalid submission**. The grader compares the two TorchScript models by their architecture (such as their layers and the shapes of their parameters), so the improved model must differ from the baseline in its architecture: models that differ only in training settings (such as learning rate, number of epochs, batch size or optimizer) count as having the same hyperparameters.
 
 ## Evaluation
 
 ### Metric
 
-Submissions are evaluated based on their classification accuracy, the percentage of predicted labels that are correct.
+Submissions are evaluated based on the relative improvement in classification accuracy (the fraction of predicted labels that are correct) of your improved model over your baseline model, both computed on the test set from `submission.csv` and `baseline_submission.csv`:
+
+$$\text{score} = \frac{\text{accuracy}_{improved} - \text{accuracy}_{baseline}}{\text{accuracy}_{baseline}}$$
+
+The submission is invalid if the grader finds that the two models have the same hyperparameters, or finds no hyperparameter search in your solution file.
 
 ### Submission Format
 
@@ -87,10 +91,10 @@ In this competition your task is to predict the superclass of ECG recordings. To
     - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
     - `labels` - zero-indexed encoded label
 
-- **test_df.csv** - The actual test set for your model
+- **test_df.h5** - The actual test set for your model
     - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
 
-- **sample_submission.csv** - A submission file in the correct format.
+- **sample_submission.csv** - A submission file in the correct format, with one row per ECG in `test_df.h5`, in the same order (rows are matched by position).
     - `label` - The target. For each ECG record, predict one of the five classes with zero-indexed encoding, i.e. 0-4.
 
 ### Loading the Data
@@ -105,13 +109,13 @@ import pandas as pd
 # Load training data
 with h5py.File('train_df.h5', 'r') as f:
     train_signal = f['signals'][:] #of shape (num_samples x num_leads x timestamps)
-    train_labels = f['labels'][:] #of shape (num_samples x 1)
+    train_labels = f['labels'][:] #of shape (num_samples,)
 
 
 # Load validation data
 with h5py.File('val_df.h5', 'r') as f:
     val_signal = f['signals'][:] #of shape (num_samples x num_leads x timestamps)
-    val_labels = f['labels'][:] #of shape (num_samples x 1)
+    val_labels = f['labels'][:] #of shape (num_samples,)
 
 # Load test data
 with h5py.File('test_df.h5', 'r') as f:
