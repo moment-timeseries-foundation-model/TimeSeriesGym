@@ -13,8 +13,6 @@ kaggle_original_competitions = [
     "sberbank-russian-housing-market",
     "spaceship-titanic",
     "ventilator-pressure-prediction",
-    "g2net-gravitational-wave-detection",
-    "amp-parkinsons-disease-progression-prediction",
     "hms-harmful-brain-activity-classification",
     "osic-pulmonary-fibrosis-progression",
 ]

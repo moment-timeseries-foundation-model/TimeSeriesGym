@@ -18,25 +18,6 @@ from timeseriesgym.utils import compress as compress_zip
 from timeseriesgym.utils import extract
 
 
-def is_directory(path):
-    extensions = [".pth", ".txt", ".json", ".yaml"]
-
-    for ext in extensions:
-        if ext in path:
-            return False
-    return True
-
-
-def make_dir_if_not_exists(path, verbose=True):
-    if not is_directory(path):
-        path = path.split(".")[0]
-    if not os.path.exists(path=path):
-        os.makedirs(path)
-        if verbose:
-            print(f"Making directory: {path}...")
-    return True
-
-
 def load_paths(basepath, fs):
     """File Names to Load"""
     folders1 = os.listdir(basepath)
@@ -135,8 +116,6 @@ def obtain_phase_to_paths_dict(df, paths_to_files, phase_to_pids=None):
             ].index.tolist()  # index is ecg_id by default when loading csv
             current_ecgid = [int(entry) for entry in current_ecgid]
             phase_to_pids[phase] = current_ecgid
-    else:
-        phase_to_pids = phase_to_pids
 
     # paths_to_ids = list(map(lambda path: int(path.split("/")[-1].split("_")[0]), paths_to_files))
     paths_to_ids = [int(path.split("/")[-1].split("_")[0]) for path in paths_to_files]
@@ -212,8 +191,6 @@ class PTBXLDataset:
 
         print("[INFO] Loading ECG Signals")
         ecg_input_paths = self.phase_to_paths[self.phase]
-        self._timeseries = []
-
         self._timeseries = Parallel(n_jobs=1)(
             delayed(self.get_timeseries)(ecg_input_path) for ecg_input_path in tqdm(ecg_input_paths)
         )
