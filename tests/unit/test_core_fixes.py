@@ -713,7 +713,9 @@ def test_arxiv_sources_cannot_write_outside_their_directory(
         tar.addfile(info, io.BytesIO(b"x"))
     handler = relevant_content.ArxivHandler("https://arxiv.org/abs/1234.5678")
     monkeypatch.setattr(handler, "fetch_tex", lambda: str(archive))
-    monkeypatch.setattr(relevant_content.tempfile, "mkdtemp", lambda: str(tmp_path / "extract"))
+    extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
+    monkeypatch.setattr(relevant_content.tempfile, "mkdtemp", lambda: str(extract_dir))
     assert handler.extract_text() == ""  # extraction refused; the handler falls back to ""
     assert not (tmp_path / "escaped.tex").exists()
 
