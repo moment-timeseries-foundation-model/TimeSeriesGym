@@ -13,7 +13,7 @@ Help improve cardiac diagnostics and potentially save lives!
 
 ### Metric
 
-Submissions are evaluated based on their classification accuracy, the percentage of predicted labels that are correct.
+Submissions are evaluated based on their classification accuracy, the fraction of predicted labels that are correct.
 
 ### Submission Format
 
@@ -41,10 +41,10 @@ In this competition your task is to predict the superclass of ECG recordings. To
     - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
     - `labels` - zero-indexed encoded label
 
-- **test_df.csv** - The actual test set for your model
+- **test_df.h5** - The actual test set for your model
     - `signals` - A 12-lead ECG signal of 1000 observations (shape 12 x 1000)
 
-- **sample_submission.csv** - A submission file in the correct format.
+- **sample_submission.csv** - A submission file in the correct format, with one row per ECG in `test_df.h5`, in the same order (rows are matched by position).
     - `label` - The target. For each ECG record, predict one of the five classes with zero-indexed encoding, i.e. 0-4.
 
 ### Loading the Data
@@ -59,13 +59,13 @@ import pandas as pd
 # Load training data
 with h5py.File('train_df.h5', 'r') as f:
     train_signal = f['signals'][:] #of shape (num_samples x num_leads x timestamps)
-    train_labels = f['labels'][:] #of shape (num_samples x 1)
+    train_labels = f['labels'][:] #of shape (num_samples,)
 
 
 # Load validation data
 with h5py.File('val_df.h5', 'r') as f:
     val_signal = f['signals'][:] #of shape (num_samples x num_leads x timestamps)
-    val_labels = f['labels'][:] #of shape (num_samples x 1)
+    val_labels = f['labels'][:] #of shape (num_samples,)
 
 # Load test data
 with h5py.File('test_df.h5', 'r') as f:

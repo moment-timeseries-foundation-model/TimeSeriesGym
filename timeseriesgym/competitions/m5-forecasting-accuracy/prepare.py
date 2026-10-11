@@ -9,7 +9,8 @@ def prepare(raw: Path, public: Path, private: Path):
     calendar = read_csv(raw / "calendar.csv")
     prices = read_csv(raw / "sell_prices.csv")
 
-    train_dates = calendar[calendar["d"] <= "d_1913"]
+    # compare day numbers, not strings: "d_500" > "d_1913" as strings
+    train_dates = calendar[calendar["d"].str.removeprefix("d_").astype(int) <= 1913]
     train_prices = prices[prices["wm_yr_wk"].isin(train_dates["wm_yr_wk"].unique())]
     sample_submission = read_csv(raw / "sample_submission.csv")
 

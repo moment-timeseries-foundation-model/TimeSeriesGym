@@ -25,7 +25,7 @@ The EEG segments used in this competition have been annotated, or classified, by
 
 Examples of EEG Patterns with Different Levels of Expert Agreement:\
 ![](https://storage.googleapis.com/kaggle-media/competitions/Harvard%20Medical%20School/eFig2.png)\
-*Please refer to [Data tab](https://www.kaggle.com/competitions/hms-harmful-brain-activity-classification/data) for full screen PDF page of each subfigure.*
+*Please refer to the `example_figures/` folder for full screen PDF page of each subfigure.*
 
 This figure shows selected examples of EEG patterns with different level of agreement. Rows are structured with the 1st row seizure, 2nd row LPDs, 3rd row GPDs, 4th row LRDA, and 5th row GRDA. Column-wise, examples of idealized forms of patterns are in the 1st column (A). These are patterns with uniform expert agreement. The 2nd column (B) are proto or partially formed patterns. About half of raters labeled these as one IIIC pattern and the other half labeled "Other". The 3rd and 4th columns (C, D) are edge cases (about half of raters labeled these one IIIC pattern and half labeled them as another IIIC pattern).
 
@@ -37,16 +37,16 @@ Submissions are evaluated on the [Kullback Liebler divergence](https://www.kagg
 
 #### Submission File
 
-For each row in the test set (uniquely identified by `eeg_id` and `eeg_sub_id`), you must predict a probability for each of the `vote` columns. The file should contain a header and have the following format:
+For each row in the test set (uniquely identified by `eeg_id` and `eeg_sub_id`), you must predict a probability for each of the `vote` columns. The file must be named `submission.csv`, contain a header and have the following format:
 
 ```
-eeg_id,eeg_sub_id,seizure_vote,lpd_vote,gpd_vote,lrda_vote,grda_vote,other_vote\
-0,0,0.166,0.166,0.167,0.167,0.167,0.167\
-0,1,0.166,0.166,0.167,0.167,0.167,0.167\
+eeg_id,eeg_sub_id,seizure_vote,lpd_vote,gpd_vote,lrda_vote,grda_vote,other_vote
+0,0,0.166,0.166,0.167,0.167,0.167,0.167
+0,1,0.166,0.166,0.167,0.167,0.167,0.167
 etc.
 ```
 
-Your total predicted probabilities for each row must sum to one or your submission will fail.
+Your total predicted probabilities for each row must sum to one (after rounding to 5 decimal places) or your submission will fail.
 
 ### Prizes
 
@@ -55,22 +55,6 @@ Your total predicted probabilities for each row must sum to one or your submissi
 - 3rd Place - \$7,000
 - 4th Place - \$6,000
 - 5th Place - \$5,000
-
-### Code Requirements
-
-![](https://storage.googleapis.com/kaggle-media/competitions/general/Kerneler-white-desc2_transparent.png)
-
-**This is a Code Competition**
-
-Submissions to this competition must be made through Notebooks. In order for the "Submit" button to be active after a commit, the following conditions must be met:
-
-- CPU Notebook `<= 9` hours run-time
-- GPU Notebook `<= 9` hours run-time
-- Internet access disabled
-- Freely & publicly available external data is allowed, including pre-trained models
-- Submission file must be named `submission.csv`
-
-Please see the [Code Competition FAQ](https://www.kaggle.com/docs/competitions#notebooks-only-FAQ) for more information on how to submit. And review the [code debugging doc](https://www.kaggle.com/code-competition-debugging) if you are encountering submission errors.
 
 ### Citation
 
@@ -82,7 +66,7 @@ Jin Jing, Zhen Lin, Chaoqi Yang, Ashley Chow, Sohier Dane, Jimeng Sun, M. Brando
 
 The goal of this competition is to detect and classify seizures and other types of harmful brain activity in electroencephalography (EEG) data. Even experts find this to be a challenging task and often disagree about the correct labels.
 
-This is a code competition. Only a few examples from the test set are available for download. When your submission is scored the test folders will be replaced with versions containing the complete test set.
+`test.csv`, `test_eegs/` and `test_spectrograms/` contain the complete test set that is scored.
 
 ### Files
 
@@ -91,13 +75,13 @@ This is a code competition. Only a few examples from the test set are available 
 - `eeg_id` - A unique identifier for the entire EEG recording.
 - `eeg_sub_id` - An ID for the specific 50 second long subsample this row's labels apply to.
 - `eeg_label_offset_seconds` - The time between the beginning of the consolidated EEG and this subsample.
-- `spectrogram_id` - A unique identifier for the entire EEG recording.
+- `spectrogram_id` - A unique identifier for the entire spectrogram recording.
 - `spectrogram_sub_id` - An ID for the specific 10 minute subsample this row's labels apply to.
-- `spectogram_label_offset_seconds` - The time between the beginning of the consolidated spectrogram and this subsample.
+- `spectrogram_label_offset_seconds` - The time between the beginning of the consolidated spectrogram and this subsample.
 - `label_id` - An ID for this set of labels.
 - `patient_id` - An ID for the patient who donated the data.
 - `expert_consensus` - The consensus annotator label. **Provided for reference only and is not available for the test set.**
-- `[seizure/lpd/gpd/lrda/grda/other]_vote` - Target columns for the prediction task. Each column includes the count of annotator votes for a given brain activity class. The full names of the activity classes are as follows: `lpd`: lateralized periodic discharges, `gpd`: generalized periodic discharges, `lrd`: lateralized rhythmic delta activity, and `grda`: generalized rhythmic delta activity . A detailed explanations of these patterns is [available here.](https://www.acns.org/UserFiles/file/ACNSStandardizedCriticalCareEEGTerminology_rev2021.pdf)
+- `[seizure/lpd/gpd/lrda/grda/other]_vote` - Target columns for the prediction task. Each column includes the count of annotator votes for a given brain activity class. The full names of the activity classes are as follows: `lpd`: lateralized periodic discharges, `gpd`: generalized periodic discharges, `lrda`: lateralized rhythmic delta activity, and `grda`: generalized rhythmic delta activity . A detailed explanations of these patterns is [available here.](https://www.acns.org/UserFiles/file/ACNSStandardizedCriticalCareEEGTerminology_rev2021.pdf)
 
 **test.csv** Metadata for the test set. Below columns are defined the same as in `train.csv`. Note that each sample is uniquely identified by the combination of `eeg_id` and `eeg_sub_id` in both `train.csv` and `test.csv`.
 
@@ -106,7 +90,7 @@ This is a code competition. Only a few examples from the test set are available 
 - `eeg_label_offset_seconds`
 - `spectrogram_id`
 - `spectrogram_sub_id`
-- `spectogram_label_offset_seconds`
+- `spectrogram_label_offset_seconds`
 - `label_id`
 - `patient_id`
 
@@ -114,10 +98,10 @@ This is a code competition. Only a few examples from the test set are available 
 
 - `eeg_id`
 - `eeg_sub_id`
-- `[seizure/lpd/gpd/lrda/grda/other]_vote` - The target columns. Your predictions must be probabilities. Note that the test samples had between 3 and 20 annotators.
+- `[seizure/lpd/gpd/lrda/grda/other]_vote` - The target columns. Your predictions must be probabilities. Note that the number of annotators varies between samples (in `train.csv`, from 1 to 28 votes per sample).
 
 **[train/test]_eegs/** EEG data from one or more overlapping samples. Use the metadata in `train.csv` or `test.csv` to select specific annotated subsets. The column names are [the names of the individual electrode locations for EEG leads](https://en.wikipedia.org/wiki/10%E2%80%9320_system_%28EEG%29), with one exception. The EKG column is for an electrocardiogram lead that records data from the heart. All of the EEG data (for both train and test) was collected at a frequency of 200 samples per second.
 
 **[train/test]_spectrograms/** Spectrograms assembled EEG data. Use the metadata in `train.csv` or `test.csv` to select specific annotated subsets. The column names indicate the frequency in hertz and the recording regions of the EEG electrodes. The latter are abbreviated as LL = left lateral; RL = right lateral; LP = left parasagittal; RP = right parasagittal.
 
-**example_figures/** Larger copies of the example case images used on the overview tab.
+**example_figures/** Larger copies of the example case images used in the Overview above.

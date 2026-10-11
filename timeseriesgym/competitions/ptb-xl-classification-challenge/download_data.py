@@ -101,7 +101,7 @@ def obtain_phase_to_paths_dict(df, paths_to_files, phase_to_pids=None):
     """Creates a mapping between the phase (train, val, test)
     and data files belonging to that phase
     """
-    train_fold = np.arange(0, 8)
+    train_fold = np.arange(1, 9)  # PTB-XL folds are 1-10: train on 1-8
     val_fold = [9]
     test_fold = [10]
     phases = ["train", "val", "test"]

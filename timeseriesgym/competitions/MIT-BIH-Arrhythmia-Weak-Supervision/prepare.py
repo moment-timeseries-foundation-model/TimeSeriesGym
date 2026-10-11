@@ -1,10 +1,13 @@
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pandas as pd
 
+from timeseriesgym.competitions.utils import download_file
 from timeseriesgym.utils import clone_repository
 
 
@@ -57,16 +60,19 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     # Download Tutorials for Snorkel
     path_to_tutorial = "https://raw.githubusercontent.com/snorkel-team/snorkel-tutorials/refs/heads/master/spam/01_spam_tutorial.py"
-    os.system(f"cd {public}; wget {path_to_tutorial}")
+    download_file(path_to_tutorial, public / "01_spam_tutorial.py")
 
     # Download Snorkel documentation
     path_to_documentation = "https://readthedocs.org/projects/snorkel/downloads/pdf/latest/"
-    os.system(f"cd {public}; curl -L {path_to_documentation} -o snorkel-docs.pdf")
+    download_file(path_to_documentation, public / "snorkel-docs.pdf")
 
     # Convert the PDF to text files, to make it easier for agents to read them
-    os.system(f"cd {public}; pdftotext snorkel-docs.pdf snorkel-docs.txt")
+    pdftotext = ["pdftotext", "snorkel-docs.pdf"]
+    subprocess.run([*pdftotext, "snorkel-docs.txt"], cwd=public, check=True)
     # NOTE: The page numbers are based on the PDF of Release 0.9.7
-    os.system(f"cd {public}; pdftotext snorkel-docs.pdf -f 39 -l 67 snorkel-labeling-doc.txt")
+    subprocess.run(
+        [*pdftotext, "-f", "39", "-l", "67", "snorkel-labeling-doc.txt"], cwd=public, check=True
+    )
 
     # Download the Snorkel GitHub repository
     clone_repository(
@@ -77,4 +83,4 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     # Copy assets/ to public
     assets_path = Path(__file__).parent / "assets"
-    os.system(f"cp -r {assets_path} {public}")
+    shutil.copytree(assets_path, public / "assets", dirs_exist_ok=True)

@@ -35,9 +35,9 @@ For each `seg_id` in the test set folder, you must predict `time_to_failure`, wh
 
 ```
 seg_id,time_to_failure
-seg_00030f,0
-seg_0012b5,0
-seg_00184e,0
+seg_E92rZW,0
+seg_izioDb,0
+seg_00WYmC,0
 ...
 ```
 
@@ -64,7 +64,7 @@ For each `seg_id` in the test folder, you should predict a *single* `time_to_fai
 
 ### File descriptions
 * **train.csv** - A single, continuous training segment of experimental data.
-* **test** - A folder containing many small segments of test data.
+* **test** - A folder containing many small segments of test data: 2,500 files, one per `seg_id` (`test/<seg_id>.csv`), each with 15,000 consecutive rows of `acoustic_data`.
 * **sample_submission.csv** - A sample submission file in the correct format.
 
 ### Data fields

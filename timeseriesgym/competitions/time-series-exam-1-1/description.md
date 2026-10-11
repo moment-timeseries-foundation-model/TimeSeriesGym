@@ -13,7 +13,7 @@ To succeed in this competition, you'll need to demonstrate your proficiency in a
 
 ### Metric
 
-Submissions are evaluated based on their accuracy, the percentage of questions answered correctly. Each question has equal weight in the final score.
+Submissions are evaluated based on their accuracy, the fraction of questions answered correctly. Each question has equal weight in the final score.
 
 ### Submission Format
 
@@ -21,10 +21,10 @@ The submission format for the competition is a csv file with the following forma
 
 ```
 question_id,answer
-0,0
 1,0
 2,0
 3,0
+4,0
 etc.
 ```
 
@@ -43,7 +43,7 @@ In this competition your task is to solve multiple-choice questions based on tim
     - `question` - The exam question to be answered.
     - `options` - List of multiple-choice options to select from.
     - `question_hint` - A textual hint providing additional context for the question.
-    - `relevant_concept` - List of relevant time series concepts applicable to the question.
+    - `relevant_concepts` - List of relevant time series concepts applicable to the question.
 
 - **sample_submission.csv** - A submission file in the correct format.
     - `question_id` - Unique identifier for each question in the test set.

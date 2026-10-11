@@ -23,10 +23,12 @@ $$
 $$
 
 Where:
-- \(n\) is the total number of predictions
+- \(n\) is the total number of predictions whose actual value is known (months with a missing actual value are not scored)
 - \(p_i\) is your prediction for a given month
 - \(a_i\) is the actual sales for that month
 - \(\log(x)\) is the natural logarithm of \(x\)
+
+Predictions must be finite and non-negative.
 
 ## Dataset Description
 We have shared the data in CSV format. Each row represents a different consumer product.
@@ -40,4 +42,4 @@ We have shared the data in CSV format. Each row represents a different consumer 
 ### File Descriptions
 * **train.csv** – includes both labels (`Outcome_M1`–`Outcome_M12`) and features (`Date_1`, `Date_2`, `Quan_x`, `Cat_x`) for training
 * **test_features.csv** – includes test features (`Date_1`, `Date_2`, `Quan_x`, `Cat_x`)
-* **sample_submission.csv** – includes sample submission file
+* **sample_submission.csv** – includes sample submission file: the 12 `Outcome_M` columns, with one row per product in **test_features.csv**, in the same order (there is no id column; rows are matched by position)

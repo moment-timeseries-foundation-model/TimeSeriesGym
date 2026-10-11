@@ -1,3 +1,4 @@
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -113,6 +114,15 @@ def is_one_hot_encoded(xs: ndarray) -> bool:
     return is_one_hot
 
 
+def download_file(url: str, destination: Path) -> Path:
+    """Downloads `url` to `destination`; raises on any HTTP or network error.
+
+    `curl -f` fails on an HTTP error instead of saving the error page as the file.
+    """
+    subprocess.run(["curl", "-fsSL", "-o", str(destination), url], check=True)
+    return destination
+
+
 def get_ids_from_tf_records(tf_record_path: Path, id_feature: str = "image_name") -> list[str]:
     import tensorflow as tf  # Import only if needed, otherwise it slows down the module import
 
@@ -156,6 +166,53 @@ def prepare_for_accuracy_metric(
     y_true = answers[target_column].to_numpy()
 
     return {"y_true": y_true, "y_pred": y_pred}
+
+
+def prepare_for_id_matched_metric(
+    submission: pd.DataFrame,
+    answers: pd.DataFrame,
+    target_column: str,
+    id_columns: list[str],
+) -> dict:
+    """
+    Pairs each answer row with the submission row that has the same ids, in the answers' order,
+    so that a correct submission gets the same score in any row order.
+
+    The submission must contain exactly the answers' ids, each once.
+    """
+    for column in [*id_columns, target_column]:
+        assert column in answers.columns, f"Answers must have a `{column}` column"
+        if column not in submission.columns:
+            raise InvalidSubmissionError(f"Submission must have a `{column}` column")
+    if len(submission) != len(answers):
+        raise InvalidSubmissionError(
+            f"Submission length {len(submission)} does not match answer length {len(answers)}"
+        )
+
+    submission_ids = pd.MultiIndex.from_frame(submission[id_columns])
+    if submission_ids.has_duplicates:
+        raise InvalidSubmissionError(f"Submission has duplicate {id_columns} values")
+    rows = submission_ids.get_indexer(pd.MultiIndex.from_frame(answers[id_columns]))
+    if (rows < 0).any():
+        raise InvalidSubmissionError(
+            f"Submission and answers {id_columns} values do not match: "
+            f"{(rows < 0).sum()} answer rows have no submission row"
+        )
+
+    y_pred = submission[target_column].to_numpy()[rows]
+    y_true = answers[target_column].to_numpy()
+
+    return {"y_true": y_true, "y_pred": y_pred}
+
+
+def check_finite(values, name: str) -> None:
+    """Raises InvalidSubmissionError unless every value is a finite number."""
+    try:
+        finite = np.isfinite(np.asarray(values, dtype=float)).all()
+    except (TypeError, ValueError) as err:
+        raise InvalidSubmissionError(f"Submission `{name}` values must be numbers") from err
+    if not finite:
+        raise InvalidSubmissionError(f"Submission `{name}` values must be finite (no NaN or inf)")
 
 
 def prepare_for_auroc_metric(
@@ -218,10 +275,30 @@ def grade_relative_improvement(
     Grades a hyperparameter search as the relative improvement of the improved submission's
     score over the baseline submission's score, negated when lower scores are better.
 
-    Returns -inf if the two models have the same hyperparameters, or if a solution file is
-    given and it shows no hyperparameter search with one of `packages_to_look_for` (see
-    `have_hyperparameter_searching_attempt` for the default list).
+    The solution code is required: `solution_file_path` is a script, or a directory whose `.py`
+    files are searched. Raises InvalidSubmissionError without it. Returns -inf if the solution
+    shows no hyperparameter search with one of `packages_to_look_for` (see
+    `have_hyperparameter_searching_attempt` for the default list), or if the two models have
+    the same hyperparameters.
     """
+    # Checked first, before any submitted model is loaded.
+    if solution_file_path is None or not Path(solution_file_path).exists():
+        raise InvalidSubmissionError(
+            "Submission invalid! The solution code is required to grade a hyperparameter search, "
+            f"but none was found at {solution_file_path}."
+        )
+    solution_path = Path(solution_file_path)
+    scripts = sorted(solution_path.rglob("*.py")) if solution_path.is_dir() else [solution_path]
+    logger.info("[INFO] Searching the solution code for a hyperparameter searching attempt.")
+    if not any(
+        have_hyperparameter_searching_attempt(
+            load_scripts(script), packages_to_look_for=packages_to_look_for
+        )
+        for script in scripts
+    ):
+        logger.info("[INFO] Hyperparameter searching attempt not found.")
+        return np.inf * -1
+
     baseline_model = load_models(
         submission_folder_path / hyperparameter_search_config["baseline_model_name"]
     )
@@ -234,8 +311,6 @@ def grade_relative_improvement(
     improved_submission = load_submissions(
         submission_folder_path / hyperparameter_search_config["improved_submission_name"]
     )
-    has_solution_file = solution_file_path is not None
-    solution_file = load_scripts(solution_file_path) if has_solution_file else None
 
     if not have_different_hyperparameters(baseline_model, improved_model):
         logger.info("[INFO] The hyperparameters are the same as the baseline model.")
@@ -249,15 +324,5 @@ def grade_relative_improvement(
     logger.info(f"[INFO] Baseline score: {baseline_score}")
     logger.info(f"[INFO] Improved score: {improved_score}")
     logger.info(f"[INFO] Improvement: {improvement}")
-
-    if solution_file is not None:
-        logger.info(
-            "[INFO] Solution file is provided, searching for hyperparameter searching attempt."
-        )
-        if not have_hyperparameter_searching_attempt(
-            solution_file, packages_to_look_for=packages_to_look_for
-        ):
-            logger.info("[INFO] Hyperparameter searching attempt not found.")
-            return np.inf * -1
 
     return improvement

@@ -1,12 +1,11 @@
 import pandas as pd
 
+from timeseriesgym.competitions.utils import prepare_for_id_matched_metric
 from timeseriesgym.metrics import root_mean_squared_log_error
-from timeseriesgym.utils import InvalidSubmissionError
 
 
 def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
-    if len(submission) != len(answers):
-        raise InvalidSubmissionError(
-            f"Submission length {len(submission)} does not match answer length {len(answers)}"
-        )
-    return root_mean_squared_log_error(answers.visitors.to_numpy(), submission.visitors.to_numpy())
+    inputs = prepare_for_id_matched_metric(
+        submission, answers, target_column="visitors", id_columns=["id"]
+    )
+    return root_mean_squared_log_error(inputs["y_true"], inputs["y_pred"])

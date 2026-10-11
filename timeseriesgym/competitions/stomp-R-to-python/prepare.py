@@ -1,39 +1,44 @@
-import os
+import shutil
 from pathlib import Path
 
 import numpy as np
 
+from timeseriesgym.competitions.utils import download_file
 from timeseriesgym.utils import clone_repository, read_csv
 
 
 def prepare(raw: Path, public: Path, private: Path) -> None:
     # Download the data files
-    os.system(
-        f"curl -L -o {public}/ref_data.csv https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/ref_data.csv"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/ref_data.csv",
+        public / "ref_data.csv",
     )
-    os.system(
-        f"curl -L -o {public}/query_data.csv https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/query_data.csv"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/query_data.csv",
+        public / "query_data.csv",
     )
 
     # Convert the data files to .npy format
     ref_data = read_csv(public / "ref_data.csv")
     ref_data = ref_data.to_numpy().squeeze()
     np.save(public / "ref_data.npy", ref_data)
-    os.system(f"rm {public}/ref_data.csv")
+    (public / "ref_data.csv").unlink()
 
     query_data = read_csv(public / "query_data.csv")
     query_data = query_data.to_numpy().squeeze()
     np.save(public / "query_data.npy", query_data)
-    os.system(f"rm {public}/query_data.csv")
+    (public / "query_data.csv").unlink()
 
     # Download the answers file
-    os.system(
-        f"curl -L -o {private}/test_results.csv https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/test_results.csv"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/test_results.csv",
+        private / "test_results.csv",
     )
 
     # Download the sample submission file
-    os.system(
-        f"curl -L -o {public}/sample_submission.py https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/sample_submission.py"
+    download_file(
+        "https://raw.githubusercontent.com/moment-timeseries-foundation-model/tsmp/stomp-R/stomp_python_challenge/sample_submission.py",
+        public / "sample_submission.py",
     )
 
     # Download the STOMP R code files
@@ -42,5 +47,5 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
         public / "tsmp",
         commit="24c9ff2121436c40b5330c392e072650cf4af1c8",
     )
-    os.system(f"mv {public}/tsmp/R {public}/")  # the R code are under the R folder
-    os.system(f"rm -rf {public}/tsmp")
+    shutil.move(public / "tsmp" / "R", public / "R")  # the R code are under the R folder
+    shutil.rmtree(public / "tsmp")

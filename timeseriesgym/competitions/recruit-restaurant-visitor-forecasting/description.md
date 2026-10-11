@@ -24,14 +24,16 @@ Where:
 - \(a_i\) is the actual number of visitors
 - \(\log(x)\) is the natural logarithm of \(x\)
 
+Predictions must be finite and non-negative.
+
 ## Submission File
 For every store and date combination in the test set, submission files should contain two columns: `id` and `visitors`. The `id` is formed by concatenating the `air_store_id` and `visit_date` with an underscore. The file should contain a header and have the following format:
 
 ```
 id,visitors
-air_00a91d42b08b08d9_2017-04-23,0
-air_00a91d42b08b08d9_2017-04-24,0
-air_00a91d42b08b08d9_2017-04-25,0
+air_ba937bf13d40fb24_2017-03-01,0
+air_ba937bf13d40fb24_2017-03-02,0
+air_ba937bf13d40fb24_2017-03-03,0
 ```
 
 ## Dataset Description
@@ -40,7 +42,7 @@ In this competition, you are provided a time-series forecasting problem centered
 - **Hot Pepper Gourmet (hpg):** similar to Yelp, here users can search restaurants and also make a reservation online
 - **AirREGI / Restaurant Board (air):** similar to Square, a reservation control and cash register system
 
-You must use the reservations, visits, and other information from these sites to forecast future restaurant visitor totals on a given date. The training data covers the dates from 2016 until Feburary 2017. The test set covers the dates from March 2017 until the last week of April. The test set is split based on time (the public fold coming first, the private fold following the public) and covers a chosen subset of the air restaurants.
+You must use the reservations, visits, and other information from these sites to forecast future restaurant visitor totals on a given date. The training data covers the dates from 2016 until February 2017 (2016-01-01 to 2017-02-28). The test set covers the dates from 2017-03-01 to 2017-04-22 and covers a chosen subset of the air restaurants (those that appear in the training data). The reservation files also end on 2017-02-28, so they contain no reservations for the test dates.
 
 ### File Descriptions
 This is a relational dataset from two systems. Each file is prefaced with the source (`air_` or `hpg_`) to indicate its origin. Each restaurant has a unique `air_store_id` and `hpg_store_id`. Note that not all restaurants are covered by both systems, and that you have been provided data beyond the restaurants for which you must forecast. Latitudes and longitudes are not exact to discourage de-identification of restaurants.

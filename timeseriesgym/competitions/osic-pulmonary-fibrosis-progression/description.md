@@ -14,8 +14,6 @@ In this competition, you’ll predict a patient’s severity of decline in lung 
 
 If successful, patients and their families would better understand their prognosis when they are first diagnosed with this incurable lung disease. Improved severity detection would also positively impact treatment trial design and accelerate the clinical development of novel treatments.
 
-**This is a Code Competition. Refer to Code Requirements for details.**
-
 ### Evaluation
 
 This competition is evaluated on a modified version of the Laplace Log Likelihood. In medical applications, it is useful to evaluate a model's confidence in its decisions. Accordingly, the metric is designed to reflect both the accuracy and certainty of each prediction.
@@ -32,7 +30,7 @@ The error is thresholded at 1000 ml to avoid large errors adversely penalizing r
 
 For each `Patient_Week`, you must predict the `FVC` and a confidence. To avoid potential leakage in the timing of follow up visits, you are asked to predict every patient's `FVC` measurement for every possible week. Those weeks which are not in the final three visits are ignored in scoring.
 
-The file should contain a header and have the following format:
+The file must be named `submission.csv`, contain a header and have the following format:
 
 ```
 Patient_Week,FVC,Confidence
@@ -48,20 +46,6 @@ etc.
 - 2nd Place - $15,000  
 - 3rd Place - $10,000  
 
-### Code Requirements
-**This is a Code Competition**
-
-Submissions to this competition must be made through Notebooks. In order for the "Submit to Competition" button to be active after a commit, the following conditions must be met:
-
-- CPU Notebook <= 9 hours run-time
-- GPU Notebook <= 4 hours run-time
-- TPUs will not be available for making submissions to this competition. You are still welcome to use them for training models.
-- No internet access enabled
-- External data, freely & publicly available, is allowed. This includes pre-trained models.
-- Submission file must be named `submission.csv`
-
-Please see the Code Competition FAQ for more information on how to submit.
-
 ## Dataset Description
 
 The aim of this competition is to predict a patient’s severity of decline in lung function based on a CT scan of their lungs. Lung function is assessed based on output from a spirometer, which measures the forced vital capacity (`FVC`), i.e. the volume of air exhaled.
@@ -71,13 +55,13 @@ In the dataset, you are provided with a baseline chest CT scan and associated cl
 - In the training set, you are provided with an anonymized, baseline CT scan and the entire history of FVC measurements.  
 - In the test set, you are provided with a baseline CT scan and only the initial FVC measurement. **You are asked to predict the final three `FVC` measurements for each patient, as well as a confidence value in your prediction.**
 
-There are around 200 cases in the public & private test sets, combined. This is split roughly 15-85 between public-private.
+In this version of the competition, the test set has 18 patients and the training set 158 (both taken from the original training set).
 
 Since this is real medical data, you will notice the relative timing of `FVC` measurements varies widely. The timing of the initial measurement relative to the CT scan and the duration to the forecasted time points may be different for each patient. This is considered part of the challenge of the competition. To avoid potential leakage in the timing of follow up visits, you are asked to predict every patient's `FVC` measurement for every possible week. Those weeks which are not in the final three visits are ignored in scoring.
 
 ### Files
 
-This is a synchronous rerun code competition. The provided test set is a small representative set of files (copied from the training set) to demonstrate the format of the private test set. When you submit your notebook, Kaggle will rerun your code on the test set, which contains unseen images.
+`test.csv` and `test/` contain the complete test set that is scored.
 
 - **train.csv** - the training set, contains full history of clinical information  
 - **test.csv** - the test set, contains only the baseline measurement  

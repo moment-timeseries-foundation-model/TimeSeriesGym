@@ -83,7 +83,7 @@ def prepare(raw: Path, public: Path, private: Path):
 
     assert len(actual_stock_ids) == len(new_test_ids), (
         f"Expected the new test instances to have {len(new_test_ids)} unique stock IDs. Got "
-        f"{len(test_df['stock_id'].unique())} unique stock IDs."
+        f"{len(actual_stock_ids)} unique stock IDs."
     )
 
     sample_submission = test_df.copy()

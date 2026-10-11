@@ -9,9 +9,16 @@ from timeseriesgym.utils import InvalidSubmissionError
 
 
 def symmetric_mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Symmetric Mean Absolute Percentage Error (SMAPE)
+    """Symmetric Mean Absolute Percentage Error of y + 1 (SMAPE+1), in percent.
 
-    It is an accuracy measure based on percentage (or relative) errors.
+    It is an accuracy measure based on percentage (or relative) errors:
+
+        mean(200 * |y_pred - y_true| / (|y_true + 1| + |y_pred + 1|))
+
+    The +1 is intentional: it is the "SMAPE+1" of the AMP Parkinson's competition (its only
+    caller), whose leaderboard is on this scale, and for non-negative values it keeps the terms
+    where both the answer and the prediction are 0 defined. It is plain SMAPE computed on
+    y_true + 1 and y_pred + 1.
 
     References:
         - https://en.wikipedia.org/wiki/Symmetric_mean_absolute_percentage_error

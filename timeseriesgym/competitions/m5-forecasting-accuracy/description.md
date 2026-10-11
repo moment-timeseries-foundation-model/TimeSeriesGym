@@ -24,24 +24,23 @@ Additional thanks go to other partner organizations and prize sponsors, National
 
 ## Evaluation
 
-This competition uses a Weighted Root Mean Squared Scaled Error (RMSSE). Extensive details about the metric, scaling, and weighting can be found in the M5 Participants Guide.
+This competition uses a Weighted Root Mean Squared Scaled Error (WRMSSE). Extensive details about the metric, scaling, and weighting can be found in the M5 Participants Guide.
 
 ## Dataset Description
 Dataset Description
 
-In the challenge, you are predicting item sales at stores in various locations for two 28-day time periods. Information about the data is found in the M5 Participants Guide.
+In the challenge, you are predicting item sales at stores in various locations for one 28-day time period, d_1914 - d_1941 (the 28 days after the last day in `train.csv`). Information about the data is found in the M5 Participants Guide.
 Files
 
 - calendar.csv - Contains information about the dates on which the products are sold.
-- sales_train_validation.csv - Contains the historical daily unit sales data per product and store [d_1 - d_1913]
-- sample_submission.csv - The correct format for submissions. Reference the Evaluation tab for more info.
-- sell_prices.csv - Contains information about the price of the products sold per store and date.
-- sales_train_evaluation.csv - Includes sales [d_1 - d_1941] (labels used for the Public leaderboard)
+- train.csv - Contains the historical daily unit sales data per product and store [d_1 - d_1913]
+- sample_submission.csv - The correct format for submissions. See the Submission File section for more info.
+- sell_prices.csv - Contains information about the price of the products sold per store and week (`wm_yr_wk`). It ends with week 11613, so it has prices for the first five forecast days (d_1914 - d_1918) only.
 
 
 ## Submission File
 
-Each row contains an id that is a concatenation of an item_id and a store_id, which is either validation (corresponding to the Public leaderboard), or evaluation (corresponding to the Private leaderboard). You are predicting 28 forecast days (F1-F28) of items sold for each row. For the validation rows, this corresponds to d_1914 - d_1941, and for the evaluation rows, this corresponds to d_1942 - d_1969. (Note: a month before the competition close, the ground truth for the validation rows will be provided.)
+Each row contains an id that is a concatenation of an item_id and a store_id, followed by `_validation`. You are predicting 28 forecast days (F1-F28) of items sold for each row, which correspond to d_1914 - d_1941. The ids in `train.csv` end in `_evaluation` instead; apart from that suffix they name the same series, in the same order. The submission must use the `_validation` ids of `sample_submission.csv`.
 
 The files must have a header and should look like the following:
 
@@ -50,13 +49,9 @@ id,F1,...F28
 HOBBIES_1_001_CA_1_validation,0,...,2
 HOBBIES_1_002_CA_1_validation,2,...,11
 ...
-HOBBIES_1_001_CA_1_evaluation,3,...,7
-HOBBIES_1_002_CA_1_evaluation,1,...,4
 ```
 
 ## Timeline
-
-- **June 1, 2020** - Full Training Labels Released. Participants will be provided with the actual values of the 28 days of data used for scoring performance (Public test set). The private test set will remain unchanged, and will still be used to determine the winners.
 
 - **June 23, 2020** - Entry deadline. You must accept the competition rules before this date in order to compete.
 

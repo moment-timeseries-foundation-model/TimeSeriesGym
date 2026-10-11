@@ -10,21 +10,24 @@ In this challenge, we will focus on the **short-term** and **pointwise** forecas
 ### Metric
 Submissions are evaluated based on the Mean Absolute Percentage Error (MAPE) between forecasts and ground truth.
 
-The MAPE formula is:
+The MAPE is computed for each dataset and then averaged over the datasets:
 
-$$MAPE = \frac{1}{n} \sum_{i=1}^{n} \left| \frac{A_i - F_i}{A_i} \right| \times 100\%$$
+$$MAPE = \frac{1}{D} \sum_{d=1}^{D} \frac{1}{n_d} \sum_{i=1}^{n_d} \left| \frac{A_{d,i} - F_{d,i}}{A_{d,i}} \right|$$
 
 Where:
-- $n$ is the number of observations
-- $A_i$ is the actual value
-- $F_i$ is the forecasted value
+- $D$ is the number of datasets listed in `datasets.txt`
+- $n_d$ is the number of observations of dataset $d$ (all of its forecast windows), excluding those whose actual value is missing
+- $A_{d,i}$ is the actual value
+- $F_{d,i}$ is the forecasted value
+
+The score is a fraction, not a percentage, and each dataset counts equally regardless of its number of observations. The grader uses scikit-learn's `mean_absolute_percentage_error`, which divides by max(|A|, machine epsilon): a non-zero forecast where the actual value is exactly 0 makes that dataset's error very large. Predictions must not contain NaN values.
 
 # Dataset Description
 
 ## File and Data Field Descriptions
 - **[Dataset]/**: There are individual subfolders that contain the original dataset files. We will provide loading scripts for each specific dataset.
 - **datasets.txt**: Each line in the file `datasets.txt` specifies a dataset to run for the particular evaluation experiment.
-- **sample_submission.h5**: This provides a sample submission format. Note that the actual submission file might differ from this specific file due to differences in datasets used.
+- **sample_submission.h5**: This provides a sample submission format. Your submission must have exactly its field names (one per dataset in `datasets.txt`) and per-field shapes.
 
 ## Loading Data
 It is **very important** that you load data using the `Dataset` class in the provided `dataset.py` script. To load data for all required datasets, do following
@@ -37,7 +40,7 @@ dataset = dict()
 
 for dataset_name in dataset_names:
     data_path = '' #insert the data path that stores the dataset
-    dataset['dataset_name'] = Dataset(name=ds_name, term='short', to_univariate=False, storage_path=data_path)
+    dataset[dataset_name] = Dataset(name=dataset_name, term='short', to_univariate=False, storage_path=data_path)
 ```
 
 `Dataset` class provides the following properties:
@@ -53,10 +56,10 @@ Note that timeseries modality splits the data to train/val/test on the time dime
 - freq: The frequency of the series
 - past_feat_dynamic_real: [If exists] the past feature dynamic real values of the window
 
-To load data from train or validation dataset, you can do following. Here we use the example `M_DENSE/H`
+To load data from train or validation dataset, you can do following. Here we use the example `m4_daily`
 
 ```python
-train_iter = dataset['M_DENSE/H'].training_dataset
+train_iter = dataset['m4_daily'].training_dataset
 
 for sample in train_iter:
     print(sample['target'].shape)
@@ -65,7 +68,7 @@ for sample in train_iter:
 To load the test data that you are to use to make predictions, you can do following
 
 ```python
-test_input_split_iter = dataset['M_DENSE/H'].test_data.input
+test_input_split_iter = dataset['m4_daily'].test_data.input
 
 for sample in test_input_split_iter:
     print(sample['target'].shape)
@@ -93,7 +96,7 @@ Here are key details to help you successfully complete this task:
 - You may choose to either:
   - Truncate samples to achieve uniform length, or
   - Implement methods that can handle flexible input lengths.
-  - Figure our your own creative solution!
+  - Figure out your own creative solution!
 
 ### Plagiarism
 - Please do not train on test input. We will detect such behavior which can disqualify your score.
@@ -113,12 +116,15 @@ for dataset_name in dataset_names:
         dataset_name,
         term=Term.SHORT,
         to_univariate=False,
-        storage_path=gift_eval_path,
+        storage_path=data_path,
     )
     prediction_length = dataset.prediction_length
     target_dim = dataset.target_dim
     num_samples = len(dataset.test_data.input)
-    shapes = (num_samples, target_dim, prediction_length)
+    if target_dim == 1:  # univariate (all datasets in datasets.txt)
+        shapes = (num_samples, prediction_length)
+    else:
+        shapes = (num_samples, target_dim, prediction_length)
     dt.append((dataset_name, np.float32, shapes))
 
 dt = np.dtype(dt)
