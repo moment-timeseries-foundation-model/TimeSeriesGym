@@ -110,22 +110,31 @@ def grade_jsonl(
     logger.info(purple(f"Saved summary report to {save_path}"))
 
 
-def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
-    """Grades a submission for the given competition."""
-
-    _ensure_prepared(competition)
-
+def _check_suffix(path_to_submission: Path, competition: Competition) -> None:
     if competition.sample_submission.suffix != path_to_submission.suffix:
         raise InvalidSubmissionError(
             f"Submission invalid! Submission file {path_to_submission.suffix} is different from "
             f"the expected file extension {competition.sample_submission.suffix}"
         )
 
+
+def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
+    """Grades a submission for the given competition. A submission that is missing, has the
+    wrong file type or cannot be read is graded as invalid."""
+
+    _ensure_prepared(competition)
+
     submission_exists = path_to_submission.is_file()
-    submission_file = load_submissions(path_to_submission)
-    answers = load_answers(competition.answers)
-    grading_input = GradingInput(submission=submission_file, answers=answers)
-    score = competition.grader(grading_input)
+    try:
+        _check_suffix(path_to_submission, competition)
+        submission_file = load_submissions(path_to_submission)
+    except Exception as e:  # e.g. a ragged CSV: invalid, rather than aborting a whole batch
+        logger.warning(f"Invalid submission {path_to_submission}: {e}")
+        score = None
+    else:
+        answers = load_answers(competition.answers)
+        grading_input = GradingInput(submission=submission_file, answers=answers)
+        score = competition.grader(grading_input)
 
     valid_submission = score is not None
     competition_leaderboard = get_leaderboard(competition)
@@ -227,15 +236,10 @@ def grade_feature_enhancement(
 
 
 def grade_code(path_to_submission: Path, competition: Competition) -> CompetitionReport:
-    """Grades a code submission for the given competition."""
+    """Grades a code submission for the given competition. A submission with the wrong file
+    type, or one the grader rejects (e.g. it does not import), is graded as invalid."""
 
     _ensure_prepared(competition)
-
-    if competition.sample_submission.suffix != path_to_submission.suffix:
-        raise InvalidSubmissionError(
-            f"Submission invalid! Submission file {path_to_submission.suffix} is different from "
-            f"the expected file extension {competition.sample_submission.suffix}"
-        )
 
     submission_exists = path_to_submission.is_file()
     answers = load_answers(competition.answers)
@@ -247,23 +251,30 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
             f"Please define the coding config in the competition config file"
         )
 
-    grading_input = GradingInput(
-        submission_file_path=path_to_submission,
-        answers=answers,
-        coding_config=coding_config,
-    )
-    scores = competition.grader(grading_input)
+    try:
+        _check_suffix(path_to_submission, competition)
+    except InvalidSubmissionError as e:
+        logger.warning(str(e))
+        scores = None
+    else:
+        grading_input = GradingInput(
+            submission_file_path=path_to_submission,
+            answers=answers,
+            coding_config=coding_config,
+        )
+        scores = competition.grader(grading_input)
 
     valid_submission = scores is not None
+    scores = scores or {}  # the Grader returns None for a rejected submission
     return CodeCompetitionReport(
         competition_id=competition.id,
-        defined_classes=scores["defined_classes"],
-        initialized_classes=scores["initialized_classes"],
-        defined_class_methods=scores["defined_class_methods"],
-        executed_class_methods=scores["executed_class_methods"],
-        defined_functions=scores["defined_functions"],
-        executed_functions=scores["executed_functions"],
-        test_metric=scores["test_metric"],
+        defined_classes=scores.get("defined_classes"),
+        initialized_classes=scores.get("initialized_classes"),
+        defined_class_methods=scores.get("defined_class_methods"),
+        executed_class_methods=scores.get("executed_class_methods"),
+        defined_functions=scores.get("defined_functions"),
+        executed_functions=scores.get("executed_functions"),
+        test_metric=scores.get("test_metric"),
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         created_at=datetime.now(),

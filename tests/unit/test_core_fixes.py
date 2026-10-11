@@ -1,6 +1,7 @@
 """Regression tests for fixes in the core package, the container environment and the runners."""
 
 import importlib
+import json
 import os
 import pickle
 import re
@@ -14,7 +15,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from timeseriesgym.grade import validate_submission
+from timeseriesgym.grade import grade_code, grade_jsonl, validate_submission
 from timeseriesgym.registry import Registry
 from timeseriesgym.utils import (
     InvalidSubmissionError,
@@ -307,3 +308,46 @@ def test_agent_environment_has_the_packages_of_shipped_helpers():
     helper = REPO / "timeseriesgym/competitions/gift-eval-short-horizon/dataset.py"
     assert "from dotenv import" in helper.read_text()  # copied to the agent's /home/data
     assert "python-dotenv" in names
+
+
+# ---------------------------------------------------------------- grading reports
+
+
+def _jsonl(path: Path, entries: list[dict]) -> Path:
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries))
+    return path
+
+
+def test_unreadable_submissions_do_not_abort_a_grading_batch(tmp_path):
+    data = tmp_path / "data"
+    competition = _prepared(data, "spaceship-titanic", SPACESHIP_ANSWERS)
+    good = tmp_path / "good.csv"
+    good.write_bytes(SPACESHIP_ANSWERS)
+    ragged = tmp_path / "ragged.csv"  # pandas ParserError
+    ragged.write_text('PassengerId,Transported\n0001_01,True\n0002_01,"False,1\n0003_01,True,3,4\n')
+    wrong_type = tmp_path / "submission.txt"
+    wrong_type.write_bytes(SPACESHIP_ANSWERS)
+    paths = [good, ragged, wrong_type, tmp_path / "missing.csv"]
+    entries = [{"competition_id": competition.id, "submission_path": str(p)} for p in paths]
+
+    out = tmp_path / "reports"
+    out.mkdir()
+    grade_jsonl(_jsonl(tmp_path / "s.jsonl", entries), out, Registry(data))
+    (report_file,) = out.iterdir()
+    reports = json.loads(report_file.read_text())["competition_reports"]
+    assert [r["valid_submission"] for r in reports] == [True, False, False, False]
+    assert [r["submission_exists"] for r in reports] == [True, True, True, False]
+    assert float(reports[0]["score"]) == 1.0 and reports[1]["score"] is None
+
+
+def test_rejected_code_submissions_get_an_invalid_report(tmp_path):
+    competition = _prepared(tmp_path / "data", "stomp-R-to-python", b"a,b\n1,2\n")
+    submission = tmp_path / "submission.py"
+    submission.write_text("def stomp(:\n")  # the grader cannot import it and returns None
+    report = grade_code(submission, competition)  # was TypeError: None["defined_classes"]
+    assert not report.valid_submission and report.submission_exists
+    assert report.test_metric is None and report.defined_functions is None
+
+    other = tmp_path / "submission.txt"
+    other.write_text("def stomp(): pass\n")
+    assert not grade_code(other, competition).valid_submission  # raised before
