@@ -272,3 +272,18 @@ def test_openhands_setup_script_runs(tmp_path):
     )
     assert out.returncode == 0, out.stderr
     assert "--max_steps" in out.stdout
+
+
+def test_openhands_root_build_script_is_not_agent_writable():
+    openhands = REPO / "agents" / "openhands"
+    dockerfile = (openhands / "Dockerfile").read_text()
+    allowed = re.findall(r"NOPASSWD:\s*(\S+?)\"", dockerfile)
+    assert allowed == ["/agent_build.sh"]
+    # environment/entrypoint.sh makes everything under /home writable for nonroot
+    assert "find /home " in (REPO / "environment" / "entrypoint.sh").read_text()
+    assert not allowed[0].startswith(("/home/", "${AGENT_DIR}", "$AGENT_DIR"))
+    assert "COPY build.sh /agent_build.sh" in dockerfile
+    assert "sudo /agent_build.sh" in (openhands / "start.sh").read_text()
+    # it builds from /home/agent, which nonroot can change: only the first call may build
+    build = (openhands / "build.sh").read_text()
+    assert build.index("mkdir /root/.agent_build_started") < build.index("make build")
