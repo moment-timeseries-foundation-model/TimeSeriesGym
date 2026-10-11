@@ -135,7 +135,7 @@ class Registry:
             assert (
                 "parent_id" in config
             ), "Only competitions with parent_id can skip description configuration!"
-            description_path = self.get_competitions_dir() / parent_id / "description.md"
+            description_path = self.get_competitions_dir() / config["parent_id"] / "description.md"
         else:
             description_path = get_repo_dir() / config["description"]
         description = description_path.read_text()
