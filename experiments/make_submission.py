@@ -6,8 +6,8 @@
 Each successful run in metadata.json contributes one line
 {"competition_id": ..., "submission_path": ...}. The path is the submission file whose suffix
 matches the challenge's sample submission, or the submission directory for hyperparameter-search
-and feature-enhancement challenges. Hyperparameter-search lines also name the search script,
-`solution.py` in the submission directory, as "solution_file_path": the graders check it for a
+and feature-enhancement challenges. Hyperparameter-search lines also carry "solution_file_path":
+the run's code directory (the agent's /home/code), which the graders require and search for a
 hyperparameter search. Runs without a usable submission are skipped with a warning.
 """
 
@@ -61,9 +61,8 @@ def main() -> None:
             continue
         line = {"competition_id": competition.id, "submission_path": str(path)}
         if competition.hyperparameter_search_config is not None:
-            # passed even if missing: the grader decides what a missing script means
-            name = competition.hyperparameter_search_config.get("solution_file_name", "solution.py")
-            line["solution_file_path"] = str(path / name)
+            # passed even if missing: the graders then reject the run (no solution code)
+            line["solution_file_path"] = str(Path(run["run_dir"]) / "code")
         lines.append(line)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

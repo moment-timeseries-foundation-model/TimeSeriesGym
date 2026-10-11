@@ -162,6 +162,12 @@ def test_validation_of_hyperparameter_search_folders(tmp_path):
     assert valid and "Submission is valid." in message
     assert not marker.exists()  # models are not unpickled by the root server
 
+    code = tmp_path / "code"  # the solution code, which grading requires
+    valid, message = validate_submission(folder, competition, solution_file_path=code)
+    assert not valid and "solution code" in message
+    code.mkdir()
+    assert validate_submission(folder, competition, solution_file_path=code)[0]
+
     (folder / "submission.csv").write_text("row_id,target\n0-1,0.002\n")
     valid, message = validate_submission(folder, competition)
     assert not valid and message.startswith("submission.csv: Submission invalid!")
@@ -420,10 +426,10 @@ def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
     )
     fe = lines["ptb-xl-classification-challenge-feature-enhancement"]  # was .../submission.csv
     assert fe["submission_path"] == str(root[fe["competition_id"]])
-    assert lines[HPS_ID] == {  # the search script was never passed, so never checked
+    assert lines[HPS_ID] == {  # the solution code was never passed, so never checked
         "competition_id": HPS_ID,
         "submission_path": str(root[HPS_ID]),
-        "solution_file_path": str(root[HPS_ID] / "solution.py"),
+        "solution_file_path": str(tmp_path / HPS_ID / "code"),
     }
 
 
@@ -716,3 +722,36 @@ def test_kaggle_resources_are_scraped_from_the_given_url(relevant_content):
     url = "https://www.kaggle.com/competitions/x/discussion/1"
     # used the script's global loop variable `link`: NameError when imported
     assert relevant_content.process_resource(url) == f"posts of {url}"
+
+
+def test_hyperparameter_search_runs_are_graded_with_their_code(tmp_path):
+    from sklearn.linear_model import Ridge
+
+    data = tmp_path / "data"
+    _prepared(data, HPS_ID, OPTIVER_ANSWERS)
+    run = tmp_path / "run"
+    folder = run / "submission"
+    folder.mkdir(parents=True)
+    (folder / "baseline_submission.csv").write_text("row_id,target\n0-1,0.003\n0-2,0.004\n")
+    (folder / "submission.csv").write_bytes(OPTIVER_ANSWERS)
+    (folder / "baseline_model.pkl").write_bytes(pickle.dumps(Ridge(alpha=1.0)))
+    (folder / "model.pkl").write_bytes(pickle.dumps(Ridge(alpha=0.5)))
+    # the JSONL line make_submission.py writes for this run
+    line = {
+        "competition_id": HPS_ID,
+        "submission_path": str(folder),
+        "solution_file_path": str(run / "code"),
+    }
+    jsonl = _jsonl(tmp_path / "s.jsonl", [line])
+
+    def graded() -> dict:
+        out = tmp_path / f"out{len(list(tmp_path.glob('out*')))}"
+        grade_jsonl(jsonl, out, Registry(data))
+        (report,) = json.loads(next(out.iterdir()).read_text())["competition_reports"]
+        return report
+
+    assert not graded()["valid_submission"]  # no solution code
+    (run / "code").mkdir()
+    (run / "code" / "search.py").write_text("import optuna\noptuna.create_study()\n")
+    report = graded()
+    assert report["valid_submission"] and float(report["score"]) > 0

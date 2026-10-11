@@ -326,7 +326,7 @@ def _validate_prediction_file(submission: Path, competition: Competition) -> tup
 
 
 def _validate_hyperparameter_search_folder(
-    folder: Path, competition: Competition
+    folder: Path, competition: Competition, solution_file_path: Path | None
 ) -> tuple[bool, str]:
     config = competition.hyperparameter_search_config
     submissions = [config["baseline_submission_name"], config["improved_submission_name"]]
@@ -334,6 +334,8 @@ def _validate_hyperparameter_search_folder(
     missing = [name for name in submissions + models if not (folder / name).is_file()]
     if missing:
         return False, f"Submission invalid! {folder} is missing {', '.join(missing)}."
+    if solution_file_path is not None and not Path(solution_file_path).exists():
+        return False, f"Submission invalid! The solution code {solution_file_path} does not exist."
     for name in submissions:
         valid, message = _validate_prediction_file(folder / name, competition)
         if not valid:
@@ -341,17 +343,21 @@ def _validate_hyperparameter_search_folder(
     # the models are agent-written pickles / TorchScript: never loaded here
     return (
         True,
-        "Submission is valid. (The models are loaded and compared when the submission is graded.)",
+        "Submission is valid. (When it is graded, the solution code, which is required, is "
+        "checked for a hyperparameter search, and the models are loaded and compared.)",
     )
 
 
-def validate_submission(submission: Path, competition: Competition) -> tuple[bool, str]:
+def validate_submission(
+    submission: Path, competition: Competition, solution_file_path: Path | None = None
+) -> tuple[bool, str]:
     """
     Validates a submission for the given competition by actually running the competition grader.
     This is designed for end users, not developers (we assume that the competition grader is
     correctly implemented and use that for validating the submission, not the other way around).
     For challenges whose submission is a folder, a single file is validated as one of its
-    prediction files.
+    prediction files. `solution_file_path` is the solution code of a hyperparameter-search
+    folder (a script or a directory, as for `grade_hyperparameter_search`).
 
     The in-container grading server runs this as root on files the agent uploads, so agent code
     is never imported here: code submissions are only parsed, models are not loaded, and pickles
@@ -359,7 +365,7 @@ def validate_submission(submission: Path, competition: Competition) -> tuple[boo
     """
     if competition.hyperparameter_search_config is not None and submission.is_dir():
         _ensure_prepared(competition)
-        return _validate_hyperparameter_search_folder(submission, competition)
+        return _validate_hyperparameter_search_folder(submission, competition, solution_file_path)
 
     if not submission.is_file():
         return False, f"Submission invalid! Submission file {submission} does not exist."
