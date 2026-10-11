@@ -1,0 +1,19 @@
+# Build context of environment/Dockerfile (`docker build -f environment/Dockerfile .`).
+# That image is the agent's container and `COPY . /timeseriesgym` makes everything in the
+# context readable by the agent, so only what the grading server needs is sent: the package
+# and the environment files. Everything else in a checkout stays out: git history, the Git LFS
+# archive of raw challenge data (timeseriesgym/data/, which holds test answers), earlier runs,
+# prepared data, .env files and caches.
+*
+!environment/
+!timeseriesgym/
+!pyproject.toml
+!README.md
+!LICENSE
+
+timeseriesgym/data/
+# reference solution of the feature-enhancement challenge
+timeseriesgym/competitions/*/example/
+**/__pycache__/
+**/*.pyc
+**/.env

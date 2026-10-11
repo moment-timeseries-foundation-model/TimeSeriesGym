@@ -265,5 +265,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    if args.n_workers < 1:  # no worker would take the queued tasks: queue.join() never returns
+        parser.error("--n-workers must be at least 1")
 
     asyncio.run(main(args))

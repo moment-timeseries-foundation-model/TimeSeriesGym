@@ -12,11 +12,11 @@ from dataclasses import dataclass
 # deepeval starts telemetry when it is imported; opt out before the import (as in judge.py)
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
-from deepeval.metrics import GEval  # noqa: E402
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams  # noqa: E402
-from dotenv import load_dotenv  # noqa: E402
+from deepeval.metrics import GEval
+from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+from dotenv import load_dotenv
 
-from timeseriesgym.utils import get_logger  # noqa: E402
+from timeseriesgym.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -25,8 +25,8 @@ logger = get_logger(__name__)
 class ReasonablenessResult:
     """Result of a reasonableness evaluation."""
 
-    is_reasonable: bool
-    score: float
+    is_reasonable: bool | None  # None: not evaluated
+    score: float | None
     threshold: float
     has_suspicious_patterns: bool
     has_modeling_patterns: bool
@@ -48,12 +48,12 @@ def has_suspicious_patterns(code: str) -> bool:
     patterns = [
         # Directly reading sample submission
         r'pd\.read_csv\([\'"].*sample_submission',
-        r'sample_submission.*\.read|read.*sample_submission',
+        r"sample_submission.*\.read|read.*sample_submission",
         # Random/constant predictions as final output
-        r'np\.random\.(rand|randn|uniform|choice)\s*\([^)]*\)\s*$',
-        r'predictions?\s*=\s*\d+\.?\d*\s*$',
+        r"np\.random\.(rand|randn|uniform|choice)\s*\([^)]*\)\s*$",
+        r"predictions?\s*=\s*\d+\.?\d*\s*$",
         # Just copying files
-        r'shutil\.copy.*submission',
+        r"shutil\.copy.*submission",
     ]
     return any(re.search(p, code, re.IGNORECASE | re.MULTILINE) for p in patterns)
 
@@ -62,15 +62,15 @@ def has_modeling_patterns(code: str) -> bool:
     """Quick regex check for genuine modeling indicators."""
     patterns = [
         # Model training
-        r'\.fit\s*\(',
-        r'\.train\s*\(',
+        r"\.fit\s*\(",
+        r"\.train\s*\(",
         # Common ML imports
-        r'from\s+sklearn',
-        r'import\s+torch|from\s+torch',
-        r'import\s+tensorflow|from\s+tensorflow',
-        r'import\s+xgboost|import\s+lightgbm|import\s+catboost',
+        r"from\s+sklearn",
+        r"import\s+torch|from\s+torch",
+        r"import\s+tensorflow|from\s+tensorflow",
+        r"import\s+xgboost|import\s+lightgbm|import\s+catboost",
         # Neural network layers
-        r'nn\.Linear|nn\.Conv|nn\.LSTM|nn\.Transformer',
+        r"nn\.Linear|nn\.Conv|nn\.LSTM|nn\.Transformer",
     ]
     return any(re.search(p, code) for p in patterns)
 
@@ -95,15 +95,15 @@ SCORE 1 (REASONABLE / GENUINE) only if ALL of these are true:
 - There is a clear pipeline: data loading → processing/feature engineering → model training or inference → prediction output
 
 Be STRICT: If the code looks like it's just gaming the submission format without real modeling, score 0.
-"""
+"""  # noqa: E501
 
 # Explicit evaluation steps for chain-of-thought reasoning
 EVALUATION_STEPS = [
-    "Identify what data files the code loads. Does it load actual training/input data, or only sample_submission.csv?",
-    "Examine the prediction generation logic. Are predictions computed from a model or data analysis, or are they random/constant/copied?",
-    "Check if there is actual model training, fitting, or inference happening. Look for sklearn, torch, tensorflow, statsmodels, or custom implementations.",
-    "Determine if the output is derived from learned patterns or computed features, versus just reformatting existing files.",
-    "Make a final judgment: Is this a genuine modeling attempt (score 1) or a submission that games the format without real modeling (score 0)?",
+    "Identify what data files the code loads. Does it load actual training/input data, or only sample_submission.csv?",  # noqa: E501
+    "Examine the prediction generation logic. Are predictions computed from a model or data analysis, or are they random/constant/copied?",  # noqa: E501
+    "Check if there is actual model training, fitting, or inference happening. Look for sklearn, torch, tensorflow, statsmodels, or custom implementations.",  # noqa: E501
+    "Determine if the output is derived from learned patterns or computed features, versus just reformatting existing files.",  # noqa: E501
+    "Make a final judgment: Is this a genuine modeling attempt (score 1) or a submission that games the format without real modeling (score 0)?",  # noqa: E501
 ]
 
 
@@ -162,8 +162,8 @@ def evaluate_reasonableness(
     if not os.getenv("OPENAI_API_KEY"):
         logger.warning("OPENAI_API_KEY not found - skipping reasonableness check")
         return ReasonablenessResult(
-            is_reasonable=True,  # Default to reasonable if can't check
-            score=1.0,
+            is_reasonable=None,  # unknown: a skipped check must not pass every submission
+            score=None,
             threshold=0.5,
             has_suspicious_patterns=False,
             has_modeling_patterns=False,
@@ -204,7 +204,7 @@ def evaluate_reasonableness(
 
     # Create test case with the code as the "actual output" to evaluate
     test_case = LLMTestCase(
-        input="Evaluate whether this code submission represents a genuine modeling attempt for a data science competition.",
+        input="Evaluate whether this code submission represents a genuine modeling attempt for a data science competition.",  # noqa: E501
         actual_output=code_content,
     )
 
@@ -234,4 +234,3 @@ def evaluate_reasonableness(
         has_modeling_patterns=modeling,
         reason=metric.reason if hasattr(metric, "reason") else None,
     )
-

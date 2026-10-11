@@ -153,6 +153,12 @@ def download_and_prepare_dataset(
             "only code files."
         )
         zipfile = None
+    else:  # `zipfile` would be unbound below
+        raise ValueError(
+            f"`{competition.id}` is in none of the competition lists in "
+            "timeseriesgym/competitions/constants.py; add it to the one that says how its data "
+            "is obtained."
+        )
 
     # Generate the checksum for the zip file if it exists.
     if overwrite_checksums or not skip_verification:

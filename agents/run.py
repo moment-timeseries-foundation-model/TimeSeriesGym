@@ -43,9 +43,9 @@ def save_output(container: Container, save_dir: Path, container_config: dict) ->
     return save_dir
 
 
-def execute_agent(container: Container, agent: Agent, logger: logging.Logger):
+def execute_agent(container: Container, agent: Agent, logger: logging.Logger) -> int:
     """
-    Initiates the agent via its start script inside the container.
+    Initiates the agent via its start script inside the container and returns its exit code.
     """
     cmd = ["bash", f"{CONSTANTS['AGENT_DIR']}/start.sh"]
 
@@ -61,10 +61,14 @@ def execute_agent(container: Container, agent: Agent, logger: logging.Logger):
                 cmd.append(f"{key}={value}")
 
     logger.info("Running agent...")
-    exit_code, output = container.exec_run(cmd, stream=True, user="nonroot")
+    # what container.exec_run(cmd, stream=True) does, except that it returns no exit code
+    api = container.client.api
+    exec_id = api.exec_create(container.id, cmd, user="nonroot")["Id"]
 
-    for chunk in output:
+    for chunk in api.exec_start(exec_id, stream=True):
         logger.info(f"[Container] {chunk.decode('utf-8').strip()}")
+
+    return api.exec_inspect(exec_id)["ExitCode"]
 
 
 def clean_up(container: Container, logger: logging.Logger, retain: bool = False) -> bool:
@@ -151,9 +155,11 @@ def run_in_container(
                 "The grading server failed to start within 60 seconds. This is likely due to an "
                 "error in `entrypoint.sh`; check the logs."
             )
-        execute_agent(container, agent, logger)
-        save_output(container, run_dir, container_config)
+        exit_code = execute_agent(container, agent, logger)
+        save_output(container, run_dir, container_config)  # also for failed runs: their logs
         time_end = time.monotonic()
+        if exit_code != 0:
+            raise RuntimeError(f"The agent's start script exited with code {exit_code}.")
         logger.info(f"Run completed in {time_end - time_start:.2f} seconds.")
         return run_dir
     finally:
