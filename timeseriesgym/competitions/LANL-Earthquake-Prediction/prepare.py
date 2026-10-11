@@ -32,8 +32,7 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     # Find the start and end of each seismic event sequence
     t = old_train["time_to_failure"].to_numpy()
-    t1 = np.roll(t, 1)
-    temp = np.where(t[1:] - t1[1:] > 0)[0]
+    temp = np.where(np.diff(t) > 0)[0]
 
     n_segments = 17  # There are 16 events, 17 segments
     starts = np.zeros(n_segments)
