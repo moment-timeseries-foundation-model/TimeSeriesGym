@@ -1,8 +1,10 @@
 """Regression tests for fixes in the core package, the container environment and the runners."""
 
 import importlib
+import os
 import pickle
 import re
+import subprocess
 import sys
 import types
 from collections import defaultdict
@@ -253,3 +255,20 @@ def test_agent_image_context_excludes_answers_and_history():
     ]
     assert [p for p in leaked if not _dockerignored(p, patterns)] == []
     assert [p for p in needed if _dockerignored(p, patterns)] == []
+
+
+# ---------------------------------------------------------------- agents
+
+
+def test_openhands_setup_script_runs(tmp_path):
+    # start.sh runs it as `python setup.py`: a relative import failed before argparse ran
+    env = {**os.environ, "CODE_DIR": str(tmp_path), "AGENT_DIR": str(tmp_path)}
+    out = subprocess.run(
+        [sys.executable, "setup.py", "--help"],
+        cwd=REPO / "agents" / "openhands",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "--max_steps" in out.stdout

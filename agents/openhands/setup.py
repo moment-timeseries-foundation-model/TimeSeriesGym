@@ -3,9 +3,7 @@ import os
 from pathlib import Path
 
 from templates import additional_notes_template, config_template
-from utils import get_gpu_generation
-
-from .utils import str_to_bool
+from utils import get_gpu_generation, str_to_bool
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 CODE_DIR = Path(os.getenv("CODE_DIR"))
