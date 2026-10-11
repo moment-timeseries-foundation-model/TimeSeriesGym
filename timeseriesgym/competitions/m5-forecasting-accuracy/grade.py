@@ -57,8 +57,8 @@ class WRMSSEEvaluator:
         for i, group_id in enumerate(tqdm(self.group_ids)):
             train_y = train_df.groupby(group_id)[train_target_columns].sum()
             scale = []
-            for _, row in train_y.iterrows():
-                series = row.values[np.argmax(row.values != 0) :]
+            for values in train_y.to_numpy():
+                series = values[np.argmax(values != 0) :]
                 scale.append(((series[1:] - series[:-1]) ** 2).mean())
             setattr(self, f"lv{i + 1}_scale", np.array(scale))
             setattr(self, f"lv{i + 1}_train_df", train_y)
