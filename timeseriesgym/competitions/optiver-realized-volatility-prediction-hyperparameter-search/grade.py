@@ -38,4 +38,5 @@ def grade_hyperparameter_search(
         grade_fn=grade,
         lower_is_better=True,  # RMSPE
         packages_to_look_for=["optuna"],
+        default_baseline="xgboost.sklearn.XGBRegressor",  # the description requires XGBRegressor()
     )

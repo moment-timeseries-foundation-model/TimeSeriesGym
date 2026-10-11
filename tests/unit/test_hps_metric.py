@@ -13,9 +13,11 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+from sklearn.ensemble import GradientBoostingRegressor
 from torch import nn
 from xgboost import XGBRegressor
 
+from timeseriesgym.competitions.utils import has_default_hyperparameters
 from timeseriesgym.grade import grade_hyperparameter_search
 from timeseriesgym.registry import Registry
 from timeseriesgym.utils import InvalidSubmissionError
@@ -154,6 +156,33 @@ def test_the_cli_reads_the_challenges_sample_submission(tmp_path, competition_id
 
 
 # ---------------------------------------------------------------- validity
+
+
+@pytest.mark.parametrize(
+    "baseline_model,valid",
+    [
+        (XGBRegressor(), True),
+        (XGBRegressor(n_jobs=4, nthread=2, verbosity=0, random_state=0), True),
+        (XGBRegressor().fit(np.eye(8), np.arange(8.0)), True),  # trained
+        (XGBRegressor(max_depth=3), False),
+        (XGBRegressor(n_estimators=50, objective="reg:absoluteerror"), False),
+        (GradientBoostingRegressor(), False),
+    ],
+)
+def test_optiver_baseline_must_be_the_default_xgbregressor(tmp_path, baseline_model, valid):
+    inputs = _submission(tmp_path, OPTIVER, OPTIVER_HONEST_BASELINE, baseline_model)
+    expected = OPTIVER_SCORE if valid else -np.inf
+    assert _grade(OPTIVER, *inputs) == pytest.approx(expected)
+
+
+def test_default_hyperparameters():
+    name = "xgboost.sklearn.XGBRegressor"
+    assert has_default_hyperparameters(XGBRegressor(), name)
+    assert has_default_hyperparameters(XGBRegressor(objective="reg:squarederror"), name)
+    assert not has_default_hyperparameters(XGBRegressor(missing=0.0), name)  # default: nan
+    assert not has_default_hyperparameters(XGBRegressor(foo=1), name)  # unknown keyword
+    assert not has_default_hyperparameters(XGBRegressor(), "xgboost.sklearn.XGBClassifier")
+    assert not has_default_hyperparameters(object(), "builtins.object")  # no get_params
 
 
 @pytest.mark.parametrize("competition_id", CASES)

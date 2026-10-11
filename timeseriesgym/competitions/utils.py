@@ -9,6 +9,7 @@ from scipy.special import softmax
 
 from timeseriesgym.utils import (
     InvalidSubmissionError,
+    _values_differ,
     get_logger,
     have_different_hyperparameters,
     have_hyperparameter_searching_attempt,
@@ -262,6 +263,28 @@ def prepare_for_auroc_metric(
     return roc_auc_inputs
 
 
+# Settings that do not change what XGBoost learns while every other hyperparameter has its
+# default (no row or column subsampling, so the seed is unused): a default baseline may set them.
+RUNTIME_ONLY_HYPERPARAMETERS = frozenset({"n_jobs", "nthread", "verbosity", "random_state"})
+
+
+def has_default_hyperparameters(model, class_name: str) -> bool:
+    """
+    Whether `model` is an instance of `class_name` (module and qualified name, e.g.
+    `xgboost.sklearn.XGBRegressor`) whose `get_params()` equal those of `class_name()`, apart
+    from RUNTIME_ONLY_HYPERPARAMETERS.
+    """
+    cls = type(model)
+    if f"{cls.__module__}.{cls.__qualname__}" != class_name or not hasattr(model, "get_params"):
+        return False
+    params, defaults = model.get_params(), cls().get_params()
+    missing = object()
+    return not any(
+        _values_differ(params.get(key, missing), defaults.get(key, missing))
+        for key in (params.keys() | defaults.keys()) - RUNTIME_ONLY_HYPERPARAMETERS
+    )
+
+
 def grade_relative_improvement(
     submission_folder_path: Path,
     answers: pd.DataFrame,
@@ -271,6 +294,7 @@ def grade_relative_improvement(
     grade_fn: Callable[[pd.DataFrame, pd.DataFrame], float],
     lower_is_better: bool,
     packages_to_look_for: list[str] | None = None,
+    default_baseline: str | None = None,
 ) -> float:
     """
     Grades a hyperparameter search as the relative improvement of the improved submission's
@@ -283,7 +307,9 @@ def grade_relative_improvement(
     files are searched. Raises InvalidSubmissionError without it, or if the baseline or improved
     submission cannot be graded. Returns -inf if the solution shows no hyperparameter search
     with one of `packages_to_look_for` (see `have_hyperparameter_searching_attempt` for the
-    default list), or if the two models have the same hyperparameters.
+    default list), if the two models have the same hyperparameters, or, when `default_baseline`
+    names a class, if the baseline model is not that class with default hyperparameters (see
+    `has_default_hyperparameters`).
     """
     if sample_submission_path is None or not Path(sample_submission_path).is_file():
         raise ValueError(
@@ -323,6 +349,12 @@ def grade_relative_improvement(
 
     if not have_different_hyperparameters(baseline_model, improved_model):
         logger.info("[INFO] The hyperparameters are the same as the baseline model.")
+        return np.inf * -1
+
+    if default_baseline is not None and not has_default_hyperparameters(
+        baseline_model.model, default_baseline
+    ):
+        logger.info(f"[INFO] The baseline model is not {default_baseline}() with defaults.")
         return np.inf * -1
 
     baseline_score = grade_fn(baseline_submission, answers)  # must be gradable; does not count
