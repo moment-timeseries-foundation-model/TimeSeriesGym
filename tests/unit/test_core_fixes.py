@@ -733,17 +733,19 @@ def test_kaggle_resources_are_scraped_from_the_given_url(relevant_content):
 
 
 def test_hyperparameter_search_runs_are_graded_with_their_code(tmp_path):
-    from sklearn.linear_model import Ridge
+    from xgboost import XGBRegressor
 
     data = tmp_path / "data"
-    _prepared(data, HPS_ID, OPTIVER_ANSWERS)
+    competition = _prepared(data, HPS_ID, OPTIVER_ANSWERS)
+    competition.sample_submission.parent.mkdir(parents=True)  # the score is measured over it
+    competition.sample_submission.write_text("row_id,target\n0-1,0.0\n0-2,0.0\n")
     run = tmp_path / "run"
     folder = run / "submission"
     folder.mkdir(parents=True)
     (folder / "baseline_submission.csv").write_text("row_id,target\n0-1,0.003\n0-2,0.004\n")
     (folder / "submission.csv").write_bytes(OPTIVER_ANSWERS)
-    (folder / "baseline_model.pkl").write_bytes(pickle.dumps(Ridge(alpha=1.0)))
-    (folder / "model.pkl").write_bytes(pickle.dumps(Ridge(alpha=0.5)))
+    (folder / "baseline_model.pkl").write_bytes(pickle.dumps(XGBRegressor()))  # as described
+    (folder / "model.pkl").write_bytes(pickle.dumps(XGBRegressor(max_depth=3)))
     # the JSONL line make_submission.py writes for this run
     line = {
         "competition_id": HPS_ID,
