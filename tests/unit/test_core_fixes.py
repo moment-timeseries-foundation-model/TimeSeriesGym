@@ -997,6 +997,40 @@ def test_self_contained_h5_submissions_load(tmp_path):
     assert np.array_equal(loaded["nested"]["hard"], np.zeros(3))
 
 
+def _declared_only(path: Path, n_values: int) -> Path:
+    """A small HDF5 file whose one chunked dataset was never written: it reads as zeros."""
+    import h5py
+
+    with h5py.File(path, "w") as f:
+        f.create_dataset("submission/x", shape=(n_values,), dtype="f8", chunks=True)
+    return path
+
+
+def test_h5_submissions_cannot_declare_more_data_than_the_cap(tmp_path):
+    from timeseriesgym.utils import MAX_H5_BYTES
+
+    path = _declared_only(tmp_path / "submission.h5", MAX_H5_BYTES // 8 + 1)
+    assert path.stat().st_size < 10_000
+    with pytest.raises(InvalidSubmissionError, match="more than"):  # was read into memory
+        load_submissions(path)
+    small = _declared_only(tmp_path / "small.h5", 1000)
+    assert np.array_equal(load_submissions(small, max_h5_bytes=8000)["x"], np.zeros(1000))
+    with pytest.raises(InvalidSubmissionError, match="more than 7999 bytes"):
+        load_submissions(small, max_h5_bytes=7999)
+
+
+def test_h5_submissions_are_capped_by_the_size_of_the_answers(tmp_path):
+    labels = np.zeros(50)
+    competition = _prepared(
+        tmp_path / "data", "ucr-anomaly-detection", _h5_bytes(tmp_path, "a", {"labels/x": labels})
+    )
+    # 100 MiB of zeros in a 5 kB file, for 50 answers: a 1 GB grading container was OOM-killed
+    # by 3.2 GB declared this way
+    submission = _declared_only(tmp_path / "submission.h5", 100 * 2**20 // 8)
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "more than 67108864 bytes" in message
+
+
 def test_validation_does_not_follow_h5_links_to_the_answers(tmp_path):
     import h5py
 

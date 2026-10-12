@@ -180,17 +180,22 @@ def load_plain_pickle(file) -> Any:
 
 MAX_H5_OBJECTS = 1_000_000
 MAX_H5_DEPTH = 32
+# The data that the datasets of an HDF5 submission may declare in total: load_arbitrary_h5 reads
+# all of it into memory, and a small file can declare much more (a chunked dataset that was never
+# written reads as its fill value). The largest submission, TSL long-horizon in float64, is 3.6 GiB.
+MAX_H5_BYTES = 4 * 2**30
 
 
-def check_h5_self_contained(h5_file: h5py.File) -> None:
+def check_h5_self_contained(h5_file: h5py.File, max_bytes: int = MAX_H5_BYTES) -> None:
     """Raises InvalidSubmissionError unless every object in the agent-written file is a group or
-    a dataset, reached by a hard link, with its data stored in the file itself.
+    a dataset, reached by a hard link, with its data stored in the file itself, and the datasets
+    declare at most `max_bytes` of data in total.
 
     Soft and external links, virtual datasets and external raw storage make HDF5 read other
     files (as root, in the grading server), e.g. the private answers. Walks the link names
     without following them; the caps also stop hard-link cycles.
     """
-    stack, count = [(h5_file, "", 0)], 0
+    stack, count, declared = [(h5_file, "", 0)], 0, 0
     while stack:
         group, prefix, depth = stack.pop()
         if depth > MAX_H5_DEPTH:
@@ -222,9 +227,15 @@ def check_h5_self_contained(h5_file: h5py.File) -> None:
                     f"Submission invalid! {name}: virtual or externally stored HDF5 datasets "
                     "are not allowed."
                 )
+            else:
+                declared += (obj.size or 0) * obj.dtype.itemsize
+                if declared > max_bytes:
+                    raise InvalidSubmissionError(
+                        f"Submission invalid! The HDF5 datasets hold more than {max_bytes} bytes."
+                    )
 
 
-def load_submissions(path_to_submission: Path) -> Any:
+def load_submissions(path_to_submission: Path, max_h5_bytes: int = MAX_H5_BYTES) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
     if not path_to_submission.is_file():
@@ -237,7 +248,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
     elif path_to_submission.suffix.lower() == ".h5" or path_to_submission.suffix.lower() == ".hdf5":
         with h5py.File(path_to_submission, "r") as submission_file:
-            check_h5_self_contained(submission_file)
+            check_h5_self_contained(submission_file, max_h5_bytes)
             return load_arbitrary_h5(submission_file["submission"])
 
     elif path_to_submission.suffix.lower() == ".pkl":
