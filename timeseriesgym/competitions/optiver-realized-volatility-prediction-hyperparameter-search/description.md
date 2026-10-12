@@ -23,7 +23,7 @@ The score of a submission is the relative improvement in RMSPE of your improved 
 
 $$\text{score} = \frac{\text{RMSPE}_{sample} - \text{RMSPE}_{improved}}{\text{RMSPE}_{sample}}$$
 
-The sample submission predicts 0.0 for every row, so its RMSPE is 1 and the score is $1 - \text{RMSPE}_{improved}$. Higher scores are better. Your baseline model and `baseline_submission.csv` do not change the score, but they are required: the submission is invalid if the baseline model is not `xgboost.XGBRegressor()` with default hyperparameters (only `n_jobs`, `nthread`, `verbosity` and `random_state` may be set), if the two models have the same hyperparameters (as returned by `get_params()`), if `baseline_submission.csv` or `submission.csv` is not a valid submission, or if your solution code (the `.py` files in `/home/code`) is missing or shows no hyperparameter search with Optuna.
+The sample submission predicts 0.0 for every row, so its RMSPE is 1 and the score is $1 - \text{RMSPE}_{improved}$. Higher scores are better. Your baseline model and `baseline_submission.csv` do not change the score, but they are required: the submission is invalid if the baseline model is not `xgboost.XGBRegressor()` with default hyperparameters (only `n_jobs`, `nthread`, `verbosity` and `random_state` may be set), if the two models have the same hyperparameters (as returned by `get_params()`, not counting those four settings), if `baseline_submission.csv` or `submission.csv` is not a valid submission, or if your solution code (the `.py` files in `/home/code`) is missing or shows no hyperparameter search with Optuna.
 
 ## Submission File
 For each `row_id` in the test set, you must predict the `target` variable. The file should contain a header and have the following format:

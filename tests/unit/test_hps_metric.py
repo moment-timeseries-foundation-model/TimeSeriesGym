@@ -195,6 +195,23 @@ def test_models_with_the_same_hyperparameters_are_invalid(tmp_path, competition_
     assert _grade(competition_id, folder, *rest) == -np.inf
 
 
+@pytest.mark.parametrize(
+    "improved_model,different",
+    [
+        (XGBRegressor(n_jobs=4), False),  # was valid: n_jobs counted as a hyperparameter
+        (XGBRegressor(nthread=2, verbosity=0, random_state=7), False),
+        (XGBRegressor(n_jobs=4, max_depth=3), True),
+    ],
+)
+def test_runtime_only_settings_are_not_different_hyperparameters(
+    tmp_path, improved_model, different
+):
+    folder, *rest = _submission(tmp_path, OPTIVER, OPTIVER_HONEST_BASELINE)
+    (folder / _config(OPTIVER)["improved_model_name"]).write_bytes(pickle.dumps(improved_model))
+    expected = OPTIVER_SCORE if different else -np.inf
+    assert _grade(OPTIVER, folder, *rest) == pytest.approx(expected)
+
+
 @pytest.mark.parametrize("competition_id", CASES)
 def test_the_solution_code_must_show_a_search(tmp_path, competition_id):
     folder, answers, config, solution, sample = _submission(

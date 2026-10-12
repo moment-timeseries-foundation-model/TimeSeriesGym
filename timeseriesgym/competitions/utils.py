@@ -8,6 +8,7 @@ from numpy import ndarray
 from scipy.special import softmax
 
 from timeseriesgym.utils import (
+    RUNTIME_ONLY_HYPERPARAMETERS,
     InvalidSubmissionError,
     _values_differ,
     get_logger,
@@ -261,11 +262,6 @@ def prepare_for_auroc_metric(
     }
 
     return roc_auc_inputs
-
-
-# Settings that do not change what XGBoost learns while every other hyperparameter has its
-# default (no row or column subsampling, so the seed is unused): a default baseline may set them.
-RUNTIME_ONLY_HYPERPARAMETERS = frozenset({"n_jobs", "nthread", "verbosity", "random_state"})
 
 
 def has_default_hyperparameters(model, class_name: str) -> bool:

@@ -624,9 +624,16 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
     return False
 
 
+# Settings that do not change what XGBoost learns while every other hyperparameter has its
+# default (no row or column subsampling, so the seed is unused): a default baseline may set them,
+# and two models that differ only in them have the same hyperparameters.
+RUNTIME_ONLY_HYPERPARAMETERS = frozenset({"n_jobs", "nthread", "verbosity", "random_state"})
+
+
 def have_different_hyperparameters(baseline_model: Model, improved_model: Model) -> bool:
     """
-    Check if two models have different hyperparameters.
+    Check if two models have different hyperparameters. For models with `get_params()`, the
+    settings in RUNTIME_ONLY_HYPERPARAMETERS are not compared.
     """
     if type(baseline_model) is not type(improved_model):
         raise InvalidSubmissionError(
@@ -642,6 +649,8 @@ def have_different_hyperparameters(baseline_model: Model, improved_model: Model)
             # scikit-learn API (also XGBoost, LightGBM, CatBoost wrappers): compare the
             # hyperparameters themselves, not fitted state such as the booster object.
             baseline_dict, improved_dict = baseline.get_params(), improved.get_params()
+            for key in RUNTIME_ONLY_HYPERPARAMETERS:
+                improved_dict.pop(key, None)
         else:
             baseline_dict = {k: v for k, v in vars(baseline).items() if not k.endswith("_")}
             improved_dict = {k: v for k, v in vars(improved).items() if not k.endswith("_")}
