@@ -671,3 +671,15 @@ def test_missing_data_variants_describe_the_missing_values(
     # it used to inherit its parent's text, which does not mention the missing values
     parent = registry.get_competition(parent_id).description
     assert "### Missing Data" not in parent and "### Files" in competition.description
+
+
+def test_ucr_description_shows_the_shipped_dataset_helper():
+    from timeseriesgym.data import get_checksum
+    from timeseriesgym.utils import load_yaml
+
+    directory = Path(_module("ucr-anomaly-detection").__file__).parent
+    helper = directory / "anomaly_dataset.py"
+    # the shipped copy said the sample submission "Contains the anomaly labels"
+    assert helper.read_text() in (directory / "description.md").read_text()
+    public = load_yaml(directory / "checksums.yaml")["public"]
+    assert public["anomaly_dataset.py"] == get_checksum(helper)  # prepare copies it to public/

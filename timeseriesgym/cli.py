@@ -177,8 +177,8 @@ def main():
     )
     parser_grade_model.add_argument(
         "--solution-file-path",
-        help="The solution code, a script or a directory of .py files (e.g. the run's code/); "
-        "the graders require it and check it for a hyperparameter search.",
+        help="The solution code, a script or a directory of .py files (e.g. the run's code/), "
+        "which is checked for a hyperparameter search. Without it, the submission is invalid.",
         type=str,
         required=False,
         default=None,
