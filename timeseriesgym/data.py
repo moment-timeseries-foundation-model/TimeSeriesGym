@@ -1,3 +1,4 @@
+import filecmp
 import functools
 import hashlib
 import inspect
@@ -621,8 +622,13 @@ def copy_leaderboard(
     from_competition: Competition,
     to_competition: Competition,
 ) -> None:
-    if from_competition.leaderboard.is_file():
-        shutil.copy(from_competition.leaderboard, to_competition.leaderboard)
+    source, destination = from_competition.leaderboard, to_competition.leaderboard
+    # The derived competitions ship their parent's leaderboard: copying it again wrote into the
+    # package directory, which fails on a read-only install.
+    if source.is_file() and not (
+        destination.is_file() and filecmp.cmp(source, destination, shallow=False)
+    ):
+        shutil.copy(source, destination)
     logger.info(f"Copying leaderboard from {from_competition.name} to {to_competition.name}.")
 
 

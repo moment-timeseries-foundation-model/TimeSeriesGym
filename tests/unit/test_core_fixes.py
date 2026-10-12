@@ -337,6 +337,34 @@ def test_only_challenges_that_are_ranked_say_they_award_medals():
         assert ranked or not competition.awards_medals, competition_id
 
 
+def test_preparing_a_derived_competition_does_not_rewrite_its_shipped_leaderboard(
+    tmp_path, monkeypatch
+):
+    import dataclasses
+
+    from timeseriesgym import data
+
+    registry = Registry(tmp_path)
+
+    def read_only_install(*args, **kwargs):
+        raise OSError(30, "Read-only file system")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(data.shutil, "copy", read_only_install)
+        for child_id in (
+            "optiver-realized-volatility-prediction-hyperparameter-search",
+            "ptb-xl-classification-challenge-feature-enhancement",
+        ):
+            child = registry.get_competition(child_id)
+            # was OSError: the parent's identical leaderboard was copied into the package
+            data.copy_leaderboard(registry.get_competition(child.parent_id), child)
+
+    parent = registry.get_competition("spaceship-titanic")
+    child = dataclasses.replace(parent, leaderboard=tmp_path / "leaderboard.csv")
+    data.copy_leaderboard(parent, child)  # a missing leaderboard is still copied
+    assert child.leaderboard.read_bytes() == parent.leaderboard.read_bytes()
+
+
 def test_agent_environment_has_the_packages_of_shipped_helpers():
     requirements = (REPO / "environment" / "requirements.txt").read_text()
     names = {re.split(r"[=<>~ ]", line)[0].lower() for line in requirements.splitlines() if line}
