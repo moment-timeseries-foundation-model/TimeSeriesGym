@@ -321,6 +321,50 @@ def test_competition_ids_are_the_competition_directories():
         assert registry.get_competition(competition_id).id == competition_id
 
 
+def test_only_challenges_that_are_ranked_say_they_award_medals():
+    from timeseriesgym.data import get_leaderboard
+
+    registry = Registry()
+    for competition_id in registry.list_competition_ids():
+        competition = registry.get_competition(competition_id)
+        graded_as_a_file = (
+            competition.hyperparameter_search_config is None
+            and competition.coding_config is None
+            and competition.feature_enhancement_config is None
+        )
+        ranked = graded_as_a_file and get_leaderboard(competition) is not None
+        # Optiver HPS said true, but HPS reports are never ranked (grade.py)
+        assert ranked or not competition.awards_medals, competition_id
+
+
+def test_preparing_a_derived_competition_does_not_rewrite_its_shipped_leaderboard(
+    tmp_path, monkeypatch
+):
+    import dataclasses
+
+    from timeseriesgym import data
+
+    registry = Registry(tmp_path)
+
+    def read_only_install(*args, **kwargs):
+        raise OSError(30, "Read-only file system")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(data.shutil, "copy", read_only_install)
+        for child_id in (
+            "optiver-realized-volatility-prediction-hyperparameter-search",
+            "ptb-xl-classification-challenge-feature-enhancement",
+        ):
+            child = registry.get_competition(child_id)
+            # was OSError: the parent's identical leaderboard was copied into the package
+            data.copy_leaderboard(registry.get_competition(child.parent_id), child)
+
+    parent = registry.get_competition("spaceship-titanic")
+    child = dataclasses.replace(parent, leaderboard=tmp_path / "leaderboard.csv")
+    data.copy_leaderboard(parent, child)  # a missing leaderboard is still copied
+    assert child.leaderboard.read_bytes() == parent.leaderboard.read_bytes()
+
+
 def test_agent_environment_has_the_packages_of_shipped_helpers():
     requirements = (REPO / "environment" / "requirements.txt").read_text()
     names = {re.split(r"[=<>~ ]", line)[0].lower() for line in requirements.splitlines() if line}
@@ -402,6 +446,22 @@ def test_dict_scores_are_reported_as_json_objects():
     assert CompetitionReport.from_dict(plain.to_dict()).score == 0.5
 
 
+def _make_submission(tmp_path: Path, runs: dict) -> Path:
+    """Runs experiments/make_submission.py on a metadata.json with `runs`; returns the JSONL."""
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(json.dumps({"runs": runs}))
+    output = tmp_path / "submission.jsonl"
+    args = ["--metadata", metadata, "--output", output, "--data-dir", tmp_path / "data"]
+    subprocess.run(
+        [sys.executable, "experiments/make_submission.py", *map(str, args)],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        check=True,
+        capture_output=True,
+    )
+    return output
+
+
 def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
     runs = {}
     for competition_id in (
@@ -414,17 +474,7 @@ def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
         (submission_dir / "submission.csv").write_text("id,label\n")
         run = {"competition_id": competition_id, "run_dir": str(submission_dir.parent)}
         runs[competition_id] = {**run, "success": True}
-    metadata = tmp_path / "metadata.json"
-    metadata.write_text(json.dumps({"runs": runs}))
-    output = tmp_path / "submission.jsonl"
-    args = ["--metadata", metadata, "--output", output, "--data-dir", tmp_path / "data"]
-    subprocess.run(
-        [sys.executable, "experiments/make_submission.py", *map(str, args)],
-        cwd=REPO,
-        env={**os.environ, "PYTHONPATH": str(REPO)},
-        check=True,
-        capture_output=True,
-    )
+    output = _make_submission(tmp_path, runs)
     lines = {line["competition_id"]: line for line in map(json.loads, output.open())}
     root = {cid: tmp_path / cid / "submission" for cid in runs}
     assert lines["spaceship-titanic"]["submission_path"] == str(
@@ -437,6 +487,53 @@ def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
         "submission_path": str(root[HPS_ID]),
         "solution_file_path": str(tmp_path / HPS_ID / "code"),
     }
+
+
+def test_make_submission_lists_every_run(tmp_path):
+    fe = "ptb-xl-classification-challenge-feature-enhancement"
+    runs = {}
+
+    def run(name, competition_id, files=(), exit_code=0):
+        for relative, mtime in files:
+            path = tmp_path / name / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(SPACESHIP_ANSWERS)
+            os.utime(path, (mtime, mtime))
+        runs[name] = {
+            "competition_id": competition_id,
+            "run_dir": str(tmp_path / name),
+            "success": exit_code == 0,
+            "agent_exit_code": exit_code,
+        }
+
+    run("timed_out", "spaceship-titanic", [("submission/submission.csv", 1)], exit_code=124)
+    run("crashed", "spaceship-titanic", exit_code=1)  # saved nothing
+    two = [("submission/submission.csv", 1), ("submission/final.csv", 2)]  # final.csv is last
+    run("two_files", "spaceship-titanic", two)
+    run("fe_in_code", fe, [("submission/submission.csv", 1), ("code/model.py", 1)])
+    run("fe_in_submission", fe, [("submission/submission.csv", 1), ("submission/model.py", 1)])
+    lines = [json.loads(line) for line in _make_submission(tmp_path, runs).open()]
+
+    # the failed runs and the run with two submission files were left out (2 lines)
+    paths = [line["submission_path"] for line in lines]
+    assert paths == [
+        str(tmp_path / "timed_out" / "submission" / "submission.csv"),
+        str(tmp_path / "crashed" / "submission" / "submission.csv"),  # missing: graded invalid
+        str(tmp_path / "two_files" / "submission" / "final.csv"),
+        str(tmp_path / "fe_in_code" / "submission"),
+        str(tmp_path / "fe_in_submission" / "submission"),
+    ]
+    # was absent, so the grader looked for model.py in the submission folder only
+    assert lines[3]["solution_files_path"] == str(tmp_path / "fe_in_code" / "code")
+    assert lines[4]["solution_files_path"] == str(tmp_path / "fe_in_submission" / "submission")
+
+    data = tmp_path / "data"
+    _prepared(data, "spaceship-titanic", SPACESHIP_ANSWERS)
+    out = tmp_path / "reports"
+    grade_jsonl(_jsonl(tmp_path / "spaceship.jsonl", lines[:3]), out, Registry(data))
+    summary = json.loads(next(out.iterdir()).read_text())
+    assert summary["total_runs"] == 3  # the crashed run counts, as invalid
+    assert [r["valid_submission"] for r in summary["competition_reports"]] == [True, False, True]
 
 
 # ---------------------------------------------------------------- hyperparameter search
@@ -481,18 +578,25 @@ def test_torchscript_models_compare_their_layer_hyperparameters(tmp_path):
         ("import wandb\nwandb.init(project='p')\n", False),
         ("import mlflow\nmlflow.log_metric('acc', 1.0)\n", False),
         ("import ray.tune\nimport ray\nray.init()\n", False),
+        # a mention, or a search object that is never run, is not a search
+        ("import optuna\nprint(optuna.__version__)\n", False),
+        ("import optuna\noptuna.logging.set_verbosity(optuna.logging.WARNING)\n", False),
+        ("import optuna\nstudy = optuna.create_study()\n", False),
+        ("from optuna.samplers import TPESampler\nTPESampler()\n", False),
+        ("from sklearn.model_selection import GridSearchCV\nGridSearchCV(m, grid)\n", False),
+        ("import wandb\nwandb.sweep(config)\n", False),
         # searches
         (
             "from sklearn.model_selection import GridSearchCV\nGridSearchCV(m, grid).fit(x, y)\n",
             True,
         ),
-        ("import sklearn.model_selection as ms\nms.RandomizedSearchCV(m, d)\n", True),
-        ("from sklearn import model_selection\nmodel_selection.GridSearchCV(m, g)\n", True),
-        ("import wandb\nwandb.sweep(config)\n", True),
+        ("import sklearn.model_selection as ms\nms.RandomizedSearchCV(m, d).fit(x, y)\n", True),
+        ("from sklearn import model_selection as ms\ns = ms.GridSearchCV(m, g)\ns.fit(x)\n", True),
+        ("import wandb\nsweep_id = wandb.sweep(config)\nwandb.agent(sweep_id, train)\n", True),
         ("import ray\nray.tune.run(train)\n", True),
-        ("from ray import tune\ntune.Tuner(train)\n", True),
-        ("import optuna\nstudy = optuna.create_study()\n", True),
-        ("from optuna.samplers import TPESampler\nTPESampler()\n", True),
+        ("from ray import tune\ntune.Tuner(train).fit()\n", True),
+        ("from hyperopt import fmin, tpe\nfmin(f, space, algo=tpe.suggest)\n", True),
+        ("import optuna\nstudy = optuna.create_study()\nstudy.optimize(f, n_trials=9)\n", True),
         ("import optuna\n", False),
     ],
 )
@@ -593,6 +697,29 @@ def test_run_agent_rejects_zero_workers(tmp_path):
     assert out.returncode == 2 and "--n-workers must be at least 1" in out.stderr
 
 
+def test_run_agent_needs_the_tarfile_data_filter(tmp_path):
+    competitions = tmp_path / "split.txt"
+    competitions.write_text("spaceship-titanic\n")
+    argv = ["run_agent.py", "--agent-id", "dummy", "--competition-set", str(competitions)]
+    # CPython 3.11.0-3.11.3, which requires-python allows, has no tarfile.data_filter
+    code = (
+        "import runpy, sys, tarfile\n"
+        "del tarfile.data_filter\n"
+        f"sys.argv = {argv!r}\n"
+        "runpy.run_path('run_agent.py', run_name='__main__')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    # the runs used to start, and each extraction only logged a RuntimeError: no submissions
+    assert out.returncode == 2 and "Python 3.11.4 or later is required" in out.stderr
+
+
 class _FakeExecAPI:
     def __init__(self, exit_code: int):
         self.exit_code, self.created = exit_code, []
@@ -609,8 +736,8 @@ class _FakeExecAPI:
         return {"ExitCode": self.exit_code}
 
 
-@pytest.mark.parametrize("exit_code", [0, 3])
-def test_runs_whose_agent_fails_are_not_successful(tmp_path, monkeypatch, exit_code):
+@pytest.mark.parametrize("exit_code", [0, 3, 124])
+def test_runs_return_the_agents_exit_code(tmp_path, monkeypatch, exit_code):
     import logging
 
     agents_run = importlib.import_module("agents.run")
@@ -640,13 +767,42 @@ def test_runs_whose_agent_fails_are_not_successful(tmp_path, monkeypatch, exit_c
         run_dir=tmp_path,
         logger=logging.getLogger("test"),
     )
-    if exit_code == 0:
-        assert run() == tmp_path
-    else:  # run_agent.py records a raised run as failed; it was recorded as successful
-        with pytest.raises(RuntimeError, match="exited with code 3"):
-            run()
-    assert saved == [tmp_path]  # outputs are still extracted
+    # ignored at first, then raised after the outputs were saved, which made run_agent.py and
+    # make_submission.py drop a submission saved before a timeout's 124
+    assert run() == exit_code
+    assert saved == [tmp_path]  # outputs are extracted whatever the exit code
     assert api.created[0][2] == "nonroot"
+
+
+@pytest.mark.parametrize("exit_code", [0, 124])
+def test_run_metadata_records_the_agents_exit_code(tmp_path, monkeypatch, exit_code):
+    import asyncio
+
+    run_agent = importlib.import_module("run_agent")
+    monkeypatch.setattr(run_agent, "args", SimpleNamespace(retain=False), raising=False)
+    monkeypatch.setattr(run_agent, "run_in_container", lambda **kwargs: exit_code)
+    task = run_agent.Task(
+        run_id="run-1",
+        seed=0,
+        image="img",
+        path_to_run_group=tmp_path,
+        path_to_run=tmp_path,
+        agent=SimpleNamespace(id="agent", name="img"),
+        competition=SimpleNamespace(id="x"),
+        container_config={},
+    )
+    outputs = {}
+
+    async def run_one():
+        queue = asyncio.Queue()
+        queue.put_nowait(task)
+        worker = asyncio.create_task(run_agent.worker(0, queue, None, outputs))
+        await queue.join()
+        worker.cancel()
+
+    asyncio.run(run_one())
+    assert outputs["run-1"]["agent_exit_code"] == exit_code
+    assert outputs["run-1"]["success"] is (exit_code == 0)
 
 
 # ---------------------------------------------------------------- container output extraction
@@ -762,7 +918,7 @@ def test_hyperparameter_search_runs_are_graded_with_their_code(tmp_path):
 
     assert not graded()["valid_submission"]  # no solution code
     (run / "code").mkdir()
-    (run / "code" / "search.py").write_text("import optuna\noptuna.create_study()\n")
+    (run / "code" / "search.py").write_text("import optuna\noptuna.create_study().optimize(f)\n")
     report = graded()
     assert report["valid_submission"] and float(report["score"]) > 0
 
@@ -867,6 +1023,40 @@ def test_self_contained_h5_submissions_load(tmp_path):
     loaded = load_submissions(path)
     assert np.array_equal(loaded["easy"], np.ones(10))
     assert np.array_equal(loaded["nested"]["hard"], np.zeros(3))
+
+
+def _declared_only(path: Path, n_values: int) -> Path:
+    """A small HDF5 file whose one chunked dataset was never written: it reads as zeros."""
+    import h5py
+
+    with h5py.File(path, "w") as f:
+        f.create_dataset("submission/x", shape=(n_values,), dtype="f8", chunks=True)
+    return path
+
+
+def test_h5_submissions_cannot_declare_more_data_than_the_cap(tmp_path):
+    from timeseriesgym.utils import MAX_H5_BYTES
+
+    path = _declared_only(tmp_path / "submission.h5", MAX_H5_BYTES // 8 + 1)
+    assert path.stat().st_size < 10_000
+    with pytest.raises(InvalidSubmissionError, match="more than"):  # was read into memory
+        load_submissions(path)
+    small = _declared_only(tmp_path / "small.h5", 1000)
+    assert np.array_equal(load_submissions(small, max_h5_bytes=8000)["x"], np.zeros(1000))
+    with pytest.raises(InvalidSubmissionError, match="more than 7999 bytes"):
+        load_submissions(small, max_h5_bytes=7999)
+
+
+def test_h5_submissions_are_capped_by_the_size_of_the_answers(tmp_path):
+    labels = np.zeros(50)
+    competition = _prepared(
+        tmp_path / "data", "ucr-anomaly-detection", _h5_bytes(tmp_path, "a", {"labels/x": labels})
+    )
+    # 100 MiB of zeros in a 5 kB file, for 50 answers: a 1 GB grading container was OOM-killed
+    # by 3.2 GB declared this way
+    submission = _declared_only(tmp_path / "submission.h5", 100 * 2**20 // 8)
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "more than 67108864 bytes" in message
 
 
 def test_validation_does_not_follow_h5_links_to_the_answers(tmp_path):

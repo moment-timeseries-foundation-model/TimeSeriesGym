@@ -8,13 +8,13 @@ from numpy import ndarray
 from scipy.special import softmax
 
 from timeseriesgym.utils import (
+    RUNTIME_ONLY_HYPERPARAMETERS,
     InvalidSubmissionError,
     _values_differ,
     get_logger,
     have_different_hyperparameters,
     have_hyperparameter_searching_attempt,
     load_models,
-    load_scripts,
     load_submissions,
 )
 
@@ -263,11 +263,6 @@ def prepare_for_auroc_metric(
     return roc_auc_inputs
 
 
-# Settings that do not change what XGBoost learns while every other hyperparameter has its
-# default (no row or column subsampling, so the seed is unused): a default baseline may set them.
-RUNTIME_ONLY_HYPERPARAMETERS = frozenset({"n_jobs", "nthread", "verbosity", "random_state"})
-
-
 def has_default_hyperparameters(model, class_name: str) -> bool:
     """
     Whether `model` is an instance of `class_name` (module and qualified name, e.g.
@@ -283,6 +278,22 @@ def has_default_hyperparameters(model, class_name: str) -> bool:
         _values_differ(params.get(key, missing), defaults.get(key, missing))
         for key in (params.keys() | defaults.keys()) - RUNTIME_ONLY_HYPERPARAMETERS
     )
+
+
+def _solution_sources(solution_path: Path) -> list[str]:
+    """The source of the solution script, or of the `.py` files under the solution directory.
+    A file that is not a regular file (symlinks under the directory are not followed) or is not
+    UTF-8 text is skipped with a warning, so one stray file does not stop the grading."""
+    paths = sorted(solution_path.rglob("*.py")) if solution_path.is_dir() else [solution_path]
+    sources = []
+    for path in paths:
+        try:
+            if not path.is_file() or (path != solution_path and path.is_symlink()):
+                raise OSError("not a regular file")
+            sources.append(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning(f"[WARNING] Skipped the solution file {path}: {e}")
+    return sources
 
 
 def grade_relative_improvement(
@@ -322,14 +333,10 @@ def grade_relative_improvement(
             "Submission invalid! The solution code is required to grade a hyperparameter search, "
             f"but none was found at {solution_file_path}."
         )
-    solution_path = Path(solution_file_path)
-    scripts = sorted(solution_path.rglob("*.py")) if solution_path.is_dir() else [solution_path]
     logger.info("[INFO] Searching the solution code for a hyperparameter searching attempt.")
     if not any(
-        have_hyperparameter_searching_attempt(
-            load_scripts(script), packages_to_look_for=packages_to_look_for
-        )
-        for script in scripts
+        have_hyperparameter_searching_attempt(source, packages_to_look_for=packages_to_look_for)
+        for source in _solution_sources(Path(solution_file_path))
     ):
         logger.info("[INFO] Hyperparameter searching attempt not found.")
         return np.inf * -1

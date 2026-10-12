@@ -35,6 +35,7 @@ class Competition:
     checksums: Path
     leaderboard: Path
     feature_enhancement_config: dict | None = None
+    awards_medals: bool = True  # informational, as on Kaggle: medals are ranked by leaderboard
 
     def __post_init__(self):
         assert isinstance(self.id, str), "Competition id must be a string."
@@ -92,6 +93,7 @@ class Competition:
                 private_dir=data["private_dir"],
                 checksums=data["checksums"],
                 leaderboard=data["leaderboard"],
+                awards_medals=data.get("awards_medals", True),
             )
         except KeyError as e:
             raise ValueError(f"Missing key {e} in competition config!") from e

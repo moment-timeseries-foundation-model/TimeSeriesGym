@@ -31,7 +31,7 @@ Implement comprehensive logging and experiment tracking with TensorBoard. Your s
 Ensure code quality with ALL of the following:
 
 - **Module Docstrings**: Both model.py and train.py must begin with comprehensive module-level docstrings
-- **Type Annotations**: Functions must include type hints (e.g., `def train_epoch(model: nn.Module, ...) -> tuple[float, float]:`)
+- **Type Annotations**: Every function and method must annotate all of its parameters (except `self` and `cls`) and its return type (e.g., `def train_epoch(model: nn.Module, ...) -> tuple[float, float]:`); `__init__` may leave out `-> None`
 - **Class Docstrings**: All classes must have docstrings explaining their purpose and behavior
 - **Function Docstrings**: All substantive functions (more than 2-3 lines) must have docstrings
 - **Args/Returns Sections**: Docstrings must include `Args:` and `Returns:` sections that clearly describe parameters and return values
@@ -70,7 +70,7 @@ class Model(nn.Module):
         hidden_dim: Hidden dimension
         num_classes: Number of output classes
     """
-    def __init__(self, input_dim, hidden_dim, num_classes):
+    def __init__(self, input_dim: int, hidden_dim: int, num_classes: int):
         super().__init__()
         # Model architecture
         # ...
@@ -138,7 +138,9 @@ model:
 
 ```python
 # Model accepting config
-def __init__(self, config=None, in_channels=12, seq_length=1000, ...):
+def __init__(
+    self, config: DictConfig | None = None, in_channels: int = 12, seq_length: int = 1000, ...
+):
     if config is not None:
         # Use parameters from config
         in_channels = getattr(config.model, 'in_channels', in_channels)

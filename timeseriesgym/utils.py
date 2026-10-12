@@ -181,17 +181,22 @@ def load_plain_pickle(file) -> Any:
 
 MAX_H5_OBJECTS = 1_000_000
 MAX_H5_DEPTH = 32
+# The data that the datasets of an HDF5 submission may declare in total: load_arbitrary_h5 reads
+# all of it into memory, and a small file can declare much more (a chunked dataset that was never
+# written reads as its fill value). The largest submission, TSL long-horizon in float64, is 3.6 GiB.
+MAX_H5_BYTES = 4 * 2**30
 
 
-def check_h5_self_contained(h5_file: h5py.File) -> None:
+def check_h5_self_contained(h5_file: h5py.File, max_bytes: int = MAX_H5_BYTES) -> None:
     """Raises InvalidSubmissionError unless every object in the agent-written file is a group or
-    a dataset, reached by a hard link, with its data stored in the file itself.
+    a dataset, reached by a hard link, with its data stored in the file itself, and the datasets
+    declare at most `max_bytes` of data in total.
 
     Soft and external links, virtual datasets and external raw storage make HDF5 read other
     files (as root, in the grading server), e.g. the private answers. Walks the link names
     without following them; the caps also stop hard-link cycles.
     """
-    stack, count = [(h5_file, "", 0)], 0
+    stack, count, declared = [(h5_file, "", 0)], 0, 0
     while stack:
         group, prefix, depth = stack.pop()
         if depth > MAX_H5_DEPTH:
@@ -223,9 +228,15 @@ def check_h5_self_contained(h5_file: h5py.File) -> None:
                     f"Submission invalid! {name}: virtual or externally stored HDF5 datasets "
                     "are not allowed."
                 )
+            else:
+                declared += (obj.size or 0) * obj.dtype.itemsize
+                if declared > max_bytes:
+                    raise InvalidSubmissionError(
+                        f"Submission invalid! The HDF5 datasets hold more than {max_bytes} bytes."
+                    )
 
 
-def load_submissions(path_to_submission: Path) -> Any:
+def load_submissions(path_to_submission: Path, max_h5_bytes: int = MAX_H5_BYTES) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
     if not path_to_submission.is_file():
@@ -238,7 +249,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
     elif path_to_submission.suffix.lower() == ".h5" or path_to_submission.suffix.lower() == ".hdf5":
         with h5py.File(path_to_submission, "r") as submission_file:
-            check_h5_self_contained(submission_file)
+            check_h5_self_contained(submission_file, max_h5_bytes)
             return load_arbitrary_h5(submission_file["submission"])
 
     elif path_to_submission.suffix.lower() == ".pkl":
@@ -646,9 +657,16 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
     return False
 
 
+# Settings that do not change what XGBoost learns while every other hyperparameter has its
+# default (no row or column subsampling, so the seed is unused): a default baseline may set them,
+# and two models that differ only in them have the same hyperparameters.
+RUNTIME_ONLY_HYPERPARAMETERS = frozenset({"n_jobs", "nthread", "verbosity", "random_state"})
+
+
 def have_different_hyperparameters(baseline_model: Model, improved_model: Model) -> bool:
     """
-    Check if two models have different hyperparameters.
+    Check if two models have different hyperparameters. For models with `get_params()`, the
+    settings in RUNTIME_ONLY_HYPERPARAMETERS are not compared.
     """
     if type(baseline_model) is not type(improved_model):
         raise InvalidSubmissionError(
@@ -664,6 +682,8 @@ def have_different_hyperparameters(baseline_model: Model, improved_model: Model)
             # scikit-learn API (also XGBoost, LightGBM, CatBoost wrappers): compare the
             # hyperparameters themselves, not fitted state such as the booster object.
             baseline_dict, improved_dict = baseline.get_params(), improved.get_params()
+            for key in RUNTIME_ONLY_HYPERPARAMETERS:
+                improved_dict.pop(key, None)
         else:
             baseline_dict = {k: v for k, v in vars(baseline).items() if not k.endswith("_")}
             improved_dict = {k: v for k, v in vars(improved).items() if not k.endswith("_")}
@@ -693,49 +713,63 @@ def _values_differ(a: Any, b: Any) -> bool:
         return repr(a) != repr(b)
 
 
+# The calls that run a hyperparameter search, by import path. Where the call only creates a
+# search object, the value names the methods that run it, and the code must call one of them too
+# (`optuna.create_study()` searches nothing until `study.optimize(...)`). An empty value: a call
+# of the API, or of something inside it, counts.
+HYPERPARAMETER_SEARCH_CALLS = {
+    "optuna.create_study": ("optimize", "ask"),
+    "optuna.load_study": ("optimize", "ask"),
+    "optuna.study.create_study": ("optimize", "ask"),
+    "optuna.integration.OptunaSearchCV": ("fit",),
+    "ray.tune.run": (),
+    "ray.tune.Tuner": ("fit",),
+    "wandb.agent": (),
+    "hyperopt.fmin": (),
+    "sklearn.model_selection.GridSearchCV": ("fit",),
+    "sklearn.model_selection.RandomizedSearchCV": ("fit",),
+    "sklearn.model_selection.HalvingGridSearchCV": ("fit",),
+    "sklearn.model_selection.HalvingRandomSearchCV": ("fit",),
+    "bayes_opt.BayesianOptimization": ("maximize", "suggest"),
+    "nevergrad.optimizers": ("minimize", "ask"),
+    "sigopt": (),
+    "ax": (),
+    "pytorch_lightning.tuner": (),
+}
+
+
+def _is_within(dotted: str, api: str) -> bool:
+    return dotted == api or dotted.startswith(api + ".")
+
+
 def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_for=None) -> bool:
     """
-    Check if the solution code uses a hyperparameter search library or API.
+    Check if the solution code runs a hyperparameter search with a search library.
 
-    The previous string heuristic required the literal `import optuna` to appear twice, and
-    for `from optuna import ...` it split on commas across the rest of the file, so common,
-    honest scripts were rejected. This version parses the code: each entry of
-    `packages_to_look_for` is a module (`optuna`) or an API inside one
-    (`sklearn.model_selection.GridSearchCV`), and it counts as used when the code refers to it,
-    or to something inside it, through the names it was imported as. Importing alone does not
-    count, nor does using another part of the same module (e.g. `train_test_split`).
+    The code is parsed, not run. It must call one of HYPERPARAMETER_SEARCH_CALLS, through the
+    names it was imported as, and, where that call only creates the search, a method that runs
+    it. `packages_to_look_for` limits the search to the calls inside the listed modules or APIs
+    (e.g. `["optuna"]`); an entry with none of them counts when the code calls it or something
+    inside it. Importing a library does not count, nor does reading an attribute
+    (`optuna.__version__`) or calling another part of the module (`train_test_split`).
     """
     import ast
 
     if packages_to_look_for is None:
-        hyperparameter_searching_libraries = [
-            "optuna",
-            "ray.tune",
-            "wandb.sweep",
-            "wandb.agent",
-            "hyperopt",
-            "sklearn.model_selection.GridSearchCV",
-            "sklearn.model_selection.RandomizedSearchCV",
-            "sklearn.model_selection.HalvingGridSearchCV",
-            "sklearn.model_selection.HalvingRandomSearchCV",
-            "bayes_opt",
-            "sigopt",
-            "nevergrad",
-            "ax",
-            "pytorch_lightning.tuner",
-        ]
+        search_calls = dict(HYPERPARAMETER_SEARCH_CALLS)
     else:
-        hyperparameter_searching_libraries = packages_to_look_for
-
-    def is_search_api(dotted: str) -> bool:
-        return any(
-            dotted == lib or dotted.startswith(lib + ".")
-            for lib in hyperparameter_searching_libraries
-        )
+        search_calls = {}
+        for entry in packages_to_look_for:
+            selected = {
+                api: runs
+                for api, runs in HYPERPARAMETER_SEARCH_CALLS.items()
+                if _is_within(api, entry)
+            }
+            search_calls.update(selected or {entry: ()})
 
     try:
         tree = ast.parse(solution_code)
-    except SyntaxError:
+    except (SyntaxError, ValueError, RecursionError):  # not Python, null bytes, too deep
         return False
 
     # local name -> the dotted path it was imported as
@@ -761,12 +795,13 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
             return None
         return ".".join([imported[node.id], *reversed(attrs)])
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name | ast.Attribute):
-            dotted = dotted_name(node)
-            if dotted is not None and is_search_api(dotted):
-                return True
-    return False
+    callees = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    called = {dotted_name(func) for func in callees} - {None}
+    methods = {func.attr for func in callees if isinstance(func, ast.Attribute)}
+    return any(
+        any(_is_within(name, api) for name in called) and (not runs or bool(methods & set(runs)))
+        for api, runs in search_calls.items()
+    )
 
 
 def clone_repository(

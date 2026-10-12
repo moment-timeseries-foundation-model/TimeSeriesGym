@@ -53,7 +53,7 @@ Your submission directory must contain exactly these four files:
 | `baseline_model.pt`        | TorchScript file for baseline model    |
 | `model.pt`                 | TorchScript file for improved model    |
 
-> **Important:** You are required to conduct hyperparameter optimization, or the submission will result in an **invalid submission**. Keep the code of your hyperparameter search in `.py` files in `/home/code`: this solution code is required, and the grader checks it for the search. The grader compares the two TorchScript models by their architecture (such as their layers and the shapes of their parameters), so the improved model must differ from the baseline in its architecture: models that differ only in training settings (such as learning rate, number of epochs, batch size or optimizer) count as having the same hyperparameters.
+> **Important:** You are required to conduct hyperparameter optimization, or the submission will result in an **invalid submission**. Keep the code of your hyperparameter search in `.py` files in `/home/code`: this solution code is required, and the grader checks it for the search. The code must run the search with one of these libraries, calling both the API that sets it up and the one that runs it: Optuna (`optuna.create_study` and `study.optimize`), Ray Tune (`tune.run`, or `tune.Tuner` and `fit`), Weights & Biases sweeps (`wandb.agent`), Hyperopt (`fmin`), scikit-learn (`GridSearchCV`, `RandomizedSearchCV`, `HalvingGridSearchCV` or `HalvingRandomSearchCV`, and `fit`), BayesianOptimization (`BayesianOptimization` and `maximize`), Nevergrad (an optimizer from `nevergrad.optimizers` and `minimize`), SigOpt, Ax or the PyTorch Lightning tuner. A search written by hand, such as a loop over a grid of settings, is not recognised, and the submission is then invalid. The grader compares the two TorchScript models by their architecture (such as their layers and the shapes of their parameters), so the improved model must differ from the baseline in its architecture: models that differ only in training settings (such as learning rate, number of epochs, batch size or optimizer) count as having the same hyperparameters.
 
 ## Evaluation
 
@@ -63,7 +63,7 @@ Submissions are evaluated based on the relative improvement in classification ac
 
 $$\text{score} = \frac{\text{accuracy}_{improved} - \text{accuracy}_{sample}}{\text{accuracy}_{sample}}$$
 
-The sample submission predicts class 0 for every ECG, so its accuracy is the share of test ECGs in class 0. Higher scores are better. Your baseline model and `baseline_submission.csv` do not change the score, but they are required: the submission is invalid if the grader finds that the two models have the same hyperparameters, if `baseline_submission.csv` or `submission.csv` is not a valid submission, or if your solution code (the `.py` files in `/home/code`) is missing or shows no hyperparameter search.
+The sample submission predicts class 0 for every ECG, so its accuracy is the share of test ECGs in class 0. Higher scores are better. Your baseline model and `baseline_submission.csv` do not change the score, but they are required: the submission is invalid if the grader finds that the two models have the same hyperparameters, if `baseline_submission.csv` or `submission.csv` is not a valid submission, or if your solution code (the `.py` files in `/home/code`) is missing or shows no hyperparameter search with one of the libraries listed above.
 
 ### Submission Format
 

@@ -102,9 +102,10 @@ def run_in_container(
     retain_container: bool,
     run_dir: Path,
     logger: logging.Logger,
-) -> Path:
+) -> int:
     """
     Runs environment containing the competition and agent for a set maximum amount of time.
+    The outputs are saved to `run_dir` whatever the agent's exit code.
 
     Args:
         client: Docker client.
@@ -117,7 +118,7 @@ def run_in_container(
         logger: Logger for the run.
 
     Returns:
-        Path to the output file.
+        The exit code of the agent's start script.
     """
     volumes_config = {
         competition.public_dir.resolve().as_posix(): {
@@ -156,11 +157,12 @@ def run_in_container(
                 "error in `entrypoint.sh`; check the logs."
             )
         exit_code = execute_agent(container, agent, logger)
-        save_output(container, run_dir, container_config)  # also for failed runs: their logs
+        # also for failed runs: their logs, and the submission an agent that timed out had saved
+        save_output(container, run_dir, container_config)
         time_end = time.monotonic()
         if exit_code != 0:
-            raise RuntimeError(f"The agent's start script exited with code {exit_code}.")
+            logger.warning(f"The agent's start script exited with code {exit_code}.")
         logger.info(f"Run completed in {time_end - time_start:.2f} seconds.")
-        return run_dir
+        return exit_code
     finally:
         clean_up(container, logger, retain_container)

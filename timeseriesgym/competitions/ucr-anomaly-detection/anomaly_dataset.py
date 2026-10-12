@@ -37,7 +37,7 @@ class UCRAnomalyDataset:
 
     def _load_sample_submission(self) -> np.ndarray:
         """Load sample submission for this dataset
-        Contains the anomaly labels for the test set
+        Contains zero-filled placeholder anomaly scores for the test set (the submission format)
         """
         sample_sub_path = self.data_path / "sample_submission.h5"
 

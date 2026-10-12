@@ -1,7 +1,7 @@
 id: optiver-realized-volatility-prediction-hyperparameter-search
 name: Optiver Realized Volatility Prediction with Hyperparameter Search
 competition_type: simple
-awards_medals: true
+awards_medals: false
 prizes:
   - position: 1
     value: 25000

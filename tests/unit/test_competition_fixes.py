@@ -308,7 +308,7 @@ def test_hyperparameter_search_requires_the_solution_code(tmp_path):
     expected = -(improved - sample) / sample
 
     script = tmp_path / "search.py"
-    script.write_text("import optuna\nstudy = optuna.create_study()\n")
+    script.write_text("import optuna\nstudy = optuna.create_study()\nstudy.optimize(f)\n")
     assert module.grade_hyperparameter_search(
         folder, answers, config, script, sample_path
     ) == pytest.approx(expected)
@@ -431,6 +431,27 @@ def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
         ast.parse(TRAIN)
     )
     assert "#" not in fe.strip_comments("def broken(:  # comment\n")
+
+
+def test_feature_rubric_accepts_the_type_hints_of_the_descriptions_examples():
+    fe = _fe()
+    examples = [  # description.md, as annotated now; `__init__` without `-> None` was rejected
+        "def __init__(self, input_dim: int, hidden_dim: int, num_classes: int):\n    pass\n",
+        "def __init__(self, config: dict | None = None, in_channels: int = 12):\n    pass\n",
+        "def main(cfg: DictConfig) -> None:\n    pass\n",
+    ]
+    for code in examples:
+        assert fe.has_type_hints(ast.parse(code)), code
+    assert not fe.has_type_hints(ast.parse("def __init__(self, n):\n    pass\n"))
+    assert not fe.has_type_hints(ast.parse("def f(n: int):\n    return n\n"))  # not __init__
+
+
+def test_feature_rubric_keeps_quoted_hashes_in_the_config():
+    fe = _fe()
+    flow = '{name: "run #1", model: {hidden: 8}}\n'  # was cut at "#1", losing `model:`
+    assert fe.evaluate_hydra_usage(TRAIN, flow) == pytest.approx(1.0)
+    commented = "name: 'a # b'  # model: x\n"  # a real comment still does not count
+    assert fe.evaluate_hydra_usage(TRAIN, commented) == pytest.approx(0.8)
 
 
 def test_feature_rubric_scores_the_shipped_example_as_before():
@@ -650,3 +671,15 @@ def test_missing_data_variants_describe_the_missing_values(
     # it used to inherit its parent's text, which does not mention the missing values
     parent = registry.get_competition(parent_id).description
     assert "### Missing Data" not in parent and "### Files" in competition.description
+
+
+def test_ucr_description_shows_the_shipped_dataset_helper():
+    from timeseriesgym.data import get_checksum
+    from timeseriesgym.utils import load_yaml
+
+    directory = Path(_module("ucr-anomaly-detection").__file__).parent
+    helper = directory / "anomaly_dataset.py"
+    # the shipped copy said the sample submission "Contains the anomaly labels"
+    assert helper.read_text() in (directory / "description.md").read_text()
+    public = load_yaml(directory / "checksums.yaml")["public"]
+    assert public["anomaly_dataset.py"] == get_checksum(helper)  # prepare copies it to public/

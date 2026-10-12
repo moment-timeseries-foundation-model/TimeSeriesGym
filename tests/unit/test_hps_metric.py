@@ -24,7 +24,7 @@ from timeseriesgym.utils import InvalidSubmissionError
 
 OPTIVER = "optiver-realized-volatility-prediction-hyperparameter-search"
 PTB_XL = "ptb-xl-classification-challenge-hyperparameter-search"
-SEARCH = "import optuna\nstudy = optuna.create_study()\n"
+SEARCH = "import optuna\nstudy = optuna.create_study()\nstudy.optimize(objective, n_trials=20)\n"
 
 # Optiver: the sample predicts 0.0, so its RMSPE is 1 and the score is 1 - RMSPE.
 OPTIVER_ANSWERS = pd.DataFrame(
@@ -149,10 +149,10 @@ def test_the_cli_reads_the_challenges_sample_submission(tmp_path, competition_id
     _submission(tmp_path, competition_id, inflated)  # overwrites the baseline files
     assert grade_hyperparameter_search(folder, competition, str(solution)).score == report.score
 
-    competition.sample_submission.unlink()  # no trusted floor: not graded
-    report = grade_hyperparameter_search(folder, competition, str(solution))
-    assert not report.valid_submission
-    assert report.score is None
+    # no trusted floor: a setup error, which stops the batch (it was every run graded invalid)
+    competition.sample_submission.unlink()
+    with pytest.raises(ValueError, match="sample submission .* is missing"):
+        grade_hyperparameter_search(folder, competition, str(solution))
 
 
 # ---------------------------------------------------------------- validity
@@ -195,15 +195,56 @@ def test_models_with_the_same_hyperparameters_are_invalid(tmp_path, competition_
     assert _grade(competition_id, folder, *rest) == -np.inf
 
 
+@pytest.mark.parametrize(
+    "improved_model,different",
+    [
+        (XGBRegressor(n_jobs=4), False),  # was valid: n_jobs counted as a hyperparameter
+        (XGBRegressor(nthread=2, verbosity=0, random_state=7), False),
+        (XGBRegressor(n_jobs=4, max_depth=3), True),
+    ],
+)
+def test_runtime_only_settings_are_not_different_hyperparameters(
+    tmp_path, improved_model, different
+):
+    folder, *rest = _submission(tmp_path, OPTIVER, OPTIVER_HONEST_BASELINE)
+    (folder / _config(OPTIVER)["improved_model_name"]).write_bytes(pickle.dumps(improved_model))
+    expected = OPTIVER_SCORE if different else -np.inf
+    assert _grade(OPTIVER, folder, *rest) == pytest.approx(expected)
+
+
 @pytest.mark.parametrize("competition_id", CASES)
 def test_the_solution_code_must_show_a_search(tmp_path, competition_id):
     folder, answers, config, solution, sample = _submission(
         tmp_path, competition_id, CASES[competition_id][0]
     )
-    solution.write_text("model = None  # tuned by hand\n")
-    assert _grade(competition_id, folder, answers, config, solution, sample) == -np.inf
+    for code in [
+        "model = None  # tuned by hand\n",
+        "import optuna\nprint(optuna.__version__)\n",  # was a search: any reference counted
+        "import optuna\nstudy = optuna.create_study()\n",  # created, never run
+    ]:
+        solution.write_text(code)
+        assert _grade(competition_id, folder, answers, config, solution, sample) == -np.inf
     with pytest.raises(InvalidSubmissionError, match="solution code is required"):
         _grade(competition_id, folder, answers, config, None, sample)
+
+
+@pytest.mark.parametrize("competition_id", CASES)
+def test_unreadable_files_in_the_code_directory_are_skipped(tmp_path, competition_id):
+    folder, answers, config, solution, sample = _submission(
+        tmp_path, competition_id, CASES[competition_id][0]
+    )
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "a_notes.py").write_bytes("# r\xe9sum\xe9\n".encode("latin-1"))  # not UTF-8
+    (code / "a_link.py").symlink_to(tmp_path / "absent.py")  # dangling
+    shutil.copy(solution, code / "search.py")
+    # each of the first two stopped the grading ("does not exist", UnicodeDecodeError)
+    expected = CASES[competition_id][2]
+    assert _grade(competition_id, folder, answers, config, code, sample) == pytest.approx(expected)
+
+    (code / "search.py").unlink()
+    (code / "linked.py").symlink_to(solution)  # symlinks under the directory are not followed
+    assert _grade(competition_id, folder, answers, config, code, sample) == -np.inf
 
 
 @pytest.mark.parametrize(
