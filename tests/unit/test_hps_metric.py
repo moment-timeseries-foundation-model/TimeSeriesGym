@@ -24,7 +24,7 @@ from timeseriesgym.utils import InvalidSubmissionError
 
 OPTIVER = "optiver-realized-volatility-prediction-hyperparameter-search"
 PTB_XL = "ptb-xl-classification-challenge-hyperparameter-search"
-SEARCH = "import optuna\nstudy = optuna.create_study()\n"
+SEARCH = "import optuna\nstudy = optuna.create_study()\nstudy.optimize(objective, n_trials=20)\n"
 
 # Optiver: the sample predicts 0.0, so its RMSPE is 1 and the score is 1 - RMSPE.
 OPTIVER_ANSWERS = pd.DataFrame(
@@ -217,8 +217,13 @@ def test_the_solution_code_must_show_a_search(tmp_path, competition_id):
     folder, answers, config, solution, sample = _submission(
         tmp_path, competition_id, CASES[competition_id][0]
     )
-    solution.write_text("model = None  # tuned by hand\n")
-    assert _grade(competition_id, folder, answers, config, solution, sample) == -np.inf
+    for code in [
+        "model = None  # tuned by hand\n",
+        "import optuna\nprint(optuna.__version__)\n",  # was a search: any reference counted
+        "import optuna\nstudy = optuna.create_study()\n",  # created, never run
+    ]:
+        solution.write_text(code)
+        assert _grade(competition_id, folder, answers, config, solution, sample) == -np.inf
     with pytest.raises(InvalidSubmissionError, match="solution code is required"):
         _grade(competition_id, folder, answers, config, None, sample)
 

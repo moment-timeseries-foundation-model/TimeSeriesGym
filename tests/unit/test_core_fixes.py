@@ -481,18 +481,25 @@ def test_torchscript_models_compare_their_layer_hyperparameters(tmp_path):
         ("import wandb\nwandb.init(project='p')\n", False),
         ("import mlflow\nmlflow.log_metric('acc', 1.0)\n", False),
         ("import ray.tune\nimport ray\nray.init()\n", False),
+        # a mention, or a search object that is never run, is not a search
+        ("import optuna\nprint(optuna.__version__)\n", False),
+        ("import optuna\noptuna.logging.set_verbosity(optuna.logging.WARNING)\n", False),
+        ("import optuna\nstudy = optuna.create_study()\n", False),
+        ("from optuna.samplers import TPESampler\nTPESampler()\n", False),
+        ("from sklearn.model_selection import GridSearchCV\nGridSearchCV(m, grid)\n", False),
+        ("import wandb\nwandb.sweep(config)\n", False),
         # searches
         (
             "from sklearn.model_selection import GridSearchCV\nGridSearchCV(m, grid).fit(x, y)\n",
             True,
         ),
-        ("import sklearn.model_selection as ms\nms.RandomizedSearchCV(m, d)\n", True),
-        ("from sklearn import model_selection\nmodel_selection.GridSearchCV(m, g)\n", True),
-        ("import wandb\nwandb.sweep(config)\n", True),
+        ("import sklearn.model_selection as ms\nms.RandomizedSearchCV(m, d).fit(x, y)\n", True),
+        ("from sklearn import model_selection as ms\ns = ms.GridSearchCV(m, g)\ns.fit(x)\n", True),
+        ("import wandb\nsweep_id = wandb.sweep(config)\nwandb.agent(sweep_id, train)\n", True),
         ("import ray\nray.tune.run(train)\n", True),
-        ("from ray import tune\ntune.Tuner(train)\n", True),
-        ("import optuna\nstudy = optuna.create_study()\n", True),
-        ("from optuna.samplers import TPESampler\nTPESampler()\n", True),
+        ("from ray import tune\ntune.Tuner(train).fit()\n", True),
+        ("from hyperopt import fmin, tpe\nfmin(f, space, algo=tpe.suggest)\n", True),
+        ("import optuna\nstudy = optuna.create_study()\nstudy.optimize(f, n_trials=9)\n", True),
         ("import optuna\n", False),
     ],
 )
@@ -762,7 +769,7 @@ def test_hyperparameter_search_runs_are_graded_with_their_code(tmp_path):
 
     assert not graded()["valid_submission"]  # no solution code
     (run / "code").mkdir()
-    (run / "code" / "search.py").write_text("import optuna\noptuna.create_study()\n")
+    (run / "code" / "search.py").write_text("import optuna\noptuna.create_study().optimize(f)\n")
     report = graded()
     assert report["valid_submission"] and float(report["score"]) > 0
 

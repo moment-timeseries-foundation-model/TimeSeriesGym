@@ -308,7 +308,7 @@ def test_hyperparameter_search_requires_the_solution_code(tmp_path):
     expected = -(improved - sample) / sample
 
     script = tmp_path / "search.py"
-    script.write_text("import optuna\nstudy = optuna.create_study()\n")
+    script.write_text("import optuna\nstudy = optuna.create_study()\nstudy.optimize(f)\n")
     assert module.grade_hyperparameter_search(
         folder, answers, config, script, sample_path
     ) == pytest.approx(expected)

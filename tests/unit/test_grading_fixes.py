@@ -176,10 +176,13 @@ def test_fitted_state_is_not_a_hyperparameter(tmp_path):
 @pytest.mark.parametrize(
     "code,expected",
     [
-        ("import optuna\nstudy = optuna.create_study()\n", True),
-        ("import optuna as opt\nopt.create_study()\n", True),
-        ("from optuna import create_study\ncreate_study()\n", True),
-        ("from optuna.samplers import TPESampler\ns = TPESampler()\n", True),
+        ("import optuna\nstudy = optuna.create_study()\nstudy.optimize(f)\n", True),
+        ("import optuna as opt\nopt.create_study().optimize(f)\n", True),
+        ("from optuna import create_study\ncreate_study().optimize(f)\n", True),
+        ("import optuna\nstudy = optuna.load_study(name)\ntrial = study.ask()\n", True),
+        ("import optuna\nstudy = optuna.create_study()\n", False),  # created, never run
+        ("from optuna.samplers import TPESampler\ns = TPESampler()\n", False),
+        ("import optuna\nprint(optuna.__version__)\n", False),
         ("import optuna\n", False),  # imported, never used
         ("import numpy as np\nnp.zeros(3)\n", False),
         ("def f(:\n", False),
@@ -187,6 +190,14 @@ def test_fitted_state_is_not_a_hyperparameter(tmp_path):
 )
 def test_hyperparameter_search_detection(code, expected):
     assert have_hyperparameter_searching_attempt(code, packages_to_look_for=["optuna"]) is expected
+
+
+def test_a_listed_library_without_known_search_calls_counts_when_called():
+    libraries = ["mylib.tuning"]
+    called = "import mylib.tuning as t\nt.search(space)\n"
+    assert have_hyperparameter_searching_attempt(called, packages_to_look_for=libraries)
+    read = "import mylib.tuning as t\nprint(t.VERSION)\n"
+    assert not have_hyperparameter_searching_attempt(read, packages_to_look_for=libraries)
 
 
 # ---------------------------------------------------------------- infrastructure

@@ -680,49 +680,63 @@ def _values_differ(a: Any, b: Any) -> bool:
         return repr(a) != repr(b)
 
 
+# The calls that run a hyperparameter search, by import path. Where the call only creates a
+# search object, the value names the methods that run it, and the code must call one of them too
+# (`optuna.create_study()` searches nothing until `study.optimize(...)`). An empty value: a call
+# of the API, or of something inside it, counts.
+HYPERPARAMETER_SEARCH_CALLS = {
+    "optuna.create_study": ("optimize", "ask"),
+    "optuna.load_study": ("optimize", "ask"),
+    "optuna.study.create_study": ("optimize", "ask"),
+    "optuna.integration.OptunaSearchCV": ("fit",),
+    "ray.tune.run": (),
+    "ray.tune.Tuner": ("fit",),
+    "wandb.agent": (),
+    "hyperopt.fmin": (),
+    "sklearn.model_selection.GridSearchCV": ("fit",),
+    "sklearn.model_selection.RandomizedSearchCV": ("fit",),
+    "sklearn.model_selection.HalvingGridSearchCV": ("fit",),
+    "sklearn.model_selection.HalvingRandomSearchCV": ("fit",),
+    "bayes_opt.BayesianOptimization": ("maximize", "suggest"),
+    "nevergrad.optimizers": ("minimize", "ask"),
+    "sigopt": (),
+    "ax": (),
+    "pytorch_lightning.tuner": (),
+}
+
+
+def _is_within(dotted: str, api: str) -> bool:
+    return dotted == api or dotted.startswith(api + ".")
+
+
 def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_for=None) -> bool:
     """
-    Check if the solution code uses a hyperparameter search library or API.
+    Check if the solution code runs a hyperparameter search with a search library.
 
-    The previous string heuristic required the literal `import optuna` to appear twice, and
-    for `from optuna import ...` it split on commas across the rest of the file, so common,
-    honest scripts were rejected. This version parses the code: each entry of
-    `packages_to_look_for` is a module (`optuna`) or an API inside one
-    (`sklearn.model_selection.GridSearchCV`), and it counts as used when the code refers to it,
-    or to something inside it, through the names it was imported as. Importing alone does not
-    count, nor does using another part of the same module (e.g. `train_test_split`).
+    The code is parsed, not run. It must call one of HYPERPARAMETER_SEARCH_CALLS, through the
+    names it was imported as, and, where that call only creates the search, a method that runs
+    it. `packages_to_look_for` limits the search to the calls inside the listed modules or APIs
+    (e.g. `["optuna"]`); an entry with none of them counts when the code calls it or something
+    inside it. Importing a library does not count, nor does reading an attribute
+    (`optuna.__version__`) or calling another part of the module (`train_test_split`).
     """
     import ast
 
     if packages_to_look_for is None:
-        hyperparameter_searching_libraries = [
-            "optuna",
-            "ray.tune",
-            "wandb.sweep",
-            "wandb.agent",
-            "hyperopt",
-            "sklearn.model_selection.GridSearchCV",
-            "sklearn.model_selection.RandomizedSearchCV",
-            "sklearn.model_selection.HalvingGridSearchCV",
-            "sklearn.model_selection.HalvingRandomSearchCV",
-            "bayes_opt",
-            "sigopt",
-            "nevergrad",
-            "ax",
-            "pytorch_lightning.tuner",
-        ]
+        search_calls = dict(HYPERPARAMETER_SEARCH_CALLS)
     else:
-        hyperparameter_searching_libraries = packages_to_look_for
-
-    def is_search_api(dotted: str) -> bool:
-        return any(
-            dotted == lib or dotted.startswith(lib + ".")
-            for lib in hyperparameter_searching_libraries
-        )
+        search_calls = {}
+        for entry in packages_to_look_for:
+            selected = {
+                api: runs
+                for api, runs in HYPERPARAMETER_SEARCH_CALLS.items()
+                if _is_within(api, entry)
+            }
+            search_calls.update(selected or {entry: ()})
 
     try:
         tree = ast.parse(solution_code)
-    except SyntaxError:
+    except (SyntaxError, ValueError, RecursionError):  # not Python, null bytes, too deep
         return False
 
     # local name -> the dotted path it was imported as
@@ -748,12 +762,13 @@ def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_f
             return None
         return ".".join([imported[node.id], *reversed(attrs)])
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name | ast.Attribute):
-            dotted = dotted_name(node)
-            if dotted is not None and is_search_api(dotted):
-                return True
-    return False
+    callees = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    called = {dotted_name(func) for func in callees} - {None}
+    methods = {func.attr for func in callees if isinstance(func, ast.Attribute)}
+    return any(
+        any(_is_within(name, api) for name in called) and (not runs or bool(methods & set(runs)))
+        for api, runs in search_calls.items()
+    )
 
 
 def clone_repository(

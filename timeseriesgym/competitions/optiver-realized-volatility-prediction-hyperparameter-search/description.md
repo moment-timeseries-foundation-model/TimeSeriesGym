@@ -75,6 +75,7 @@ Your submission folder should include following files:
 > **Important:** You are required to use **Optuna** for hyperparameter optimization.
 > Any use of alternative tuning libraries will result in an **invalid submission**.
 > Keep the code of your hyperparameter search in `.py` files in `/home/code`: this solution code is required, and the grader checks it for the search.
+> The code must create an Optuna study and run it: `optuna.create_study(...)` (or `optuna.load_study(...)`) and `study.optimize(...)` (or `study.ask()`), or `optuna.integration.OptunaSearchCV(...)` and `fit`.
 
 ## Dataset Description
 
