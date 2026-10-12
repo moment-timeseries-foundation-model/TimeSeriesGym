@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pickle
+import shutil
 import sys
 import time
 import uuid
@@ -382,15 +383,33 @@ def is_compressed(fpath: Path) -> bool:
     return fpath.suffix in [".zip", ".tar", ".gz", ".tgz", ".tar.gz", ".rar", ".7z"]
 
 
+ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest date a zip entry can hold
+
+
+def _write_zip_entry(archive: zipfile.ZipFile, file_path: Path, arcname: Path) -> None:
+    """Like `ZipFile.write`, with a fixed date and permissions (0644, or 0755 if executable)."""
+    info = zipfile.ZipInfo.from_file(file_path, arcname, strict_timestamps=False)
+    info.date_time = ZIP_DATE_TIME
+    executable = (info.external_attr >> 16) & 0o111
+    info.external_attr = (0o100755 if executable else 0o100644) << 16
+    info.compress_type = archive.compression
+    with open(file_path, "rb") as source, archive.open(info, "w") as target:
+        shutil.copyfileobj(source, target, 1024 * 1024)
+
+
 def compress(src: Path, compressed: Path, exist_ok: bool = False) -> None:
-    """Compresses the contents of a source directory to a compressed file."""
+    """Compresses the contents of a source directory to a compressed file.
+
+    Files are added in sorted order. Zip entries also get a fixed date and permissions, so the
+    same files give the same zip, whatever the directory order, mtimes or umask.
+    """
     assert src.exists(), f"Source directory `{src}` does not exist."
     assert src.is_dir(), f"Expected a directory, but got `{src}`."
     if not exist_ok:
         assert not compressed.exists(), f"Compressed file `{compressed}` already exists."
 
     tqdm_desc = f"Compressing {src.name} to {compressed.name}"
-    file_paths = [path for path in src.rglob("*") if path.is_file()]
+    file_paths = sorted(path for path in src.rglob("*") if path.is_file())
     total_files = len(file_paths)
 
     # Determine the compression format from the destination file suffix
@@ -403,7 +422,10 @@ def compress(src: Path, compressed: Path, exist_ok: bool = False) -> None:
 
     with archive:
         for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
-            archive.write(file_path, arcname=file_path.relative_to(src))
+            if isinstance(archive, zipfile.ZipFile):
+                _write_zip_entry(archive, file_path, file_path.relative_to(src))
+            else:
+                archive.write(file_path, arcname=file_path.relative_to(src))
 
 
 def extract(

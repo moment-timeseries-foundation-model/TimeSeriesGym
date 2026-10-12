@@ -19,21 +19,25 @@ from timeseriesgym.utils import extract
 
 
 def load_paths(basepath, fs):
-    """File Names to Load"""
-    folders1 = os.listdir(basepath)
+    """File Names to Load, in sorted (ecg_id) order.
+
+    The listings are sorted because the order of `os.listdir` depends on the filesystem, and
+    the record order is the row order of the h5 files and of the test labels.
+    """
+    folders1 = sorted(os.listdir(basepath))
     pth_to_folders = [
         folder for folder in folders1 if "records%i" % fs in folder
     ]  # records100 contains 100Hz data
     pth_to_folders = [
         os.path.join(pth_to_folder, fldr)
         for pth_to_folder in pth_to_folders
-        for fldr in os.listdir(os.path.join(basepath, pth_to_folder))
+        for fldr in sorted(os.listdir(os.path.join(basepath, pth_to_folder)))
         if not fldr.endswith("index.html")
     ]
     files = [
         os.path.join(pth_to_folder, fldr)
         for pth_to_folder in pth_to_folders
-        for fldr in os.listdir(os.path.join(basepath, pth_to_folder))
+        for fldr in sorted(os.listdir(os.path.join(basepath, pth_to_folder)))
     ]
     paths_to_files = [
         os.path.join(basepath, file.split(".hea")[0]) for file in files if ".hea" in file
@@ -202,12 +206,17 @@ class PTBXLDataset:
         return ecg_signal.T
 
 
-def main(args):
-    competition_dir = Path(args.data_dir) / "ptb-xl-classification-challenge"
-    os.makedirs(competition_dir, exist_ok=True)
-    tmp_dir = competition_dir / "tmp"  # temporary directory to save the csv files
-    os.makedirs(tmp_dir, exist_ok=True)
+def write_h5(path, **datasets):
+    """Writes the datasets, in order, to a new h5 file without timestamps and in a fixed file
+    format (the earliest that holds the data, h5py's default), so the bytes depend only on the
+    data and not on the time or the h5py/HDF5 defaults."""
+    with h5py.File(path, "w", libver=("earliest", "v110")) as f:
+        for name, data in datasets.items():
+            f.create_dataset(name, data=data, track_times=False)
 
+
+def download_release(competition_dir):
+    """Downloads and extracts the PTB-XL 1.0.3 release; returns the release directory."""
     url = "https://physionet.org/static/published-projects/ptb-xl/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3.zip"
 
     wget_command = [
@@ -238,11 +247,20 @@ def main(args):
         f"[INFO] removed {competition_dir}/"
         "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3.zip"
     )
+    return destination / "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
 
-    # set base path and load the dataset
-    args.base_path = (
-        destination / "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
-    )
+
+def main(args):
+    competition_dir = Path(args.data_dir) / "ptb-xl-classification-challenge"
+    os.makedirs(competition_dir, exist_ok=True)
+    tmp_dir = competition_dir / "tmp"  # temporary directory to save the csv files
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    # set base path (an extracted release, or download one) and load the dataset
+    if getattr(args, "release_dir", None):
+        args.base_path = Path(args.release_dir)
+    else:
+        args.base_path = download_release(competition_dir)
     train_dataset = PTBXLDataset(args, "train")
     val_dataset = PTBXLDataset(args, "val")
     test_dataset = PTBXLDataset(args, "test")
@@ -251,14 +269,13 @@ def main(args):
     test_label_df = pd.DataFrame({"label": test_dataset._labels})
     sample_submissions = pd.DataFrame({"label": [0] * len(test_dataset._labels)})
 
-    with h5py.File(os.path.join(tmp_dir, "train_df.h5"), "w") as f:
-        f.create_dataset("signals", data=train_dataset._timeseries)
-        f.create_dataset("labels", data=train_dataset._labels)
-    with h5py.File(os.path.join(tmp_dir, "val_df.h5"), "w") as f:
-        f.create_dataset("signals", data=val_dataset._timeseries)
-        f.create_dataset("labels", data=val_dataset._labels)
-    with h5py.File(os.path.join(tmp_dir, "test_df.h5"), "w") as f:
-        f.create_dataset("signals", data=test_dataset._timeseries)
+    write_h5(
+        tmp_dir / "train_df.h5",
+        signals=train_dataset._timeseries,
+        labels=train_dataset._labels,
+    )
+    write_h5(tmp_dir / "val_df.h5", signals=val_dataset._timeseries, labels=val_dataset._labels)
+    write_h5(tmp_dir / "test_df.h5", signals=test_dataset._timeseries)
     test_label_df.to_csv(os.path.join(tmp_dir, "test_label_df.csv"))
     sample_submissions.to_csv(os.path.join(tmp_dir, "sample_submission.csv"))
 
@@ -295,6 +312,12 @@ if __name__ == "__main__":
     # other config
     parser.add_argument(
         "--data_dir", type=str, required=True, help="Path to save the preprocessed zip file"
+    )
+    parser.add_argument(
+        "--release_dir",
+        type=str,
+        default=None,
+        help="An extracted PTB-XL 1.0.3 release to build from, offline (skips the download)",
     )
     args = parser.parse_args()
 
