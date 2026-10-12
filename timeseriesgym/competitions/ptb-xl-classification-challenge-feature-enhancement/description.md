@@ -125,7 +125,7 @@ def train_epoch(
 ```
 
 **3. Hydra Configuration**
-```python
+```yaml
 # config.yaml (simple model configuration)
 model:
   in_channels: 12
@@ -139,7 +139,7 @@ model:
 ```python
 # Model accepting config
 def __init__(
-    self, config: DictConfig | None = None, in_channels: int = 12, seq_length: int = 1000, ...
+    self, config: DictConfig | None = None, in_channels: int = 12, seq_length: int = 1000
 ):
     if config is not None:
         # Use parameters from config
