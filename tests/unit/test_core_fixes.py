@@ -418,6 +418,22 @@ def test_dict_scores_are_reported_as_json_objects():
     assert CompetitionReport.from_dict(plain.to_dict()).score == 0.5
 
 
+def _make_submission(tmp_path: Path, runs: dict) -> Path:
+    """Runs experiments/make_submission.py on a metadata.json with `runs`; returns the JSONL."""
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(json.dumps({"runs": runs}))
+    output = tmp_path / "submission.jsonl"
+    args = ["--metadata", metadata, "--output", output, "--data-dir", tmp_path / "data"]
+    subprocess.run(
+        [sys.executable, "experiments/make_submission.py", *map(str, args)],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        check=True,
+        capture_output=True,
+    )
+    return output
+
+
 def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
     runs = {}
     for competition_id in (
@@ -430,17 +446,7 @@ def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
         (submission_dir / "submission.csv").write_text("id,label\n")
         run = {"competition_id": competition_id, "run_dir": str(submission_dir.parent)}
         runs[competition_id] = {**run, "success": True}
-    metadata = tmp_path / "metadata.json"
-    metadata.write_text(json.dumps({"runs": runs}))
-    output = tmp_path / "submission.jsonl"
-    args = ["--metadata", metadata, "--output", output, "--data-dir", tmp_path / "data"]
-    subprocess.run(
-        [sys.executable, "experiments/make_submission.py", *map(str, args)],
-        cwd=REPO,
-        env={**os.environ, "PYTHONPATH": str(REPO)},
-        check=True,
-        capture_output=True,
-    )
+    output = _make_submission(tmp_path, runs)
     lines = {line["competition_id"]: line for line in map(json.loads, output.open())}
     root = {cid: tmp_path / cid / "submission" for cid in runs}
     assert lines["spaceship-titanic"]["submission_path"] == str(
@@ -453,6 +459,53 @@ def test_make_submission_points_folder_challenges_at_their_folders(tmp_path):
         "submission_path": str(root[HPS_ID]),
         "solution_file_path": str(tmp_path / HPS_ID / "code"),
     }
+
+
+def test_make_submission_lists_every_run(tmp_path):
+    fe = "ptb-xl-classification-challenge-feature-enhancement"
+    runs = {}
+
+    def run(name, competition_id, files=(), exit_code=0):
+        for relative, mtime in files:
+            path = tmp_path / name / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(SPACESHIP_ANSWERS)
+            os.utime(path, (mtime, mtime))
+        runs[name] = {
+            "competition_id": competition_id,
+            "run_dir": str(tmp_path / name),
+            "success": exit_code == 0,
+            "agent_exit_code": exit_code,
+        }
+
+    run("timed_out", "spaceship-titanic", [("submission/submission.csv", 1)], exit_code=124)
+    run("crashed", "spaceship-titanic", exit_code=1)  # saved nothing
+    two = [("submission/submission.csv", 1), ("submission/final.csv", 2)]  # final.csv is last
+    run("two_files", "spaceship-titanic", two)
+    run("fe_in_code", fe, [("submission/submission.csv", 1), ("code/model.py", 1)])
+    run("fe_in_submission", fe, [("submission/submission.csv", 1), ("submission/model.py", 1)])
+    lines = [json.loads(line) for line in _make_submission(tmp_path, runs).open()]
+
+    # the failed runs and the run with two submission files were left out (2 lines)
+    paths = [line["submission_path"] for line in lines]
+    assert paths == [
+        str(tmp_path / "timed_out" / "submission" / "submission.csv"),
+        str(tmp_path / "crashed" / "submission" / "submission.csv"),  # missing: graded invalid
+        str(tmp_path / "two_files" / "submission" / "final.csv"),
+        str(tmp_path / "fe_in_code" / "submission"),
+        str(tmp_path / "fe_in_submission" / "submission"),
+    ]
+    # was absent, so the grader looked for model.py in the submission folder only
+    assert lines[3]["solution_files_path"] == str(tmp_path / "fe_in_code" / "code")
+    assert lines[4]["solution_files_path"] == str(tmp_path / "fe_in_submission" / "submission")
+
+    data = tmp_path / "data"
+    _prepared(data, "spaceship-titanic", SPACESHIP_ANSWERS)
+    out = tmp_path / "reports"
+    grade_jsonl(_jsonl(tmp_path / "spaceship.jsonl", lines[:3]), out, Registry(data))
+    summary = json.loads(next(out.iterdir()).read_text())
+    assert summary["total_runs"] == 3  # the crashed run counts, as invalid
+    assert [r["valid_submission"] for r in summary["competition_reports"]] == [True, False, True]
 
 
 # ---------------------------------------------------------------- hyperparameter search
