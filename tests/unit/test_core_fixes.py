@@ -669,6 +669,29 @@ def test_run_agent_rejects_zero_workers(tmp_path):
     assert out.returncode == 2 and "--n-workers must be at least 1" in out.stderr
 
 
+def test_run_agent_needs_the_tarfile_data_filter(tmp_path):
+    competitions = tmp_path / "split.txt"
+    competitions.write_text("spaceship-titanic\n")
+    argv = ["run_agent.py", "--agent-id", "dummy", "--competition-set", str(competitions)]
+    # CPython 3.11.0-3.11.3, which requires-python allows, has no tarfile.data_filter
+    code = (
+        "import runpy, sys, tarfile\n"
+        "del tarfile.data_filter\n"
+        f"sys.argv = {argv!r}\n"
+        "runpy.run_path('run_agent.py', run_name='__main__')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    # the runs used to start, and each extraction only logged a RuntimeError: no submissions
+    assert out.returncode == 2 and "Python 3.11.4 or later is required" in out.stderr
+
+
 class _FakeExecAPI:
     def __init__(self, exit_code: int):
         self.exit_code, self.created = exit_code, []

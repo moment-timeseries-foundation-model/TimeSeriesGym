@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import tarfile
 import time
 import traceback
 from dataclasses import dataclass
@@ -269,5 +270,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.n_workers < 1:  # no worker would take the queued tasks: queue.join() never returns
         parser.error("--n-workers must be at least 1")
+    if not hasattr(tarfile, "data_filter"):  # every extraction of the run's outputs would fail
+        parser.error("Python 3.11.4 or later is required to extract the runs' outputs safely")
 
     asyncio.run(main(args))
