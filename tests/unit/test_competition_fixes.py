@@ -683,3 +683,21 @@ def test_ucr_description_shows_the_shipped_dataset_helper():
     assert helper.read_text() in (directory / "description.md").read_text()
     public = load_yaml(directory / "checksums.yaml")["public"]
     assert public["anomaly_dataset.py"] == get_checksum(helper)  # prepare copies it to public/
+
+
+# ---------------------------------------------------------------- MIT-BIH download
+
+
+def test_mit_bih_download_fails_on_an_http_error(tmp_path, monkeypatch):
+    download = _module("MIT-BIH-Arrhythmia", "download_data")
+    calls = []
+
+    def fake_run(cmd, cwd, check):
+        calls.append(cmd)
+        assert "-f" in cmd[1] and check  # -fsSL: an HTTP error must raise, not save a page
+        raise subprocess.CalledProcessError(22, cmd)
+
+    monkeypatch.setattr(download.subprocess, "run", fake_run)
+    with pytest.raises(subprocess.CalledProcessError):
+        download.download_mitdb(tmp_path)
+    assert len(calls) == 1
