@@ -433,6 +433,27 @@ def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
     assert "#" not in fe.strip_comments("def broken(:  # comment\n")
 
 
+def test_feature_rubric_accepts_the_type_hints_of_the_descriptions_examples():
+    fe = _fe()
+    examples = [  # description.md, as annotated now; `__init__` without `-> None` was rejected
+        "def __init__(self, input_dim: int, hidden_dim: int, num_classes: int):\n    pass\n",
+        "def __init__(self, config: dict | None = None, in_channels: int = 12):\n    pass\n",
+        "def main(cfg: DictConfig) -> None:\n    pass\n",
+    ]
+    for code in examples:
+        assert fe.has_type_hints(ast.parse(code)), code
+    assert not fe.has_type_hints(ast.parse("def __init__(self, n):\n    pass\n"))
+    assert not fe.has_type_hints(ast.parse("def f(n: int):\n    return n\n"))  # not __init__
+
+
+def test_feature_rubric_keeps_quoted_hashes_in_the_config():
+    fe = _fe()
+    flow = '{name: "run #1", model: {hidden: 8}}\n'  # was cut at "#1", losing `model:`
+    assert fe.evaluate_hydra_usage(TRAIN, flow) == pytest.approx(1.0)
+    commented = "name: 'a # b'  # model: x\n"  # a real comment still does not count
+    assert fe.evaluate_hydra_usage(TRAIN, commented) == pytest.approx(0.8)
+
+
 def test_feature_rubric_scores_the_shipped_example_as_before():
     fe = _fe()
     example = Path(fe.__file__).parent / "example"

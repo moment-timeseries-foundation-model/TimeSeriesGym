@@ -382,13 +382,15 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
 
 
 def has_type_hints(tree):
-    """Check that every function annotates its return and its parameters (except self/cls)."""
+    """Check that every function annotates its parameters (except self/cls) and its return; an
+    `__init__` may leave out `-> None`, as PEP 484 allows."""
     functions = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
     for node in functions:
         args = node.args
         params = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
         params = [arg for arg in params if arg is not None and arg.arg not in ("self", "cls")]
-        if node.returns is None or any(arg.annotation is None for arg in params):
+        no_return = node.returns is None and node.name != "__init__"
+        if no_return or any(arg.annotation is None for arg in params):
             return False
     return bool(functions)
 
@@ -425,6 +427,11 @@ def has_docstring_sections(trees, sections):
         if isinstance(node, documented)
     ]
     return all(any(f"{section}:" in doc for doc in docstrings) for section in sections)
+
+
+# A YAML comment: `#` at the start of a line or after whitespace, outside quoted strings (group 1,
+# which is kept: `name: "run #1"` is not a comment).
+YAML_COMMENT = re.compile(r"""("(?:[^"\\\n]|\\.)*"|'(?:[^'\n]|'')*')|(?:^|(?<=\s))#.*""", re.M)
 
 
 def strip_comments(code: str) -> str:
@@ -560,7 +567,7 @@ def evaluate_hydra_usage(training_file: str, config_file: str) -> float:
     logger.info("[HYDRA] Starting Hydra usage evaluation")
     training_file = strip_comments(training_file)  # commented-out code earns nothing
     if config_file:
-        config_file = re.sub(r"(^|\s)#.*", r"\1", config_file)  # YAML comments
+        config_file = YAML_COMMENT.sub(lambda m: m.group(1) or "", config_file)
 
     # Check for Hydra import
     has_hydra_import = re.search(r"import\s+hydra", training_file) or re.search(
