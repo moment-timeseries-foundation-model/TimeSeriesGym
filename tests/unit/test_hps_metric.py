@@ -228,6 +228,25 @@ def test_the_solution_code_must_show_a_search(tmp_path, competition_id):
         _grade(competition_id, folder, answers, config, None, sample)
 
 
+@pytest.mark.parametrize("competition_id", CASES)
+def test_unreadable_files_in_the_code_directory_are_skipped(tmp_path, competition_id):
+    folder, answers, config, solution, sample = _submission(
+        tmp_path, competition_id, CASES[competition_id][0]
+    )
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "a_notes.py").write_bytes("# r\xe9sum\xe9\n".encode("latin-1"))  # not UTF-8
+    (code / "a_link.py").symlink_to(tmp_path / "absent.py")  # dangling
+    shutil.copy(solution, code / "search.py")
+    # each of the first two stopped the grading ("does not exist", UnicodeDecodeError)
+    expected = CASES[competition_id][2]
+    assert _grade(competition_id, folder, answers, config, code, sample) == pytest.approx(expected)
+
+    (code / "search.py").unlink()
+    (code / "linked.py").symlink_to(solution)  # symlinks under the directory are not followed
+    assert _grade(competition_id, folder, answers, config, code, sample) == -np.inf
+
+
 @pytest.mark.parametrize(
     "competition_id,baseline",
     [
