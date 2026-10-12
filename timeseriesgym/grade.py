@@ -168,6 +168,12 @@ def grade_hyperparameter_search(
     competition: Competition object
     """
     _ensure_prepared(competition)
+    if not competition.sample_submission.is_file():  # the score is measured over it
+        raise ValueError(
+            f"The sample submission of `{competition.id}` is missing, and the score of a "
+            f"hyperparameter search is measured over it. Please run "
+            f"`timeseriesgym prepare -c {competition.id}` to prepare the dataset."
+        )
 
     answers = load_answers(competition.answers)
     hyperparameter_search_config = competition.hyperparameter_search_config

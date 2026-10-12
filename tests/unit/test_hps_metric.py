@@ -149,10 +149,10 @@ def test_the_cli_reads_the_challenges_sample_submission(tmp_path, competition_id
     _submission(tmp_path, competition_id, inflated)  # overwrites the baseline files
     assert grade_hyperparameter_search(folder, competition, str(solution)).score == report.score
 
-    competition.sample_submission.unlink()  # no trusted floor: not graded
-    report = grade_hyperparameter_search(folder, competition, str(solution))
-    assert not report.valid_submission
-    assert report.score is None
+    # no trusted floor: a setup error, which stops the batch (it was every run graded invalid)
+    competition.sample_submission.unlink()
+    with pytest.raises(ValueError, match="sample submission .* is missing"):
+        grade_hyperparameter_search(folder, competition, str(solution))
 
 
 # ---------------------------------------------------------------- validity
