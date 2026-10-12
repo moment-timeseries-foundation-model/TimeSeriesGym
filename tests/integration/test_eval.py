@@ -6,7 +6,7 @@ import pytest
 from pytest import approx
 
 from tests.constants import fast_competitions, sample_submission_scores
-from timeseriesgym.data import download_and_prepare_dataset
+from timeseriesgym.data import download_and_prepare_dataset, get_leaderboard
 from timeseriesgym.grade import grade_sample
 from timeseriesgym.registry import Registry, registry
 from timeseriesgym.utils import in_ci
@@ -97,6 +97,8 @@ def test_submitting_answers_for_competition_achieves_a_gold_medal(
         registry = registry.set_data_dir(tmp_dir)
 
     competition = registry.get_competition(competition_id)
+    if get_leaderboard(competition) is None:  # none, or a one-row placeholder: no medals
+        pytest.skip(f"`{competition_id}` has no leaderboard to rank against")
     download_and_prepare_dataset(competition)
     report = grade_sample(competition.gold_submission, competition)
 

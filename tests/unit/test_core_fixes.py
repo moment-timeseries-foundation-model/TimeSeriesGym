@@ -321,6 +321,22 @@ def test_competition_ids_are_the_competition_directories():
         assert registry.get_competition(competition_id).id == competition_id
 
 
+def test_only_challenges_that_are_ranked_say_they_award_medals():
+    from timeseriesgym.data import get_leaderboard
+
+    registry = Registry()
+    for competition_id in registry.list_competition_ids():
+        competition = registry.get_competition(competition_id)
+        graded_as_a_file = (
+            competition.hyperparameter_search_config is None
+            and competition.coding_config is None
+            and competition.feature_enhancement_config is None
+        )
+        ranked = graded_as_a_file and get_leaderboard(competition) is not None
+        # Optiver HPS said true, but HPS reports are never ranked (grade.py)
+        assert ranked or not competition.awards_medals, competition_id
+
+
 def test_agent_environment_has_the_packages_of_shipped_helpers():
     requirements = (REPO / "environment" / "requirements.txt").read_text()
     names = {re.split(r"[=<>~ ]", line)[0].lower() for line in requirements.splitlines() if line}
