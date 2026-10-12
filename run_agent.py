@@ -64,7 +64,7 @@ async def worker(
             "run_dir": str(task.path_to_run),
         }
         try:
-            await asyncio.to_thread(
+            exit_code = await asyncio.to_thread(
                 run_in_container,
                 client=client,
                 competition=task.competition,
@@ -75,7 +75,9 @@ async def worker(
                 run_dir=task.path_to_run,
                 logger=run_logger,
             )
-            task_output["success"] = True
+            # a non-zero exit (e.g. 124 from `timeout`) fails the run, but its outputs were saved
+            task_output["agent_exit_code"] = exit_code
+            task_output["success"] = exit_code == 0
 
             run_logger.info(
                 f"[Worker {idx}] Finished running seed {task.seed} for {task.competition.id} and "

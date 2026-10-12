@@ -632,8 +632,8 @@ class _FakeExecAPI:
         return {"ExitCode": self.exit_code}
 
 
-@pytest.mark.parametrize("exit_code", [0, 3])
-def test_runs_whose_agent_fails_are_not_successful(tmp_path, monkeypatch, exit_code):
+@pytest.mark.parametrize("exit_code", [0, 3, 124])
+def test_runs_return_the_agents_exit_code(tmp_path, monkeypatch, exit_code):
     import logging
 
     agents_run = importlib.import_module("agents.run")
@@ -663,13 +663,42 @@ def test_runs_whose_agent_fails_are_not_successful(tmp_path, monkeypatch, exit_c
         run_dir=tmp_path,
         logger=logging.getLogger("test"),
     )
-    if exit_code == 0:
-        assert run() == tmp_path
-    else:  # run_agent.py records a raised run as failed; it was recorded as successful
-        with pytest.raises(RuntimeError, match="exited with code 3"):
-            run()
-    assert saved == [tmp_path]  # outputs are still extracted
+    # ignored at first, then raised after the outputs were saved, which made run_agent.py and
+    # make_submission.py drop a submission saved before a timeout's 124
+    assert run() == exit_code
+    assert saved == [tmp_path]  # outputs are extracted whatever the exit code
     assert api.created[0][2] == "nonroot"
+
+
+@pytest.mark.parametrize("exit_code", [0, 124])
+def test_run_metadata_records_the_agents_exit_code(tmp_path, monkeypatch, exit_code):
+    import asyncio
+
+    run_agent = importlib.import_module("run_agent")
+    monkeypatch.setattr(run_agent, "args", SimpleNamespace(retain=False), raising=False)
+    monkeypatch.setattr(run_agent, "run_in_container", lambda **kwargs: exit_code)
+    task = run_agent.Task(
+        run_id="run-1",
+        seed=0,
+        image="img",
+        path_to_run_group=tmp_path,
+        path_to_run=tmp_path,
+        agent=SimpleNamespace(id="agent", name="img"),
+        competition=SimpleNamespace(id="x"),
+        container_config={},
+    )
+    outputs = {}
+
+    async def run_one():
+        queue = asyncio.Queue()
+        queue.put_nowait(task)
+        worker = asyncio.create_task(run_agent.worker(0, queue, None, outputs))
+        await queue.join()
+        worker.cancel()
+
+    asyncio.run(run_one())
+    assert outputs["run-1"]["agent_exit_code"] == exit_code
+    assert outputs["run-1"]["success"] is (exit_code == 0)
 
 
 # ---------------------------------------------------------------- container output extraction
