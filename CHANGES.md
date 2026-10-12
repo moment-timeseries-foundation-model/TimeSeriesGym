@@ -151,7 +151,14 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **Zips built by `utils.compress`**: entries are sorted and get a fixed date and mode (19ae628),
   so a rebuild is byte-identical. This changes the zip bytes of MIT-BIH-Arrhythmia and
   gift-eval-short-horizon (built by their `download_data.py`); their prepared files are
-  unchanged, but their `zip` checksums were not regenerated.
+  unchanged.
+- **MIT-BIH checksums**: MIT-BIH-Arrhythmia's zip and prepared h5 checksums, and the three data
+  CSVs of MIT-BIH-Arrhythmia-Weak-Supervision, are regenerated from two identical rebuilds of the
+  PhysioNet 1.0.0 release (129bd2e, 80294d9). The old zip checksum held file times and could never
+  match; the old h5 values could not be reproduced with the pinned libraries (upstream's sample has
+  4,141 test beats, a rebuild 4,139). The download now fails on HTTP errors (bf41cd7).
+- **gift-eval-short-horizon**: unchanged. Its documented source is the Git LFS bundle, whose zip
+  matches `checksums.yaml`; the Hugging Face download path never matched it.
 - **m5-forecasting-accuracy**: the public `sell_prices.csv` has every training week (6,597,201
   rows; was 4,088,360) (d64a36f). Days were compared as strings, so d_2..d_9 and d_200..d_999
   counted as later than d_1913. Scores do not change: the grader reads prices from the answers.
