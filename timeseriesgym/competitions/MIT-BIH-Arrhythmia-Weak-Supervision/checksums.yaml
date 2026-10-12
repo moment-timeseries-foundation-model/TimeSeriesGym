@@ -1,8 +1,8 @@
 private:
-  labels.csv: a14e041d34982948d2066d21e7ca1090
+  labels.csv: 04c3ed5e849fcbbdbfc5823d7df90ee9
 public:
   01_spam_tutorial.py: 6f62087e620a37cb26683a9816123952
-  sample_submission.csv: 0af5accb2e414328d6b479181e7d469e
+  sample_submission.csv: c9a1be8e48c2106c5feafacdf4f95af3
   snorkel/docs/conf.py: 9326599fbc4d092112b3f11eb4ed8371
   snorkel/docs/packages.json: 376d927a22f627d2b13fbfdcb548c7ca
   snorkel/scripts/check_requirements.py: 732cb960560d35073e0f8342bbed95ec
@@ -150,5 +150,5 @@ public:
   snorkel/test/utils/test_config_utils.py: d14dc76e4d3523f910007a3d9b1ecf26
   snorkel/test/utils/test_core.py: 5ae49509774b546ad9eae278c0ee6a98
   snorkel/test/utils/test_data_operators.py: 43f86702ef8b8a2aeede8095bf7b3526
-  train_features.csv: 7435d3d47c420c7a89c0d6d19dee586f
+  train_features.csv: c940b5bb0413b309f5fab4a778baed6c
 zip: null
