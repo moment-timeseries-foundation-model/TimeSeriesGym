@@ -2,6 +2,7 @@ import difflib
 import importlib
 import json
 import logging
+import math
 import os
 import pickle
 import shutil
@@ -181,13 +182,14 @@ def load_plain_pickle(file) -> Any:
 
 MAX_H5_OBJECTS = 1_000_000
 MAX_H5_DEPTH = 32
-# The data that the datasets of an HDF5 submission may declare in total: load_arbitrary_h5 reads
-# all of it into memory, and a small file can declare much more (a chunked dataset that was never
-# written reads as its fill value). The largest submission, TSL long-horizon in float64, is 3.6 GiB.
-MAX_H5_BYTES = 4 * 2**30
+# The data that an HDF5 or .npy submission may declare in total: it is read into memory, and a
+# small file can declare much more (a chunked HDF5 dataset that was never written reads as its
+# fill value, a sparse .npy file as zeros). The largest submission, TSL long-horizon in float64,
+# is 3.6 GiB.
+MAX_SUBMISSION_BYTES = 4 * 2**30
 
 
-def check_h5_self_contained(h5_file: h5py.File, max_bytes: int = MAX_H5_BYTES) -> None:
+def check_h5_self_contained(h5_file: h5py.File, max_bytes: int = MAX_SUBMISSION_BYTES) -> None:
     """Raises InvalidSubmissionError unless every object in the agent-written file is a group or
     a dataset, reached by a hard link, with its data stored in the file itself, and the datasets
     declare at most `max_bytes` of data in total.
@@ -236,7 +238,39 @@ def check_h5_self_contained(h5_file: h5py.File, max_bytes: int = MAX_H5_BYTES) -
                     )
 
 
-def load_submissions(path_to_submission: Path, max_h5_bytes: int = MAX_H5_BYTES) -> Any:
+def check_npy_size(path: Path, max_bytes: int = MAX_SUBMISSION_BYTES) -> None:
+    """Raises InvalidSubmissionError unless the agent-written file is a .npy array (format 1.0 or
+    2.0) whose header declares at most `max_bytes` of data, all of it stored in the file.
+
+    np.load reads all the data the header declares into memory, and a small sparse file can
+    declare gigabytes of zeros. A zip (.npz) named `.npy` is not an array either: np.load returns
+    its members, and allocates each one at the size its own header declares.
+    """
+    with open(path, "rb") as f:
+        try:
+            version = np.lib.format.read_magic(f)
+            if version == (1, 0):
+                shape, _, dtype = np.lib.format.read_array_header_1_0(f)
+            elif version == (2, 0):
+                shape, _, dtype = np.lib.format.read_array_header_2_0(f)
+            else:
+                raise ValueError(f"unsupported .npy format version {version}")
+        except ValueError as e:
+            raise InvalidSubmissionError(
+                f"Submission invalid! {path.name} is not a .npy array: {e}"
+            ) from None
+        declared = math.prod(shape) * dtype.itemsize
+        if declared > max_bytes:
+            raise InvalidSubmissionError(
+                f"Submission invalid! The .npy array holds more than {max_bytes} bytes."
+            )
+        if f.tell() + declared > path.stat().st_size:
+            raise InvalidSubmissionError(
+                f"Submission invalid! {path.name} holds less data than its header declares."
+            )
+
+
+def load_submissions(path_to_submission: Path, max_bytes: int = MAX_SUBMISSION_BYTES) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
     if not path_to_submission.is_file():
@@ -249,7 +283,7 @@ def load_submissions(path_to_submission: Path, max_h5_bytes: int = MAX_H5_BYTES)
 
     elif path_to_submission.suffix.lower() == ".h5" or path_to_submission.suffix.lower() == ".hdf5":
         with h5py.File(path_to_submission, "r") as submission_file:
-            check_h5_self_contained(submission_file, max_h5_bytes)
+            check_h5_self_contained(submission_file, max_bytes)
             return load_arbitrary_h5(submission_file["submission"])
 
     elif path_to_submission.suffix.lower() == ".pkl":
@@ -257,7 +291,8 @@ def load_submissions(path_to_submission: Path, max_h5_bytes: int = MAX_H5_BYTES)
             return load_plain_pickle(f)
 
     elif path_to_submission.suffix == ".npy":
-        return np.load(path_to_submission)
+        check_npy_size(path_to_submission, max_bytes)
+        return np.load(path_to_submission, allow_pickle=False)
 
     else:
         raise InvalidSubmissionError(

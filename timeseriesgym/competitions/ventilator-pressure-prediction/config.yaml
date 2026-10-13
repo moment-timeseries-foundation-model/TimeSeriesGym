@@ -17,6 +17,7 @@ dataset:
 
 grader:
   name: mean-absolute-error
+  lower_is_better: true
   grade_fn: timeseriesgym.competitions.ventilator-pressure-prediction.grade:grade
 
 preparer: timeseriesgym.competitions.ventilator-pressure-prediction.prepare:prepare

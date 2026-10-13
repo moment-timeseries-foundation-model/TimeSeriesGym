@@ -58,13 +58,19 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     os.remove(public / "train_features.h5")
     os.remove(public / "train_labels.h5")
 
-    # Download Tutorials for Snorkel
-    path_to_tutorial = "https://raw.githubusercontent.com/snorkel-team/snorkel-tutorials/refs/heads/master/spam/01_spam_tutorial.py"
-    download_file(path_to_tutorial, public / "01_spam_tutorial.py")
+    # Download Tutorials for Snorkel, at a fixed commit (master's head, 2ba84e4) rather than the
+    # branch, which can move
+    path_to_tutorial = "https://raw.githubusercontent.com/snorkel-team/snorkel-tutorials/2ba84e41483c7e05493de3434f531ee68c0263c8/spam/01_spam_tutorial.py"
+    download_file(
+        path_to_tutorial, public / "01_spam_tutorial.py", md5="6f62087e620a37cb26683a9816123952"
+    )
 
-    # Download Snorkel documentation
-    path_to_documentation = "https://readthedocs.org/projects/snorkel/downloads/pdf/latest/"
-    download_file(path_to_documentation, public / "snorkel-docs.pdf")
+    # Download Snorkel documentation: the PDF of Release 0.9.7, whose page numbers are used below
+    # (`latest` is rebuilt whenever the docs are; in 2026 its text was the same)
+    path_to_documentation = "https://snorkel.readthedocs.io/_/downloads/en/v0.9.7/pdf/"
+    download_file(
+        path_to_documentation, public / "snorkel-docs.pdf", md5="825e7c1eff8891e4708ad1952bf51bf9"
+    )
 
     # Convert the PDF to text files, to make it easier for agents to read them
     pdftotext = ["pdftotext", "snorkel-docs.pdf"]

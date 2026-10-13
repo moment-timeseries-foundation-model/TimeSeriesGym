@@ -54,6 +54,28 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
+### Running the CI Checks Locally
+
+GitHub Actions (`.github/workflows/ci.yml`) lints the code and runs the tests on Python 3.11 for
+pushes to `main` and for pull requests. The same checks, locally:
+
+```bash
+# Lint and format check, with the ruff version CI uses (the one the dev extra pins)
+pip install ruff==0.6.9
+ruff check
+ruff format --check
+
+# Tests: CPU-only PyTorch first, so that pip skips the CUDA wheels
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+pip install -e .
+DEEPEVAL_TELEMETRY_OPT_OUT=YES python -m pytest -m "not network"
+```
+
+Apart from installing the dependencies, these tests need no network access and no Kaggle
+credentials. The tests marked `network`, in `tests/integration/`, download and prepare real
+competition data; with your Kaggle API token set up, run them with
+`python -m pytest tests/integration`.
+
 ### System Requirements
 
 - **Python**: 3.11 or higher (3.11.4 or later to run agents with `run_agent.py`)
@@ -155,6 +177,23 @@ timeseriesgym grade --submission submissions.jsonl --output-dir results/
 timeseriesgym grade-sample predictions.csv amp-parkinsons-disease-progression-prediction
 ```
 
+#### Medals
+
+Reports give Kaggle's medals (`gold_medal`, `silver_medal`, `bronze_medal`, `above_median`) and
+their thresholds, ranked by Kaggle's rules against the challenge's `leaderboard.csv`; challenges
+without a real leaderboard award none. The scores are TimeSeriesGym's own: most Kaggle-derived
+challenges hold out their test set from the competition's training data, while the leaderboard was
+scored on Kaggle's test set, so a medal places a score only approximately. Three challenges differ
+more, and their descriptions say so:
+
+- **LANL-Earthquake-Prediction**: the test is 1,112 segments of 150,000 rows, as long as Kaggle's,
+  but cut from the last 5 earthquake cycles of Kaggle's training data; the leaderboard was scored on
+  Kaggle's own 2,624 test segments.
+- **amp-parkinsons-disease-progression-prediction**: the test set is 10% of the patients in
+  Kaggle's training data; the leaderboard was scored on Kaggle's hidden test set.
+- **ashrae-energy-prediction**: the test set is the last two months of 2016; the leaderboard was
+  scored on Kaggle's test data from 2017 and 2018.
+
 #### Evaluating Hyperparameter Search Results
 
 ```bash
@@ -240,8 +279,8 @@ resnet-tensorflow-to-pytorch
 
 ### Full Competition Set
 
-The complete set of 31 gradeable challenges is available in
-`TimeSeriesGym/experiments/splits/all.txt` (the two CSDI challenges have no grader yet).
+The complete set of 33 gradeable challenges is available in
+`TimeSeriesGym/experiments/splits/all.txt`.
 
 ## Docker Environment
 
