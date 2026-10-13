@@ -163,7 +163,7 @@ public:
   predictor_tools/check.py: a70de0bf9eaedd74c3c9f77cefd470f5
   predictor_tools/config.json: e23c6cfea5fb6981b9694868baa48ecc
   predictor_tools/contract.py: ef53e2e12542dd84d7dc7e0249dc6f91
-  predictor_tools/launch.py: dbc25743bd18ee79d1a2ac3dbf391ed6
+  predictor_tools/launch.py: 03509358c765d0a5f0650b1e09d01422
   predictor_tools/metric/__init__.py: d41d8cd98f00b204e9800998ecf8427e
   predictor_tools/metric/grade.py: 1c06ccf84ef2321a6dafa1cf244c7bbc
   predictor_tools/protocol.py: 12b609eb2f1a94322724c762589b3043

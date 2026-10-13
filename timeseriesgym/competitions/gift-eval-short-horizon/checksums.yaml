@@ -15,7 +15,7 @@ private:
   solar/W/data-00000-of-00001.arrow: 59a7375bd9ce8e898593d0247aeecd83
   solar/W/dataset_info.json: eed4089c0abbe1279be71501c1a25c6e
   solar/W/state.json: 6c1d7fa5ebe781f42f1c7dbbb84cf6e4
-  test.h5: 0787b6e3800efe25e3d2e78f0a261569
+  test.h5: 2c3604c3c12a92e92ef99023b84f7014
 public:
   LOOP_SEATTLE/5T/data-00000-of-00001.arrow: 5f1b1692f3cabd2667171f4294da339d
   LOOP_SEATTLE/5T/dataset_info.json: efdb5c824d02c6e09374e24929cd005c
@@ -34,11 +34,12 @@ public:
   predictor_datasets.json: 6c53f27f336abbb3ba952c2707802c2e
   predictor_tools/__init__.py: f83275fed17189122646866a67f44664
   predictor_tools/check.py: a70de0bf9eaedd74c3c9f77cefd470f5
-  predictor_tools/config.json: 7555757461c2c3f7296db021e6af01f2
+  predictor_tools/config.json: 995c47f0a0ef4e0e947852870f0ea2b4
   predictor_tools/contract.py: ef53e2e12542dd84d7dc7e0249dc6f91
-  predictor_tools/launch.py: dbc25743bd18ee79d1a2ac3dbf391ed6
+  predictor_tools/launch.py: 03509358c765d0a5f0650b1e09d01422
   predictor_tools/metric/__init__.py: d41d8cd98f00b204e9800998ecf8427e
-  predictor_tools/metric/grade.py: 20905a885c7ce4e593332cb16aac5e95
+  predictor_tools/metric/grade.py: 1ec2a90f49b82231b809d64d2abeca0c
+  predictor_tools/metric/mase.py: 55af0f8a078c97425d17e0cc16625e7a
   predictor_tools/protocol.py: 12b609eb2f1a94322724c762589b3043
   predictor_tools/runner.py: d14ee8512fa2d108bfa1c787375b97cb
   predictor_tools/windows.py: 850a287f6f8d27dd0578fcf3a59f721f
