@@ -7,9 +7,8 @@ submission's `ResNet` class (also a copy, a reloaded model or one built inside `
 output is back-propagated adds its batch size. Forward passes without back-propagation
 (validation, predictions, BatchNorm statistics) add nothing.
 
-Agent code runs in the grader's process, so code written to evade the count (for example by
-removing the hook, or by training another class and copying its weights) is not stopped by it;
-the count catches code that trains for more passes than asked, whatever loop it uses.
+Agent code runs in the grader's process, so code written to evade the count is not stopped by
+it; the count catches code that trains for more passes than asked, whatever loop it uses.
 """
 
 from collections.abc import Callable

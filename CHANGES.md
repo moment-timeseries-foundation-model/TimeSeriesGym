@@ -78,9 +78,9 @@ the medals are not comparable for those named under "Medals and leaderboards".
   model's predictions return, so copying the tensors out of the dataset does not hide extra
   passes; forward passes without back-propagation do not count. Above the budget the test
   fails. The accuracy test now runs before the structural checks, so nothing trained in the
-  structural call of `train` carries over. Code that sets out to evade the count, which runs in
-  the grader's process, is not stopped by it (for example by calling `forward` directly or by
-  training another class and copying its weights).
+  structural call of `train` carries over. The count runs in the same process as the
+  submission, so code written to evade it is not stopped; it catches code that trains for more
+  passes than asked, whatever loop or copy of the data it uses.
 - **resnet-tensorflow-to-pytorch**: the grading arguments ask for `n_epochs=40` instead of 1
   (f1ca4fc). A port with Keras' BatchNorm settings (PyTorch momentum 0.01) scored 0.49 to 0.51
   after 1 epoch on 10 of 10 seeds: its running statistics lag the weights and eval-mode
