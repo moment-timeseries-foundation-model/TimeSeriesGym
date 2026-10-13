@@ -14,6 +14,7 @@ from timeseriesgym.grade_code_helper import (
 )
 from timeseriesgym.utils import get_logger
 
+from .architecture import keras_trainable_parameters, trainable_parameters_in_use
 from .training_budget import TrainingSampleCounter
 
 logger = get_logger(__name__)
@@ -38,6 +39,33 @@ def _test_outputs(submission_module, coding_config: dict):
     except Exception as e:
         logger.error(f"Error training and predicting for ResNet: {e}")
         return None
+
+
+def _architecture_matches(submission_module, coding_config: dict) -> bool:
+    """Whether a fresh ResNet's forward pass uses exactly the Keras model's number of trainable
+    parameters for the grading arguments (architecture.py)."""
+    resnet_config = coding_config["required_classes"]["ResNet"]
+    init_args = resnet_config["required_methods"]["__init__"]["required_args"]
+    expected = keras_trainable_parameters(
+        int(init_args["input_shape"][0]),
+        int(init_args["n_feature_maps"]),
+        int(init_args["n_classes"]),
+    )
+    model = initialize_class(submission_module, "ResNet", resnet_config)
+    if model is None:
+        return False
+    try:
+        x = resnet_config["required_methods"]["forward"]["required_args"]["x"]
+        used = trainable_parameters_in_use(model, x)
+    except Exception as e:
+        logger.error(f"Error counting the trainable parameters of ResNet: {e}")
+        return False
+    if used != expected:
+        logger.warning(
+            f"ResNet's forward pass uses {used} trainable parameters; the Keras model of "
+            f"resnet.py has {expected} with these arguments: the test fails"
+        )
+    return used == expected
 
 
 def grade_code(
@@ -83,6 +111,9 @@ def grade_code(
     # grade function definitions and executions
     function_scores = grade_function(submission_module, coding_config)
 
+    # task-specific grading: the architecture (after the test model, outside its sample count)
+    architecture_matches = _architecture_matches(submission_module, coding_config)
+
     # combine all scores
     scores = {
         "defined_classes": f"{class_scores['defined_classes']}/{class_scores['total_classes']}",
@@ -121,7 +152,7 @@ def grade_code(
     # the synthetic time series dataset is an easy task
     # the correct ResNet implementation should achieve > 80% accuracy with the provided parameters
     expected_accuracy = coding_config["required_functions"]["predict"]["expected_accuray"]
-    if within_budget and test_accuracy > expected_accuracy:
+    if within_budget and architecture_matches and test_accuracy > expected_accuracy:
         scores["test_metric"] = "1/1"
     else:
         scores["test_metric"] = "0/1"
