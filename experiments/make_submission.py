@@ -8,7 +8,8 @@ failed runs included, so that the grading report counts every run: a run without
 submission points at a path that does not exist, which is graded as invalid. The path is the
 submission file whose suffix matches the challenge's sample submission (the most recently
 written one if there are several: the agent instructions say only the last file is evaluated),
-or the submission directory for hyperparameter-search and feature-enhancement challenges.
+or the submission directory for hyperparameter-search and feature-enhancement challenges, or
+the predictor directory (`submission/predictor`) for the predictor challenges.
 Hyperparameter-search lines also carry "solution_file_path": the run's code directory (the
 agent's /home/code), which the graders require and search for a hyperparameter search.
 Feature-enhancement lines carry "solution_files_path": the folder with the run's model code,
@@ -32,6 +33,8 @@ def submission_path_for(run_dir: Path, competition) -> Path:
         or competition.feature_enhancement_config is not None
     ):
         return submission_dir  # their graders read several files from the folder
+    if competition.predictor_config is not None:
+        return submission_dir / "predictor"  # the grader runs predict.py and its files
     suffix = competition.sample_submission.suffix
     candidates = []
     if submission_dir.is_dir():

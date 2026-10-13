@@ -99,6 +99,8 @@ def grade_jsonl(
         elif competition.feature_enhancement_config is not None:
             solution = submission.get("solution_files_path")
             single_report = grade_feature_enhancement(submission_path, competition, solution)
+        elif competition.predictor_config is not None:
+            single_report = grade_predictor(submission_path, competition)
         else:
             single_report = grade_sample(submission_path, competition)
         competitions_reports.append(single_report)
@@ -250,6 +252,39 @@ def grade_feature_enhancement(
     )
 
 
+def grade_predictor(
+    path_to_predictor: Path, competition: Competition, launcher=None
+) -> CompetitionReport:
+    """Grades a predictor directory (predict.py and its files): the grader runs it on the hidden
+    test windows and scores its forecasts with the challenge's grade function (see
+    timeseriesgym/predictor). A predictor with the wrong format, or one that fails, breaks the
+    protocol or runs out of time, is graded as invalid. `launcher` starts the predictor
+    process (default: timeseriesgym.predictor.launch.default_launcher(), not a sandbox)."""
+    from timeseriesgym.predictor.grading import grade_predictor_dir
+
+    _ensure_prepared(competition)
+    try:
+        score, _ = grade_predictor_dir(path_to_predictor, competition, launcher)
+    except InvalidSubmissionError as e:
+        logger.warning(f"Invalid submission {path_to_predictor}: {e}")
+        score = None
+    competition_leaderboard = get_leaderboard(competition)
+    if competition_leaderboard is not None and not isinstance(score, dict):
+        rank_info = competition.grader.rank_score(score, competition_leaderboard)
+        is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
+    else:
+        rank_info, is_lower_better = get_null_rank_info(), None
+    return _competition_report(
+        competition,
+        score,
+        rank_info,
+        submission_path=path_to_predictor,
+        submission_exists=path_to_predictor.is_dir(),
+        valid_submission=score is not None,
+        is_lower_better=is_lower_better,
+    )
+
+
 def grade_code(path_to_submission: Path, competition: Competition) -> CompetitionReport:
     """Grades a code submission for the given competition. A submission with the wrong file
     type, or one the grader rejects (e.g. it does not import), is graded as invalid."""
@@ -306,6 +341,35 @@ def _validate_python_source(submission: Path) -> tuple[bool, str]:
         True,
         "Submission is valid. (It was only parsed: its classes and functions are run and "
         "checked when the submission is graded.)",
+    )
+
+
+def _validate_predictor(submission: Path, competition: Competition) -> tuple[bool, str]:
+    """A predictor directory, or its predict.py on its own (the grading server receives single
+    files), is checked for its format only: never imported or run here."""
+    from timeseriesgym.predictor import contract
+    from timeseriesgym.predictor.grading import settings
+
+    config = settings(competition)
+    if submission.is_file() and submission.suffix != ".py":
+        return False, (
+            "Submission invalid! This challenge takes a predictor, the directory "
+            "/home/submission/predictor/ with predict.py (see description.md), not a file of "
+            "predictions."
+        )
+    try:
+        if submission.is_dir():
+            contract.check_predictor(submission, int(config["max_bytes"]), int(config["max_files"]))
+        else:
+            contract.check_entry(submission)
+    except (contract.ContractError, OSError) as e:
+        return False, f"Submission invalid! {e}"
+    what = "predictor directory" if submission.is_dir() else f"{submission.name}"
+    return (
+        True,
+        f"Submission is valid: the {what} has the required format. (It was not run: run "
+        "`python /home/data/check_predictor.py` to run it as the grader does, on validation "
+        "windows.)",
     )
 
 
@@ -382,6 +446,9 @@ def validate_submission(
     if competition.hyperparameter_search_config is not None and submission.is_dir():
         _ensure_prepared(competition)
         return _validate_hyperparameter_search_folder(submission, competition, solution_file_path)
+
+    if competition.predictor_config is not None and (submission.is_dir() or submission.is_file()):
+        return _validate_predictor(submission, competition)
 
     if not submission.is_file():
         return False, f"Submission invalid! Submission file {submission} does not exist."
