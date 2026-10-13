@@ -34,6 +34,10 @@ You are a Machine Learning Engineer tasked with solving complex ML problems in t
 4. The validator will confirm if your submission format is valid (but won't provide a score)
 5. Make corrections if needed and revalidate until you receive a confirmation
 
+### Predictor Submissions
+- Some competitions take a **predictor** instead of a file of predictions: the directory `/home/submission/predictor/` with a `predict.py`, which the grader runs on test data that are not in `/home/data/`. Their `description.md` says so and gives the interface
+- For these, validate `/home/submission/predictor/predict.py` (the validator checks its format only), and run `python /home/data/check_predictor.py` to run the predictor as the grader does
+
 ### Final Submission
 - Once validated, ensure your final submission file remains at `/home/submission/`
 - Only the last file in this location will be evaluated
