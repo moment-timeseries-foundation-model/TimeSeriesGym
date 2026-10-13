@@ -3,6 +3,8 @@ the seasonal naive forecast's MASE, and the geometric mean of these ratios over 
 
 import hashlib
 import importlib
+import io
+import json
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -315,12 +317,95 @@ def test_prepare_keeps_each_windows_scale_and_seasonal_naive_forecast(tmp_path):
     assert np.isfinite(_grade(sample, answers))
 
 
-def test_the_leaderboard_is_a_placeholder_at_the_seasonal_naive_score():
+# ---------------------------------------------------------------- leaderboard
+
+
+def _published(model: str, mase: dict, leakage: str | None = "No") -> tuple:
+    """One model directory of the GIFT-Eval space: its all_results.csv rows and config.json."""
+    configurations = _module("leaderboard").CONFIGURATIONS
+    rows = pd.DataFrame(
+        {
+            "dataset": [configurations[name] for name in mase] + ["m4_weekly/W/short"],
+            "model": model,
+            "eval_metrics/MASE[0.5]": [*mase.values(), 9.0],
+        }
+    )
+    config = {"model": model}
+    if leakage is not None:
+        config["testdata_leakage"] = leakage
+    return rows, config
+
+
+def test_the_leaderboard_scores_published_results_with_this_metric():
+    leaderboard = _module("leaderboard")
+    names = list(leaderboard.CONFIGURATIONS)
+    reference = dict(zip(names, [0.8, 1.0, 1.3, 3.3, 1.5], strict=True))
+    ratios = {"good": [0.5] * 5, "mixed": [4, 1, 1, 1, 0.5]}
+    results = {
+        "Seasonal_Naive": _published("Seasonal_Naive", reference),
+        **{
+            model: _published(model, {n: r * reference[n] for n, r in zip(names, rs, strict=True)})
+            for model, rs in ratios.items()
+        },
+        "leaky": _published("leaky", {n: 0.1 for n in names}, leakage="Yes"),
+        "unflagged": _published("unflagged", {n: 0.1 for n in names}, leakage=None),
+        "partial": _published("partial", {n: 0.1 for n in names[:4]}),
+        "nan": _published("nan", {**{n: 0.1 for n in names[:4]}, names[4]: float("nan")}),
+    }
+
+    built = leaderboard.build(results)
+    assert list(built.columns) == ["teamId", "teamName", "submissionDate", "score"]
+    assert built["teamName"].tolist() == ["good", "Seasonal_Naive", "mixed"]
+    assert built["score"].tolist() == [0.5, 1.0, 1.1487]  # mixed: 2 ** (1 / 5)
+    assert built["teamId"].tolist() == [0, 1, 2]
+    assert (built["submissionDate"] == leaderboard.REVISION_DATE).all()
+
+
+def test_the_leaderboard_is_read_at_the_pinned_revision(tmp_path, monkeypatch):
+    leaderboard = _module("leaderboard")
+    files = ["results/A b (+c)/all_results.csv", "results/A b (+c)/config.json", "README.md"]
+    files += ["results/grouped_results_by_domain.csv", "results/A b (+c)/notes.txt"]
+    opened = []
+
+    def urlopen(url):
+        opened.append(url)
+        body = (
+            json.dumps({"siblings": [{"rfilename": f} for f in files]}) if "/api/" in url else url
+        )
+        return io.BytesIO(body.encode())
+
+    monkeypatch.setattr(leaderboard.urllib.request, "urlopen", urlopen)
+    leaderboard.fetch_results(tmp_path)
+    revision = leaderboard.REVISION
+    assert opened == [
+        f"https://huggingface.co/api/spaces/Salesforce/GIFT-Eval/revision/{revision}",
+        f"https://huggingface.co/spaces/Salesforce/GIFT-Eval/resolve/{revision}/"
+        "results/A%20b%20%28%2Bc%29/all_results.csv",
+        f"https://huggingface.co/spaces/Salesforce/GIFT-Eval/resolve/{revision}/"
+        "results/A%20b%20%28%2Bc%29/config.json",
+    ]
+    assert sorted(p.name for p in (tmp_path / "A b (+c)").iterdir()) == [
+        "all_results.csv",
+        "config.json",
+    ]
+
+
+def test_the_shipped_leaderboard_ranks_gift_evals_models():
     from timeseriesgym.data import get_leaderboard
     from timeseriesgym.registry import registry
 
     competition = registry.get_competition("gift-eval-short-horizon")
-    rows = pd.read_csv(competition.leaderboard)
-    # the MAPE placeholder (score 0) is not on the new scale; one row is never ranked
-    assert rows[["teamName", "score"]].values.tolist() == [["seasonal_naive", 1.0]]
-    assert get_leaderboard(competition) is None
+    leaderboard = get_leaderboard(competition)
+    assert len(leaderboard) == 123  # of 143 models; the other 20 are flagged for leakage
+    scores = dict(zip(leaderboard["teamName"], leaderboard["score"], strict=True))
+    # Naive's published MASE gives the score the grader gives the naive forecast (1.02262)
+    assert scores["Seasonal_Naive"] == 1.0 and scores["Naive"] == 1.02262
+    assert not {"TimesFM", "Chronos_large", "MoiraiAgent-leaking"} & set(scores)
+
+    grader = competition.grader
+    assert grader.is_lower_better(leaderboard)
+    info = grader.rank_score(1.0, leaderboard)  # 123 teams: gold is rank 10
+    assert info["gold_threshold"] == 0.71687 and info["silver_threshold"] == 0.74775
+    assert info["bronze_threshold"] == 0.76343 and info["median_threshold"] == 0.77337
+    assert not (info["gold_medal"] or info["silver_medal"] or info["bronze_medal"])
+    assert grader.rank_score(0.7, leaderboard)["gold_medal"]

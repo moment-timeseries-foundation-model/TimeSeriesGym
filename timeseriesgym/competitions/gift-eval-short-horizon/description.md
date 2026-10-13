@@ -24,6 +24,9 @@ Where:
 
 This is GIFT-Eval's evaluation (gluonts' `evaluate_model` with `MASE()`, `axis=None`, `mask_invalid_label=True`, `allow_nan_forecast=False` and the season above) and the normalization and geometric mean of its leaderboard. The forecast windows are GIFT-Eval's own, so the seasonal naive MASE of each dataset is the one GIFT-Eval publishes for it (for example 3.2784 on `m4_daily`). A window whose scale is 0 would not count, as in gluonts; no provided dataset has one. Predictions must be finite: NaN and infinite values make the submission invalid. The grader also logs the previous metric of this challenge, the MAPE averaged over the datasets, which does not affect the score.
 
+### Leaderboard
+The leaderboard lists the models published on GIFT-Eval's leaderboard (the Hugging Face space `Salesforce/GIFT-Eval`, revision `9d731e061162d5d8440204a2c455583d82e084d4` of 2026-10-09), each scored with this metric from its published MASE on the 5 datasets; the forecast windows are the same, so scores are comparable. Only models that GIFT-Eval marks as free of test-data leakage (`"testdata_leakage": "No"`) and that have a result on each of the 5 datasets are listed: 123 of its 143 models, including Seasonal_Naive (1.0) and Naive (1.02262); the other 20 are flagged for leakage.
+
 # Dataset Description
 
 ## File and Data Field Descriptions

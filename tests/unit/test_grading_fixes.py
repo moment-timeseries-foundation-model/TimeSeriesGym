@@ -180,6 +180,10 @@ DATA_ENDS = {
     "recruit-restaurant-visitor-forecasting": "2017-05-31",  # date_info.csv, calendar_date
     "sberbank-russian-housing-market": "2016-10-19",  # macro.csv, timestamp
 }
+# Challenges taken from a benchmark, not a Kaggle competition: their leaderboard is built from the
+# benchmark's published results by a module that pins the source's revision (`REVISION`, of
+# `REVISION_DATE`), and the description names that revision.
+BENCHMARK_LEADERBOARDS = {"gift-eval-short-horizon": "leaderboard"}
 
 
 @pytest.mark.parametrize(
@@ -187,7 +191,7 @@ DATA_ENDS = {
 )
 def test_shipped_leaderboards_are_final_standings_of_their_competition(competition_id):
     leaderboard = pd.read_csv(COMPETITIONS / competition_id / "leaderboard.csv")
-    if len(leaderboard) < 2:
+    if len(leaderboard) < 2 and competition_id not in BENCHMARK_LEADERBOARDS:
         return  # a placeholder, which get_leaderboard ignores
     assert list(leaderboard.columns) in LEADERBOARD_COLUMNS
     assert leaderboard["teamId"].is_unique
@@ -197,6 +201,13 @@ def test_shipped_leaderboards_are_final_standings_of_their_competition(competiti
     if competition_id in DATA_ENDS:
         first_day = pd.to_datetime(leaderboard["submissionDate"]).min().normalize()
         assert first_day > pd.Timestamp(DATA_ENDS[competition_id])
+    if competition_id in BENCHMARK_LEADERBOARDS:
+        source = importlib.import_module(
+            f"timeseriesgym.competitions.{competition_id}.{BENCHMARK_LEADERBOARDS[competition_id]}"
+        )
+        assert len(leaderboard) >= 2
+        assert (leaderboard["submissionDate"] == source.REVISION_DATE).all()  # one snapshot
+        assert source.REVISION in (COMPETITIONS / competition_id / "description.md").read_text()
 
 
 def _fake_kaggle_api(rows: int, teams: int):
