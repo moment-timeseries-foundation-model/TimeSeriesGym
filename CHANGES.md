@@ -118,6 +118,45 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
 - **Reports**: dict scores are written as JSON objects (1fac171); they were a Python repr string
   that `from_dict` could not read.
 
+## Grading sandbox
+
+Code challenges (resnet-tensorflow-to-pytorch, stomp-R-to-python) and both hyperparameter-search
+challenges.
+
+- **Agent code runs in a sandbox** (73be122, 5bc2131, 8b4cc3a; hardened in e1231b5, 12e2970):
+  `grade_code` imported `submission.py` and ran its functions, and `grade_relative_improvement`
+  unpickled or `torch.jit.load`ed the submitted models, in the grading process, with the
+  answers loaded. Agent code could read the answers, the grader's environment (credentials) and
+  the user's files, write wherever the grader could, open connections, and leave processes
+  running. Now this runs in a separate process (`timeseriesgym/sandbox.py`): as the user
+  `sandbox` when grading runs as root, otherwise as the grading user confined by Landlock; with
+  a copy of the submission and of the public input data, a scrubbed environment, no sockets,
+  limits on time (1800 s for code, 600 s for a hyperparameter search), memory (3/4 of the
+  machine's, all its processes together) and file size (1 GiB), and no read access to the
+  private files or to the raw-data archive of a checkout. The grading process compares the
+  outputs with the answers as before. Scores are unchanged: on the prepared data, 21
+  submissions (the shipped samples, reference solutions, broken and altered versions of them,
+  and hyperparameter-search folders) get identical reports, and the parity unit tests pass on
+  the old graders too.
+- **Submissions that end, hang or exhaust the grader are invalid** (5bc2131, 8b4cc3a): a
+  segmentation fault, `os._exit` or `SystemExit` at import or while a model loads ended the
+  grading process (`SystemExit` passed the grader's except clause), an endless loop hung it, and
+  memory was unlimited.
+- **Linked and huge files are invalid** (5bc2131, 8b4cc3a, 12e2970; test 983efae): a
+  `submission.py` or model file that is a symbolic link was followed; one that is larger than
+  2 GiB is invalid too. The copy into the sandbox is made outside it, so a followed link could
+  bring in any file the grader can read, and a sparse file could fill the disk.
+- **Setup errors stop the grading** (73be122, 5bc2131): grading as root without a `sandbox` user
+  (`TIMESERIESGYM_SANDBOX_USER` names another), or as a user where Landlock is not available, so
+  that the sandbox could read the answers, raises a `SandboxError`. Unlike other grader errors it
+  is not recorded as an invalid submission, and it stops a `timeseriesgym grade` batch.
+  `TIMESERIESGYM_SANDBOX_UNCONFINED=1` grades trusted submissions without Landlock. The agent
+  image has a `sandbox` user (a93e0b8). Grading as a user is a narrower boundary than grading
+  as root in a container, which the README recommends for untrusted submissions (25ba65a).
+- **Cost**: each graded code or hyperparameter-search submission starts a Python process that
+  imports torch and pandas again, about 4 to 7 s. The unit tests take about 7 minutes instead
+  of 1 (1.5 minutes with `pytest -n 8`).
+
 ## Medals and leaderboards
 
 - **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 10 challenges
