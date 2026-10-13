@@ -11,7 +11,7 @@ dataset:
   sample_submission: ucr-anomaly-detection/prepared/public/sample_submission.h5
 
 grader:
-  name: adjusted-f1-score
+  name: average-precision
   grade_fn: timeseriesgym.competitions.ucr-anomaly-detection.grade:grade
 
 preparer: timeseriesgym.competitions.ucr-anomaly-detection.prepare:prepare

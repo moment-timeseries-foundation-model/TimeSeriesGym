@@ -77,6 +77,46 @@ def test_ucr_requires_every_dataset():
         grade({"easy": labels.copy()}, answers)
 
 
+def test_ucr_score_is_the_average_precision_that_chance_does_not_earn():
+    from sklearn.metrics import average_precision_score
+
+    from timeseriesgym.metrics import adjusted_best_f1
+
+    grade = _grade_fn("ucr-anomaly-detection")
+    labels = np.zeros(2000)
+    labels[750:850] = 1
+    answers = {"a": labels}
+    rng = np.random.default_rng(0)
+    random = rng.random(2000)
+    comb = np.zeros(2000)
+    comb[::400] = 1.0  # knows nothing of the labels, but one tooth lands in the anomaly
+    for label_free in [random, comb, np.zeros(2000)]:
+        assert grade({"a": label_free}, answers) < 0.1  # about the share of anomalous points
+    # the old score, the point-adjusted best F1, paid the random scores and the comb
+    assert adjusted_best_f1(labels, random) > 0.5
+    assert adjusted_best_f1(labels, comb) > 0.9
+
+    honest = labels + rng.normal(0, 0.3, 2000)  # an imperfect detector
+    assert grade({"a": honest}, answers) == pytest.approx(average_precision_score(labels, honest))
+    assert 0.5 < grade({"a": honest}, answers) < 1.0
+    assert grade({"a": labels.copy()}, answers) == 1.0
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "column", "text"])
+def test_ucr_scores_must_be_finite_numbers_in_the_shape_of_the_labels(bad):
+    grade = _grade_fn("ucr-anomaly-detection")
+    labels = np.zeros(100)
+    labels[40:50] = 1
+    scores = {
+        "nan": np.full(100, np.nan),  # was graded 0.0
+        "inf": np.r_[np.zeros(99), np.inf],  # was graded 0.0
+        "column": labels.reshape(100, 1),  # was graded 1.0
+        "text": np.array(["a"] * 100),  # was an unexpected error
+    }[bad]
+    with pytest.raises(InvalidSubmissionError):
+        grade({"a": scores}, {"a": labels})
+
+
 # ---------------------------------------------------------------- exact-match graders
 
 
