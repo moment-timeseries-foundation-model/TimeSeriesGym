@@ -366,6 +366,20 @@ def test_proxy_refuses_bad_bodies(make_proxy, headers, body, code):
     sock.close()
 
 
+def test_proxy_reads_a_refused_requests_body_before_it_replies(make_proxy):
+    """Else the agent's client, still sending the body, gets a broken pipe, not the reply."""
+    proxy, _ = make_proxy()
+    sock = _connect(proxy)
+    sock.sendall(b"POST /t/wrong/openai/v1/chat/completions HTTP/1.1\r\nContent-Length: 5\r\n\r\n")
+    sock.settimeout(0.5)
+    with pytest.raises(TimeoutError):  # it waits for the body
+        sock.recv(100)
+    sock.sendall(b'{"x":')
+    sock.settimeout(5)
+    assert sock.recv(100).startswith(b"HTTP/1.1 403")
+    sock.close()
+
+
 def test_proxy_bounds_the_request_bytes_it_holds(make_proxy):
     proxy, up = make_proxy(max_buffered=1000)
     resp, _ = _post(

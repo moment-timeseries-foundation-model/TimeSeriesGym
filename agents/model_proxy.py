@@ -268,12 +268,33 @@ def make_handler(cfg: dict, record):
             self.end_headers()
             self.wfile.write(body)
 
-        def _refuse(self, code: int, why: str, detail: str = "") -> None:
+        def _refuse(self, code: int, why: str, detail: str = "", drain: bool = True) -> None:
             """Refuses the request; the log gets `why` only (`detail` is the agent's own data)."""
             count("refused")
             record(event="refused", code=code, why=why)
+            if drain:
+                self._drain()
             self.close_connection = True  # an unread body must not be parsed as a request
             self._send_json(code, f"model proxy: {why}{detail}", close=True)
+
+        def _drain(self) -> None:
+            """Reads and drops an unread body of up to MAX_BODY bytes (within the request
+            deadline): closing on it would break the connection before the agent reads the
+            reply."""
+            try:
+                left = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            if left > MAX_BODY:
+                return
+            try:
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 65536))
+                    if not chunk:
+                        return
+                    left -= len(chunk)
+            except OSError:
+                pass
 
         def do_GET(self):  # noqa: N802 (BaseHTTPRequestHandler API)
             if urllib.parse.urlsplit(self.path).path == "/health":
@@ -297,8 +318,8 @@ def make_handler(cfg: dict, record):
                 return self._refuse(400, "bad Content-Length")
             if length <= 0 or length > MAX_BODY:
                 return self._refuse(413, "bad body size")
-            if not reserve(length):
-                return self._refuse(503, "too many request bytes in flight")
+            if not reserve(length):  # the body is not read: the connection may break first
+                return self._refuse(503, "too many request bytes in flight", drain=False)
             try:
                 self._forward(*allowed, length)
             finally:
@@ -310,17 +331,17 @@ def make_handler(cfg: dict, record):
             except OSError:  # timed out or cut off
                 body = b""
             if len(body) != length:
-                return self._refuse(400, "incomplete body")
+                return self._refuse(400, "incomplete body", drain=False)
             self._deadline.cancel()  # the request is in; the response may stream for long
             try:
                 model = json.loads(body).get("model")
             except (ValueError, AttributeError):
-                return self._refuse(400, "body must be a JSON object")
+                return self._refuse(400, "body must be a JSON object", drain=False)
             if not isinstance(model, str) or model not in models[name]:
-                return self._refuse(403, "model not allowed", f": {str(model)[:80]}")
+                return self._refuse(403, "model not allowed", f": {str(model)[:80]}", False)
             n, exhausted = take_budget()
             if exhausted:  # refused outside the lock: _refuse takes it again
-                return self._refuse(429, exhausted)
+                return self._refuse(429, exhausted, drain=False)
             provider = providers[name]
             headers = {
                 "Content-Type": self.headers.get("Content-Type", "application/json"),
