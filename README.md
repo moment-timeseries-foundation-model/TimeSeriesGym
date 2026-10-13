@@ -167,9 +167,8 @@ more, and their descriptions say so:
 - **LANL-Earthquake-Prediction**: the test segments have 15,000 rows; Kaggle's had 150,000.
 - **amp-parkinsons-disease-progression-prediction**: the test set is 10% of the patients in
   Kaggle's training data; the leaderboard was scored on Kaggle's hidden test set.
-- **ashrae-energy-prediction**: the test set is the last two months of 2016, and `leaderboard.csv`
-  is Kaggle's public leaderboard, not the final one. It was scored on part of Kaggle's 2017-2018
-  test period, and leaked meter readings drove its top scores.
+- **ashrae-energy-prediction**: the test set is the last two months of 2016; the leaderboard was
+  scored on Kaggle's test data from 2017 and 2018.
 
 #### Evaluating Hyperparameter Search Results
 

@@ -28,7 +28,7 @@ Where:
 
 Predictions must be finite and non-negative.
 
-Medal thresholds come from Kaggle's public leaderboard, not the final one. It was scored on part of Kaggle's 2017-2018 test period, and leaked meter readings drove its top scores. The test set here is the last two months of 2016, so medals are only a rough guide to where a score would rank on Kaggle.
+Medal thresholds come from the final Kaggle leaderboard, which was scored on Kaggle's test data from 2017 and 2018. The test set here is the last two months of 2016, so medals are only a rough guide to where a score would rank on Kaggle.
 
 ## Submission File
 For each row in the test set, you must predict the `meter_reading`. The file should contain a header and have the following format:
