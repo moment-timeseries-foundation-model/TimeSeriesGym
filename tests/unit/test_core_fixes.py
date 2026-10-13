@@ -373,6 +373,37 @@ def test_agent_environment_has_the_packages_of_shipped_helpers():
     assert "python-dotenv" in names
 
 
+def test_package_modules_import_only_declared_dependencies():
+    import ast
+    import importlib.metadata
+    import tomllib
+
+    def normalized(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    requirements = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["dependencies"]
+    declared = {normalized(re.split(r"[\s<>=!~;\[]", line)[0]) for line in requirements}
+    distributions = importlib.metadata.packages_distributions()
+    undeclared = set()
+    for path in sorted((REPO / "timeseriesgym").glob("*.py")):
+        for node in ast.parse(path.read_text()).body:  # module-level imports run on import
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                modules = [node.module]
+            else:
+                continue
+            for top in {module.split(".")[0] for module in modules}:
+                if top in sys.stdlib_module_names or top == "timeseriesgym":
+                    continue
+                for distribution in distributions.get(top, [top]):
+                    if normalized(distribution) not in declared:
+                        undeclared.add((path.name, normalized(distribution)))
+    # h5py (utils.py) was only installed as a dependency of tensorflow. tqdm is not declared
+    # either; kaggle, datasets and others install it.
+    assert {distribution for _, distribution in undeclared} <= {"tqdm"}, sorted(undeclared)
+
+
 # ---------------------------------------------------------------- grading reports
 
 

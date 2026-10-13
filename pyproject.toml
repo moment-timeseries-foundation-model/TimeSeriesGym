@@ -33,6 +33,7 @@ dependencies = [
   "pyquaternion>=0.9.9",
   "shapely>=2.0.5",
   "numpy==2.0.2",
+  "h5py>=3.11",
   "torch==2.6.0",
   "xgboost==2.1.1",
   "datasets==3.4.1",
