@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      # the dev extra allows ruff>=0.3.0; the code is formatted with 0.6.9
+      # the ruff version the dev extra pins
       - run: pip install ruff==0.6.9
       - run: ruff check --output-format=github
       - run: ruff format --check

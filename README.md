@@ -60,7 +60,7 @@ GitHub Actions (`.github/workflows/ci.yml`) lints the code and runs the tests on
 pushes to `main` and for pull requests. The same checks, locally:
 
 ```bash
-# Lint and format check, with the ruff version CI uses (the dev extra allows any ruff >= 0.3.0)
+# Lint and format check, with the ruff version CI uses (the one the dev extra pins)
 pip install ruff==0.6.9
 ruff check
 ruff format --check
