@@ -38,6 +38,16 @@ the medals are not comparable for those named under "Medals and leaderboards".
 - **ucr-anomaly-detection**: the score averages over every dataset in the answers (229df50).
   It iterated over the submission's keys, so a submission with only the easiest dataset was
   scored on that one alone.
+- **ucr-anomaly-detection**: the score is each dataset's average precision on the point labels
+  (`sklearn.metrics.average_precision_score`), averaged over the datasets; it was the
+  point-adjusted best F1 (d7cb84e). Point adjustment pays chance: on the shipped data, 20 seeded
+  uniform-random submissions average 0.453 (0.377 to 0.543), and a label-free comb (every 400th
+  point 1) earns 0.540, both above a rolling z-score (0.364). In average precision, a constant
+  scores 0.0086 (the share of anomalous points), random scores 0.0095 (median of 20 seeds), the
+  comb 0.0088, a nearest-neighbour distance to the training series 0.417, and the labels 1.0.
+  The point-adjusted F1 is still logged. Scores must be finite numbers in the labels' shape: NaN
+  and infinite scores were graded 0.0, and an (n, 1) column of the labels 1.0. The placeholder
+  leaderboard stays ignored, so no medals.
 - **gift-eval-short-horizon**: the score is GIFT-Eval's leaderboard metric, each dataset's MASE
   divided by the seasonal naive forecast's MASE, geometric mean over the 5 datasets (4c2294b).
   It was MAPE, which divides by max(|actual|, eps): a non-zero forecast where the actual value is
@@ -70,6 +80,34 @@ the medals are not comparable for those named under "Medals and leaderboards".
   `np.load` read all the declared data (a sparse file of 100 MiB of zeros, for MOMENT's 50
   answers, was read in full before the shape check), and returned a zip as an `NpzFile`. The
   shipped MOMENT and TSL iTransformer samples load as before.
+- **resnet-tensorflow-to-pytorch**: the test model may be trained on at most
+  `n_epochs * len(train_data)` samples (ec1faa1). The grader asked for `n_epochs=1` but never
+  checked it: a Claude Code submission set `n_epochs = max(n_epochs, 30)` and passed. The grader
+  now counts every sample back-propagated through an instance of the submission's `ResNet`
+  (copies and reloaded models included) from before the submission is imported until the test
+  model's predictions return, so copying the tensors out of the dataset does not hide extra
+  passes; forward passes without back-propagation do not count. Above the budget the test
+  fails. The accuracy test now runs before the structural checks, so nothing trained in the
+  structural call of `train` carries over. The count runs in the same process as the
+  submission, so code written to evade it is not stopped; it catches code that trains for more
+  passes than asked, whatever loop or copy of the data it uses.
+- **resnet-tensorflow-to-pytorch**: the grading arguments ask for `n_epochs=40` instead of 1
+  (f1ca4fc). A port with Keras' BatchNorm settings (PyTorch momentum 0.01) scored 0.49 to 0.51
+  after 1 epoch on 10 of 10 seeds: its running statistics lag the weights and eval-mode
+  predictions collapse to one class. Measured in tsgym-core on CPU, it passes on 12 of 20 seeds
+  after 25 epochs, 30 of 31 after 30 and 31 of 31 after 40. Ports with PyTorch's default
+  momentum pass from 3 epochs, and the reference port with re-estimated statistics passes at
+  every count. An untrained model and a one-layer convolution with average pooling score 0.49
+  to 0.51 at every count, so they still fail. A ResNet without its shortcuts also passes after
+  30 epochs: the accuracy test does not check the architecture. The threshold stays at 0.8,
+  because the accuracies are either about 0.5 or about 1.0. Grading a faithful port takes about
+  70 s.
+- **stomp-R-to-python**: each test also runs on a variant of its inputs, and passes only if the
+  outputs match on both (d918a7c). The tests used only the public inputs, so outputs computed
+  offline and pasted into the code passed. The variant reverses the inputs in time and maps
+  them by `-1.5 * x + 0.5`. The z-normalized distance does not change under either, so the R
+  answers give the variant's expected outputs exactly, and no reference implementation is
+  added. The reference port and two Claude Code ports pass as before.
 - **Unreadable submissions**: a ragged CSV, a wrong suffix, an unreadable `.h5` or `.npy`, or a
   code submission that does not import, is reported as invalid instead of aborting the whole
   `timeseriesgym grade` batch (5e8750c). One bad agent file used to lose the report for every
@@ -131,6 +169,39 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
   cut at the `#`, losing any `model:` key after it.
 - **Reports**: dict scores are written as JSON objects (1fac171); they were a Python repr string
   that `from_dict` could not read.
+- **Score** (`overall_score`): the test accuracy if every rubric check passes, and 0 otherwise
+  (e87c88d); it was the mean of the TensorBoard, code-quality and Hydra sub-scores and the
+  accuracy. Three quarters of it came from keyword and AST checks: with the rubric passed, any
+  predictions scored at least 0.75, and the most frequent training class for every ECG 0.888.
+  The lint check passes only with no flake8 problems; the code-quality sub-score keeps its
+  partial credit. The sub-scores and the accuracy are still reported, with `rubric_passed`, and
+  the description lists what each check requires. The design is the RL conversion's (rl_envs
+  DEVIATIONS G12).
+- **Model from the config**: the Hydra check passes if `train.py` builds the model from the
+  config's `model` section: it passes the section, or a value read from it, to a class or
+  function of `model.py` or to `hydra.utils.instantiate`, or it passes an argument to a class or
+  function of `model.py` that reads a parameter's `model` section (ef6a6bd). The check looked for
+  the text `cfg.model` or `cfg['model']` in `train.py`: it rejected `ECGClassifier(config)` with
+  a model that reads `config.model`, and accepted `print(dict(cfg.model))`, which an agent added
+  in an evaluation run to pass it. The shipped example passes as before.
+- **flake8**: a dependency (7.1.1), and a flake8 that cannot run is a grading error (eda11ed). It
+  was neither declared nor installed in the tsgym-core image; a missing flake8 gave half the lint
+  credit, so no code-quality score could reach 1.0, and a run that failed without a report
+  counted as no problems. The shipped example's one flake8 problem (E203) is fixed (d754b5d).
+  Grading stops with a setup error when flake8 is not installed (ac59df8), as for a missing HPS
+  sample submission; every run in the batch was graded invalid.
+- **flake8 options**: the lint check runs `flake8 --isolated --disable-noqa --extend-ignore=E203
+  --max-line-length=100` (3cc2cce); it ran `flake8 --max-line-length=100`. A `# noqa` comment
+  or a configuration file in flake8's working directory could switch checks off, and E203
+  failed the slices that black and ruff write (`x[i : i + 1]`), the repository's own format.
+- **Code checks and event files**: the TensorBoard checks (the import, `SummaryWriter(...)`,
+  `.add_scalar(...)`, `.add_graph(...)`) and the Hydra checks (the import, `@hydra.main`,
+  `OmegaConf` or `DictConfig`) look at train.py's syntax tree; they were regular expressions,
+  so code in a string literal passed them (a train.py that held a training script as a string
+  scored 0.8 on both). A TensorBoard log must be an event file that holds a logged scalar
+  (CRC-checked TFRecord records, as SummaryWriter writes them); any file named
+  `events.out.tfevents.*`, even an empty one, counted (a7fbd91). The checks are the rl_envs
+  rubric's (F4-04). The shipped example with SummaryWriter's own event file passes every check.
 
 ## Medals and leaderboards
 
@@ -256,6 +327,13 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **ucr-anomaly-detection**: the shipped `anomaly_dataset.py` reads `train/{name}.csv` (e232319),
   and its docstring no longer says the sample submission holds the labels (7ed1429; its
   checksum changes).
+- **ucr-anomaly-detection labels**: the archive's indices are 1-based and inclusive, as its
+  readme says ("From 1 to X is training data"; an anomaly's length is end - begin + 1)
+  (e306273). The labels started one point late and missed each anomaly's first point: in 005,
+  the only labelled point was the one after the distorted point. The labels now have 621, 2,
+  301, 45 and 31 anomalous points (were 620, 1, 300, 44 and 30). The training split and the
+  public files are unchanged; the checksum of `labels.h5` is regenerated from two identical
+  rebuilds.
 - **Prepare scripts**: downloads are checked (`curl -fsSL`, checked subprocesses) and failures
   raise (262a3b3); an HTTP error page was saved as the data, stomp's answers included. The
   ucr, gift-eval and MIT-BIH-WS prepare scripts work from any directory, and the PTB-XL zip has
@@ -401,6 +479,8 @@ Three more, after reviews of agent runs:
   with the shipped ones, which belong to the real data. The integration tests still cover the
   real downloads.
 - The integration tests are marked `network` (58249d6): `-m "not network"` deselects them.
+- `test_code_graders.py` covers the resnet sample budget and epoch count and the stomp variant
+  through the registry and `grade_code` (a296e48). 6 of its 13 tests fail before the fixes.
 
 ## Packaging and CI
 
