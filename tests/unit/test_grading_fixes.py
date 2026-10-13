@@ -146,6 +146,20 @@ def test_non_finite_scores_earn_no_medal():
     assert grader.rank_score(0.1, leaderboard)["gold_medal"]
 
 
+def test_osic_leaderboard_lists_every_kaggle_team(tmp_path):
+    from timeseriesgym.registry import Registry
+
+    competition = Registry(tmp_path).get_competition("osic-pulmonary-fibrosis-progression")
+    leaderboard = get_leaderboard(competition)
+    # it held the top 20 of Kaggle's 2,097 teams, so gold was rank 2 (-6.8311), not Kaggle's
+    # rank 10 + int(0.002 * 2097) = 14
+    assert len(leaderboard) == 2097 and leaderboard["teamId"].is_unique
+    info = competition.grader.rank_score(-6.8412, leaderboard)
+    assert info["gold_threshold"] == -6.8412 and info["gold_medal"]
+    assert info["silver_threshold"] == -6.8533 and info["bronze_threshold"] == -6.8683
+    assert not competition.grader.rank_score(-6.8416, leaderboard)["gold_medal"]  # rank 15
+
+
 # ---------------------------------------------------------------- hyperparameter search
 
 
