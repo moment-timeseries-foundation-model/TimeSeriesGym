@@ -8,10 +8,17 @@ description: timeseriesgym/competitions/gift-eval-short-horizon/description.md
 
 dataset:
   answers: gift-eval-short-horizon/prepared/private/test.h5
-  sample_submission: gift-eval-short-horizon/prepared/public/sample_submission.h5
+  sample_submission: gift-eval-short-horizon/prepared/public/sample_predictor/predict.py
 
 grader:
   name: mean-absolute-percentage-error
   grade_fn: timeseriesgym.competitions.gift-eval-short-horizon.grade:grade
 
 preparer: timeseriesgym.competitions.gift-eval-short-horizon.prepare:prepare
+
+# The submission is a predictor directory (predict.py), which the grader runs on the hidden
+# test windows (timeseriesgym/predictor); the forecasts are scored with grade_fn.
+predictor_config:
+  windows: gift            # timeseriesgym/predictor/windows.py: gift_windows
+  timeout_sec: 2400        # the whole predictor run: 16,696 windows in 568 calls
+  cpus: 8

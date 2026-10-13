@@ -5,20 +5,25 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from timeseriesgym.predictor import prepare as predictor_prepare
+from timeseriesgym.predictor import windows as pw
+from timeseriesgym.predictor.grading import check_windows
+from timeseriesgym.utils import load_answers
+
 
 def prepare(raw: Path, public: Path, private: Path):
+    """The agent gets every series up to its first test window and submits a predictor; the
+    grader keeps the full series in `private` and builds the test windows from them (see
+    timeseriesgym/predictor). The answers are unchanged."""
     datasets_path = Path(__file__).parent / "datasets.txt"
     dataset_prepare_path = Path(__file__).parent / "dataset.py"
 
-    # copy over to public
-    shutil.copy2(datasets_path, public / datasets_path.name)
-    logging.info(f"Copying {datasets_path} to {public / datasets_path.name}")
+    # the full data, from which the grader builds the test windows
+    shutil.copy2(datasets_path, private / datasets_path.name)
+    shutil.copy2(dataset_prepare_path, private / dataset_prepare_path.name)
+    logging.info(f"Copying {datasets_path.name} and {dataset_prepare_path.name} to {private}")
 
-    # copy over to public
-    shutil.copy2(dataset_prepare_path, public / dataset_prepare_path.name)
-    logging.info(f"Copying {dataset_prepare_path} to {public / dataset_prepare_path.name}")
-
-    with open(public / datasets_path.name) as f:
+    with open(private / datasets_path.name) as f:
         dataset_names = [line.strip() for line in f.readlines()]
 
     logging.info(f"Dataset names: {dataset_names}")
@@ -60,25 +65,75 @@ def prepare(raw: Path, public: Path, private: Path):
         subset_file.create_dataset("labels", data=data)
         logging.info(f"Created {private / 'test.h5'} with subset data.")
 
-    # create a sample submission file of the same shape as the test.h5 file
-    with h5py.File(public / "sample_submission.h5", "w") as sample_file:
-        # Create a dataset with the same shape as the test.h5 file
-        sample_data = np.zeros(1, dtype=subset_dt)
-        sample_file.create_dataset("submission", data=sample_data)
-        logging.info(f"Created {public / 'sample_submission.h5'} with sample submission data.")
+    if valid_subset_names != dataset_names:
+        raise ValueError(f"datasets.txt lists datasets without answers: {dataset_names}")
 
-    # move dataset to public
+    # Only the frequencies in datasets.txt: the others of the same datasets cover the test
+    # period (the solar/W test labels are the weekly sums of solar/D, solar/H and solar/10T).
     for ds_name in dataset_names:
-        ds_name = ds_name.split("/")[0]
-        item = raw / ds_name
-        item.rename(public / ds_name)
+        shutil.copytree(raw / ds_name, private / ds_name)
 
-    # for item in raw.iterdir():
-    #     # Skip the test.h5 file
-    #     if item.name == "test.h5":
-    #         continue
+    # The test windows, built from the full series as the grader builds them, are the answers.
+    test = pw.gift_windows(private, private / "dataset.py", dataset_names, with_labels=True)
+    check_windows(test, load_answers(private / "test.h5"))
 
-    #     if item.is_file():
-    #         item.rename(public / item.name)
-    #     elif item.is_dir():
-    #         item.rename(public / item.name)
+    # public: each series up to its first test window (the series of `validation_dataset` of
+    # the full data), in a form the agent environment's `datasets` reads
+    module = pw.load_gift_dataset_module(private / "dataset.py")
+    meta = []
+    for ds_name in dataset_names:
+        ds = module.Dataset(name=ds_name, term="short", storage_path=str(private))
+        h, w = int(ds.prediction_length), int(ds.windows)
+        lengths = [len(entry["target"]) for entry in ds.hf_dataset]
+        cut = [n - h * w for n in lengths]
+        if min(cut) < 1:
+            raise ValueError(f"{ds_name}: a series is shorter than its test windows")
+        predictor_prepare.cut_gift_dataset(private / ds_name, public / ds_name, cut)
+        info = test.by_name[ds_name]
+        meta.append(
+            {
+                "name": ds_name,
+                "freq": str(ds.freq),
+                "prediction_length": h,
+                "series": len(lengths),
+                "test_windows_per_series": w,
+                "test_windows": info.n_windows,
+                "forecast_starts": len({x.clock for x in test.windows if x.dataset == ds_name}),
+                "public_length": {"min": min(cut), "max": max(cut)},
+            }
+        )
+    shutil.copy2(datasets_path, public / datasets_path.name)
+    predictor_prepare.patch_gift_dataset_py(dataset_prepare_path, public / "dataset.py")
+    _check_public(private, public, test, {m["name"]: m["test_windows_per_series"] for m in meta})
+    for m in meta:
+        m["validation_windows"] = m["test_windows"]
+    config = predictor_prepare.predictor_config(Path(__file__).parent)
+    predictor_prepare.write_common(
+        public, Path(__file__).parent / "grade.py", config, {"datasets": meta}, test.windows
+    )
+    logging.info(f"Wrote the public data (series cut before the test windows) to {public}")
+
+
+def _check_public(private: Path, public: Path, test: pw.WindowSet, windows: dict) -> None:
+    """Each public series is the full series up to its first test window, and the local check's
+    validation windows (the test's count, one test span earlier) end right there."""
+    numpy_had_object = "object" in vars(np)  # the public dataset.py adds it for datasets 2.1.0
+    full = pw.load_gift_dataset_module(private / "dataset.py").Dataset
+    cut = pw.load_gift_dataset_module(public / "dataset.py").Dataset
+    names = [d.name for d in test.datasets]
+    firsts = {}
+    for w in test.windows:
+        firsts.setdefault((w.dataset, w.series), w.t0)
+    for name in names:
+        a_ds = full(name=name, term="short", storage_path=str(private)).hf_dataset
+        b_ds = cut(name=name, term="short", storage_path=str(public)).hf_dataset
+        for s, (a, b) in enumerate(zip(a_ds, b_ds, strict=True)):
+            t, p = np.asarray(a["target"]), np.asarray(b["target"])
+            assert len(p) == firsts[(name, s)], (name, s)
+            assert np.array_equal(t[: len(p)], p, equal_nan=True), (name, s)
+            assert a["item_id"] == b["item_id"] and a["start"] == b["start"], (name, s)
+    val = pw.gift_windows(public, public / "dataset.py", names, windows=windows)
+    for d, v in zip(test.datasets, val.datasets, strict=True):
+        assert v.n_windows == d.n_windows, (d.name, v.n_windows, d.n_windows)
+    if not numpy_had_object:
+        del np.object
