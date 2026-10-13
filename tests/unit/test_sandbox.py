@@ -345,6 +345,15 @@ sandbox.write_json = _write_json
     assert not _grade_stomp(tmp_path, forge + STOMP_SUBMISSION).valid_submission
 
 
+def test_a_linked_submission_is_invalid(tmp_path):
+    competition = _stomp_competition(tmp_path)
+    target = tmp_path / "code.py"
+    target.write_text(STOMP_SUBMISSION)
+    submission = tmp_path / "submission.py"
+    submission.symlink_to(target)  # was followed: it could name any file the grader can read
+    assert not grade_code(submission, competition).valid_submission
+
+
 def test_grading_stops_if_the_sandbox_could_read_the_answers(tmp_path, monkeypatch):
     shared = Path(tempfile.mkdtemp())  # the answers are readable for every user here
     try:
