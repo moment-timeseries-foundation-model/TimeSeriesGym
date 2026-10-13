@@ -160,6 +160,45 @@ def test_osic_leaderboard_lists_every_kaggle_team(tmp_path):
     assert not competition.grader.rank_score(-6.8416, leaderboard)["gold_medal"]  # rank 15
 
 
+COMPETITIONS = Path(__file__).resolve().parents[2] / "timeseriesgym" / "competitions"
+# The columns of Kaggle's leaderboard view, which lists a finished competition's final standings,
+# as `ensure_leaderboard_exists` writes them; m5's file keeps the team names. Kaggle's leaderboard
+# download (`Rank,TeamId,TeamName,LastSubmissionDate,...`) is the public leaderboard: the ashrae,
+# online-sales and sberbank files were that, and recruit's another competition's.
+LEADERBOARD_COLUMNS = (
+    ["scoreNullable", "teamId", "hasTeamName", "submissionDate", "score", "hasScore"],
+    ["teamId", "teamName", "submissionDate", "score"],
+)
+# The last date in the public data of the challenges whose data have dates (file, column): the
+# competition's leaderboard can only be later. recruit's old file was dated 2016-05-24 to
+# 2016-08-30.
+DATA_ENDS = {
+    "ashrae-energy-prediction": "2016-12-31",  # test_features.csv, timestamp
+    "child-mind-institute-detect-sleep-states": "2019-07-05",  # train_events.csv, timestamp
+    "m5-forecasting-accuracy": "2016-06-19",  # calendar.csv, date
+    "new-york-city-taxi-fare-prediction": "2015-06-30",  # test.csv, pickup_datetime
+    "recruit-restaurant-visitor-forecasting": "2017-05-31",  # date_info.csv, calendar_date
+    "sberbank-russian-housing-market": "2016-10-19",  # macro.csv, timestamp
+}
+
+
+@pytest.mark.parametrize(
+    "competition_id", sorted(p.parent.name for p in COMPETITIONS.glob("*/leaderboard.csv"))
+)
+def test_shipped_leaderboards_are_final_standings_of_their_competition(competition_id):
+    leaderboard = pd.read_csv(COMPETITIONS / competition_id / "leaderboard.csv")
+    if len(leaderboard) < 2:
+        return  # a placeholder, which get_leaderboard ignores
+    assert list(leaderboard.columns) in LEADERBOARD_COLUMNS
+    assert leaderboard["teamId"].is_unique
+    scores = leaderboard["score"]  # ranked best first: rank_score reads positions
+    assert scores.notna().all()
+    assert scores.is_monotonic_increasing or scores.is_monotonic_decreasing
+    if competition_id in DATA_ENDS:
+        first_day = pd.to_datetime(leaderboard["submissionDate"]).min().normalize()
+        assert first_day > pd.Timestamp(DATA_ENDS[competition_id])
+
+
 # ---------------------------------------------------------------- hyperparameter search
 
 
