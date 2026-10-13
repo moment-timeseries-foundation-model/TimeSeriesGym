@@ -184,6 +184,29 @@ read from the submission folder.
 timeseriesgym grade-code solution.py mit-bih-arrhythmia
 ```
 
+#### Agent Code Runs in a Sandbox
+
+Code challenges import and run the submitted `submission.py`, and hyperparameter-search
+challenges load the submitted models (unpickling and `torch.jit.load` can run code). The graders
+do this in a separate, confined process, never in the grading process, which holds the answers.
+That process gets a copy of the submission and of the public input data, no credentials, and
+limits on time, memory and file size, and it cannot read the challenge's private files. The
+grading process then compares what it computed with the answers. A submission whose code
+crashes, hangs or exceeds a limit is invalid.
+
+- Graded as root (e.g. in a container), agent code runs as the user `sandbox`. Create it with
+  `useradd --system --no-create-home sandbox`, or name another user in
+  `TIMESERIESGYM_SANDBOX_USER`. Grading as root without such a user stops with an error.
+- Graded as a normal user, agent code runs as that user, and Landlock (Linux 5.13 or later)
+  keeps it from the answers, the user's home directory and, on Linux 6.7 or later, TCP. Where
+  Landlock is not available, grading stops with an error, as agent code could read the answers;
+  `TIMESERIESGYM_SANDBOX_UNCONFINED=1` grades trusted submissions anyway.
+- `TIMESERIESGYM_SANDBOX_TIMEOUT_SEC` sets the time limit (default: 1800 s for code challenges,
+  600 s for hyperparameter searches), and `TIMESERIESGYM_SANDBOX_MEMORY_MB` the memory limit for
+  all of the sandbox's processes together (default: 3/4 of the machine's or container's memory).
+
+`timeseriesgym/sandbox.py` describes what each mode does and does not protect against.
+
 #### Evaluating Code Reasonableness
 
 The `evaluate-reasonableness` command uses an LLM-as-a-judge and simple rule-based heuristics to determine whether code makes a genuine modeling attempt rather than gaming the submission format (e.g., copying sample submissions, using random predictions).
