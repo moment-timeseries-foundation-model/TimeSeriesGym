@@ -13,11 +13,11 @@ Help improve cardiac diagnostics and potentially save lives!
 
 ## Grading Criteria - Detailed Requirements
 
-Your score is the accuracy of your `submission.csv` on the test set, provided that your solution passes **every** check of criteria 1-3 below; if any check fails, your score is 0. Each check is pass/fail. The checks read `train.py`, `model.py` and `conf/config.yaml` (comments are ignored, and your code is not run), and look for TensorBoard event files in your submission folder.
+Your score is the accuracy of your `submission.csv` on the test set, provided that your solution passes **every** check of criteria 1-3 below; if any check fails, your score is 0. Each check is pass/fail. The checks read `train.py`, `model.py` and `conf/config.yaml`, and look for TensorBoard event files in your submission folder. Your code is parsed, not run: the checks of `train.py` look at its statements, so code in comments or string literals does not count.
 
 ### 1. Traceability and Logging
 
-Implement logging and experiment tracking with TensorBoard. `train.py` must contain ALL of the following:
+Implement logging and experiment tracking with TensorBoard. The code of `train.py` must contain ALL of the following:
 
 - **TensorBoard Import**: `from torch.utils.tensorboard import SummaryWriter` (or `import torch.utils.tensorboard`)
 - **SummaryWriter Initialization**: a `SummaryWriter(...)` call with an appropriate log directory (e.g., `writer = SummaryWriter(log_dir='runs/ecg_classification')`)
@@ -26,7 +26,7 @@ Implement logging and experiment tracking with TensorBoard. `train.py` must cont
 
 And your submission folder must contain:
 
-- **Actual Log Files**: at least one TensorBoard event file (`events.out.tfevents.*`, as written by `SummaryWriter`) under `runs/`, `logs/` or `tb_logs/`. Run your training so that these files are written, and keep them.
+- **Actual Log Files**: at least one TensorBoard event file under `runs/`, `logs/` or `tb_logs/`, named `events.out.tfevents.*`, that holds at least one scalar logged with `add_scalar`, as `SummaryWriter` writes it (a valid TFRecord file of TensorBoard events). A placeholder file with such a name does not count. Run your training so that these files are written, and keep them.
 
 Close the writer with `writer.close()` at the end of training, so that the logs are complete.
 
@@ -44,11 +44,11 @@ Close the writer with `writer.close()` at the end of training, so that the logs 
 
 ### 3. Configuration Management
 
-Use Hydra for configuration management. `train.py` must contain ALL of the following:
+Use Hydra for configuration management. The code of `train.py` must contain ALL of the following:
 
 - **Hydra Import**: `import hydra` (or `from hydra import ...`)
-- **Hydra Decorator**: the `@hydra.main` decorator on your main function
-- **Config Import**: `OmegaConf` and/or `DictConfig`, imported from `omegaconf`
+- **Hydra Decorator**: the `@hydra.main(...)` decorator on your main function, written as `hydra.main`
+- **Config Import**: `OmegaConf` and/or `DictConfig`, imported from `omegaconf` (e.g., `from omegaconf import DictConfig`)
 - **Config Usage**: the model is built from the config's `model` section: `train.py` passes the section (`cfg.model`, `cfg['model']`) or a value read from it (e.g., `cfg.model.hidden_dims`) to a class or function of `model.py` or to `hydra.utils.instantiate`, or it passes the config to a class or function of `model.py` that reads the `model` section of its parameter (as `ECGClassifier(cfg)` in the example below, whose `__init__` reads `config.model`). Printing `cfg.model`, or only mentioning it, does not count.
 
 And your solution must contain:

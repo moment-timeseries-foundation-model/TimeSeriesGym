@@ -8,6 +8,7 @@ import ast
 import importlib
 import pickle
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -413,6 +414,42 @@ def main(cfg: DictConfig) -> None:
 """
 
 
+def _uvarint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte, n = n & 0x7F, n >> 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _field(number: int, payload: bytes) -> bytes:  # a length-delimited protobuf field
+    return _uvarint(number << 3 | 2) + _uvarint(len(payload)) + payload
+
+
+def _event_file(path: Path, scalars: str | None = "simple_value") -> Path:
+    """An event file as SummaryWriter writes it: TFRecord records of a file_version Event, then
+    an Event whose summary holds a scalar (or none, as after add_graph alone)."""
+    crc = _fe().masked_crc32c
+
+    def record(data: bytes) -> bytes:
+        length = struct.pack("<Q", len(data))
+        return length + struct.pack("<I", crc(length)) + data + struct.pack("<I", crc(data))
+
+    wall_time = _uvarint(1 << 3 | 1) + struct.pack("<d", 1.0)  # double wall_time = 1
+    data = record(wall_time + _field(3, b"brain.Event:2"))  # string file_version = 3
+    value = _field(1, b"Loss/train")  # Summary.Value: string tag = 1
+    if scalars == "simple_value":
+        value += _uvarint(2 << 3 | 5) + struct.pack("<f", 0.5)  # float simple_value = 2
+    else:  # metadata = 9, plugin_data = 1, plugin_name = 1: the newer tensor-style scalars
+        value += _field(9, _field(1, _field(1, b"scalars")))
+    if scalars is not None:  # int64 step = 2, Summary summary = 5, repeated Value value = 1
+        data += record(wall_time + _uvarint(2 << 3) + _uvarint(1) + _field(5, _field(1, value)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
 def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
     fe = _fe()
     commented = "\n".join(f"# {line}" for line in TRAIN.splitlines()) + "\nx = 1\n"
@@ -425,13 +462,56 @@ def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
     (tmp_path / "runs").mkdir()
     (tmp_path / "runs" / "x").write_text("not a log")  # any file used to count as a log
     assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(0.8)
-    (tmp_path / "runs" / "events.out.tfevents.1.host").write_bytes(b"\0")
+    _event_file(tmp_path / "runs" / "events.out.tfevents.1.host")
     assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(1.0)
 
-    assert ast.dump(ast.parse(fe.strip_comments(TRAIN + "  # note\n"))) == ast.dump(
-        ast.parse(TRAIN)
+
+def test_feature_rubric_does_not_count_code_in_strings():
+    fe = _fe()
+    quoted = f"CODE = {TRAIN!r}\n"  # every pattern the checks looked for, in a string literal
+    assert ast.literal_eval(ast.parse(quoted).body[0].value) == TRAIN
+    assert fe.evaluate_tensorboard_usage(quoted, Path("/nonexistent")) == 0.0  # was 0.8
+    assert fe.evaluate_hydra_usage(quoted, "model:\n  hidden: 8\n") == pytest.approx(0.2)  # was 0.8
+    aliased = TRAIN.replace("import hydra", "import hydra.utils").replace(
+        "from torch.utils.tensorboard import SummaryWriter", "import torch.utils.tensorboard as tb"
     )
-    assert "#" not in fe.strip_comments("def broken(:  # comment\n")
+    aliased = aliased.replace("SummaryWriter(", "tb.SummaryWriter(")
+    assert fe.evaluate_tensorboard_usage(aliased, Path("/nonexistent")) == pytest.approx(0.8)
+    assert fe.evaluate_hydra_usage(aliased, "model:\n  hidden: 8\n") == pytest.approx(1.0)
+
+
+def test_feature_rubric_needs_an_event_file_with_scalars(tmp_path):
+    fe = _fe()
+    # the CRC32C check value of b"123456789" is 0xE3069283; TFRecord rotates it and adds a delta
+    rotated = ((0xE3069283 >> 15) | (0xE3069283 << 17)) & 0xFFFFFFFF
+    assert fe.masked_crc32c(b"123456789") == (rotated + 0xA282EAD8) & 0xFFFFFFFF
+
+    runs = tmp_path / "runs"
+    real_file = _event_file(tmp_path / "real" / "events.out.tfevents.1.host")
+    real = real_file.read_bytes()
+    placeholders = {
+        "empty": b"",
+        "one byte": b"\0",  # passed before
+        "text": b"not an event file\n" * 10,
+        "truncated": real[:-3],
+        "a corrupted record": real[:20] + bytes([real[20] ^ 1]) + real[21:],
+        "no scalars (add_graph alone)": None,
+    }
+    for name, data in placeholders.items():
+        path = runs / "x" / f"events.out.tfevents.{len(name)}.host"
+        if data is None:
+            _event_file(path, scalars=None)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        assert fe.find_event_file(runs) is None, name
+        path.unlink()
+    (runs / "x" / "events.out.tfevents.9.link").symlink_to(real_file)
+    assert fe.find_event_file(runs) is None  # a symbolic link is not followed
+    for scalars in ("simple_value", "plugin"):
+        path = _event_file(runs / "y" / f"events.out.tfevents.{scalars}.host", scalars=scalars)
+        assert fe.find_event_file(runs) == path
+        path.unlink()
 
 
 def test_feature_rubric_accepts_the_type_hints_of_the_descriptions_examples():
@@ -554,8 +634,7 @@ def test_feature_enhancement_score_is_the_accuracy_gated_by_the_rubric(
     fe = _fe()
     project = tmp_path / "project"  # the shipped example, with the logs that training writes
     shutil.copytree(Path(fe.__file__).parent / "example", project)
-    (project / "runs" / "x").mkdir(parents=True)
-    (project / "runs" / "x" / "events.out.tfevents.1.host").write_bytes(b"\0")
+    _event_file(project / "runs" / "x" / "events.out.tfevents.1.host")
     answers = pd.read_csv(project / "submission.csv")
     answers.loc[:24, "label"] = (answers.loc[:24, "label"] + 1) % 5  # accuracy 0.75
     _flake8_reports(monkeypatch, fe)

@@ -1,9 +1,8 @@
 import ast
-import io
 import os
 import re
+import struct
 import subprocess
-import tokenize
 from pathlib import Path
 
 import pandas as pd
@@ -114,17 +113,16 @@ def grade_feature_enhancement(
     if not rubric_passed:
         logger.info("[SUGGESTION] The score is 0 until every check marked ✗ above passes")
 
+    training_tree = _parse(training_code_file)
     if tensorboard_score < 1.0:
         logger.info("[SUGGESTION] To improve TensorBoard score:")
-        if not re.search(
-            r"from\s+torch\.utils\.tensorboard\s+import\s+SummaryWriter", training_code_file
-        ):
+        if not imports_summary_writer(training_tree):
             logger.info("  - Import SummaryWriter from torch.utils.tensorboard")
-        if not re.search(r"SummaryWriter\s*\(", training_code_file):
+        if not calls_function(training_tree, "SummaryWriter"):
             logger.info("  - Initialize SummaryWriter with an appropriate log directory")
-        if not re.search(r"\.add_scalar\s*\(", training_code_file):
+        if not calls_method(training_tree, "add_scalar"):
             logger.info("  - Log training and validation metrics using writer.add_scalar()")
-        if not re.search(r"\.add_graph\s*\(", training_code_file):
+        if not calls_method(training_tree, "add_graph"):
             logger.info("  - Log model architecture using writer.add_graph()")
 
     if code_quality_score < 1.0:
@@ -138,9 +136,9 @@ def grade_feature_enhancement(
 
     if hydra_score < 1.0:
         logger.info("[SUGGESTION] To improve Hydra usage score:")
-        if not re.search(r"import\s+hydra", training_code_file):
+        if not (imports_hydra(training_tree) and decorated_with_hydra_main(training_tree)):
             logger.info("  - Import hydra and use the @hydra.main decorator")
-        if not re.search(r"OmegaConf|DictConfig", training_code_file):
+        if not uses_omegaconf(training_tree):
             logger.info("  - Use OmegaConf or DictConfig for configuration management")
         if not builds_model_from_config(training_code_file, model_code_file):
             logger.info("  - Build the model from the config's model section (e.g. cfg.model)")
@@ -172,12 +170,11 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
     max_score = 0.0
 
     logger.info("[TENSORBOARD] Starting TensorBoard usage evaluation")
-    training_file = strip_comments(training_file)  # commented-out code earns nothing
+    # The code is parsed, so comments and string literals earn nothing.
+    training_tree = _parse(training_file)
 
     # Check for TensorBoard import
-    has_tb_import = re.search(
-        r"from\s+torch\.utils\.tensorboard\s+import\s+SummaryWriter", training_file
-    ) or re.search(r"import\s+torch\.utils\.tensorboard", training_file)
+    has_tb_import = imports_summary_writer(training_tree)
 
     max_score += 0.2
     if has_tb_import:
@@ -187,7 +184,7 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
         logger.info("[TENSORBOARD] ✗ Missing TensorBoard import: 0.0/0.2")
 
     # Check for SummaryWriter initialization
-    has_writer_init = re.search(r"SummaryWriter\s*\(", training_file)
+    has_writer_init = calls_function(training_tree, "SummaryWriter")
     max_score += 0.2
     if has_writer_init:
         score += 0.2
@@ -196,7 +193,7 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
         logger.info("[TENSORBOARD] ✗ SummaryWriter is not initialized: 0.0/0.2")
 
     # Check for logging metrics with add_scalar
-    has_add_scalar = re.search(r"\.add_scalar\s*\(", training_file)
+    has_add_scalar = calls_method(training_tree, "add_scalar")
     max_score += 0.2
     if has_add_scalar:
         score += 0.2
@@ -205,7 +202,7 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
         logger.info("[TENSORBOARD] ✗ Metrics are not logged with add_scalar: 0.0/0.2")
 
     # Check for model graph logging
-    has_add_graph = re.search(r"\.add_graph\s*\(", training_file)
+    has_add_graph = calls_method(training_tree, "add_graph")
     max_score += 0.2
     if has_add_graph:
         score += 0.2
@@ -213,23 +210,24 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
     else:
         logger.info("[TENSORBOARD] ✗ Model graph is not logged with add_graph: 0.0/0.2")
 
-    # Check if there are actual TensorBoard logs in the submission
+    # Check if there are actual TensorBoard logs in the submission: an event file that holds
+    # logged scalars, not merely a file with an event file's name
     tensorboard_log_dirs = ["runs", "logs", "tb_logs"]
-    has_logs = False
+    event_file = None
     for log_dir in tensorboard_log_dirs:
         log_path = solution_path / log_dir
-        if log_path.is_dir() and any(log_path.rglob("events.out.tfevents.*")):
-            has_logs = True
-            log_files = list(log_path.glob("**/*"))
-            logger.info(f"[TENSORBOARD] Found {len(log_files)} log files in {log_dir}/")
-            break
+        if log_path.is_dir() and not log_path.is_symlink():
+            event_file = find_event_file(log_path)
+            if event_file is not None:
+                logger.info(f"[TENSORBOARD] Found an event file with scalars: {event_file}")
+                break
 
     max_score += 0.2
-    if has_logs:
+    if event_file is not None:
         score += 0.2
         logger.info("[TENSORBOARD] ✓ TensorBoard log files are present: 0.2/0.2")
     else:
-        logger.info("[TENSORBOARD] ✗ No TensorBoard log files found: 0.0/0.2")
+        logger.info("[TENSORBOARD] ✗ No TensorBoard event file with scalars found: 0.0/0.2")
         logger.info("[TENSORBOARD] Searched directories: " + ", ".join(tensorboard_log_dirs))
 
     logger.info(f"[TENSORBOARD] Final score: {score:.2f}/{max_score:.2f}")
@@ -449,18 +447,221 @@ def has_docstring_sections(trees, sections):
 YAML_COMMENT = re.compile(r"""("(?:[^"\\\n]|\\.)*"|'(?:[^'\n]|'')*')|(?:^|(?<=\s))#.*""", re.M)
 
 
-def strip_comments(code: str) -> str:
-    """Remove the comments from Python source, so that patterns in them are not matched."""
+# The checks of train.py's code use its syntax tree, so that comments and string literals do not
+# count (as in the rl_envs rubric, rl_envs/tsgym_rl/grader/fe_rubric.py). A tree that is None (the
+# file does not parse) passes none of them.
+
+
+def _name_of(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _walk(tree: ast.AST | None):
+    return ast.walk(tree) if tree is not None else ()
+
+
+def calls_method(tree: ast.AST | None, name: str) -> bool:
+    """A call `<expression>.<name>(...)`, e.g. `writer.add_scalar(...)`."""
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == name
+        for node in _walk(tree)
+    )
+
+
+def calls_function(tree: ast.AST | None, name: str) -> bool:
+    """A call `<name>(...)` or `<expression>.<name>(...)`."""
+    return any(isinstance(node, ast.Call) and _name_of(node.func) == name for node in _walk(tree))
+
+
+def imports_summary_writer(tree: ast.AST | None) -> bool:
+    """`from torch.utils.tensorboard import SummaryWriter` or `import torch.utils.tensorboard`."""
+    for node in _walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "torch.utils.tensorboard":
+            if node.level == 0 and any(alias.name == "SummaryWriter" for alias in node.names):
+                return True
+        if isinstance(node, ast.Import) and any(
+            alias.name == "torch.utils.tensorboard"
+            or alias.name.startswith("torch.utils.tensorboard.")
+            for alias in node.names
+        ):
+            return True
+    return False
+
+
+def imports_hydra(tree: ast.AST | None) -> bool:
+    """`import hydra` (or a submodule), or `from hydra... import ...`."""
+    for node in _walk(tree):
+        if isinstance(node, ast.Import) and any(
+            alias.name == "hydra" or alias.name.startswith("hydra.") for alias in node.names
+        ):
+            return True
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if node.module == "hydra" or node.module.startswith("hydra."):
+                return True
+    return False
+
+
+def decorated_with_hydra_main(tree: ast.AST | None) -> bool:
+    """A function decorated with `@hydra.main` or `@hydra.main(...)`."""
+    for node in _walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            for decorator in node.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr == "main"
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "hydra"
+                ):
+                    return True
+    return False
+
+
+def uses_omegaconf(tree: ast.AST | None) -> bool:
+    """The name `OmegaConf` or `DictConfig`, imported or used."""
+    names = {"OmegaConf", "DictConfig"}
+    return any(
+        _name_of(node) in names
+        or (isinstance(node, ast.alias) and node.name.rsplit(".", 1)[-1] in names)
+        for node in _walk(tree)
+    )
+
+
+# A TensorBoard event file is a TFRecord file: records of a uint64 length, the masked CRC32C of
+# the length, the data and the masked CRC32C of the data, each an Event protobuf (event.proto).
+# The reader below is the rl_envs rubric's.
+EVENT_FILE_PREFIX = "events.out.tfevents."
+MAX_EVENT_FILE_BYTES = 16 * 1024**2  # read per event file
+MAX_EVENT_FILES = 100  # checked per log directory
+
+
+def _crc32c_table() -> list[int]:
+    table = []
+    for i in range(256):
+        crc = i
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0x82F63B78 if crc & 1 else crc >> 1
+        table.append(crc)
+    return table
+
+
+_CRC32C_TABLE = _crc32c_table()
+
+
+def masked_crc32c(data: bytes) -> int:
+    """TFRecord's masked CRC32C (Castagnoli) checksum."""
+    crc = 0xFFFFFFFF
+    for byte in data:
+        crc = _CRC32C_TABLE[(crc ^ byte) & 0xFF] ^ (crc >> 8)
+    crc ^= 0xFFFFFFFF
+    return (((crc >> 15) | (crc << 17)) + 0xA282EAD8) & 0xFFFFFFFF
+
+
+def _varint(buf: bytes, i: int) -> tuple[int, int]:
+    value = shift = 0
+    while True:
+        if i >= len(buf) or shift > 63:
+            raise ValueError("bad varint")
+        value |= (buf[i] & 0x7F) << shift
+        shift += 7
+        i += 1
+        if not buf[i - 1] & 0x80:
+            return value, i
+
+
+def _protobuf_fields(buf: bytes) -> list[tuple[int, int, int | bytes]]:
+    """(field number, wire type, value) of a protobuf message: an int for varint and fixed-size
+    fields, bytes for length-delimited ones. Raises ValueError if it is not a message."""
+    fields, i = [], 0
+    while i < len(buf):
+        key, i = _varint(buf, i)
+        number, wire = key >> 3, key & 7
+        if wire == 0:
+            value, i = _varint(buf, i)
+        elif wire in (1, 5):
+            size = 8 if wire == 1 else 4
+            if i + size > len(buf):
+                raise ValueError("truncated field")
+            value, i = int.from_bytes(buf[i : i + size], "little"), i + size
+        elif wire == 2:
+            size, i = _varint(buf, i)
+            if i + size > len(buf):
+                raise ValueError("truncated field")
+            value, i = buf[i : i + size], i + size
+        else:
+            raise ValueError(f"wire type {wire}")
+        fields.append((number, wire, value))
+    return fields
+
+
+def _messages(fields: list, number: int) -> list[bytes]:
+    return [value for n, wire, value in fields if n == number and wire == 2]
+
+
+def _has_scalar(summary: bytes) -> bool:
+    """Whether a Summary holds a scalar: a value with a `simple_value` (as `add_scalar` writes
+    it), or one whose metadata names the `scalars` plugin."""
+    for value in _messages(_protobuf_fields(summary), 1):  # repeated Value value = 1
+        fields = _protobuf_fields(value)
+        if any(n == 2 and wire == 5 for n, wire, _ in fields):  # float simple_value = 2
+            return True
+        for metadata in _messages(fields, 9):  # SummaryMetadata metadata = 9
+            for plugin in _messages(_protobuf_fields(metadata), 1):  # PluginData plugin_data = 1
+                if b"scalars" in _messages(_protobuf_fields(plugin), 1):  # plugin_name = 1
+                    return True
+    return False
+
+
+def is_event_file_with_scalars(data: bytes) -> bool:
+    """Whether `data` is a TensorBoard event file that holds logged scalars: valid TFRecord
+    records, the first an Event whose file_version starts with `brain.Event:`, a later one an
+    Event whose summary holds a scalar."""
+    i, first = 0, True
     try:
-        tokens = [
-            token
-            for token in tokenize.generate_tokens(io.StringIO(code).readline)
-            if token.type != tokenize.COMMENT
-        ]
-        return tokenize.untokenize(tokens)
-    except (tokenize.TokenError, SyntaxError, ValueError):
-        # not valid Python: drop everything after a `#`
-        return re.sub(r"#.*", "", code)
+        while i + 12 <= len(data):
+            (length,) = struct.unpack_from("<Q", data, i)
+            if masked_crc32c(data[i : i + 8]) != struct.unpack_from("<I", data, i + 8)[0]:
+                return False
+            start, end = i + 12, i + 12 + length
+            if end + 4 > len(data):
+                return False
+            record = data[start:end]
+            if masked_crc32c(record) != struct.unpack_from("<I", data, end)[0]:
+                return False
+            fields = _protobuf_fields(record)
+            if first:
+                versions = _messages(fields, 3)  # string file_version = 3
+                if not versions or not versions[0].startswith(b"brain.Event:"):
+                    return False
+                first = False
+            elif any(_has_scalar(summary) for summary in _messages(fields, 5)):  # summary = 5
+                return True
+            i = end + 4
+    except ValueError:
+        return False
+    return False
+
+
+def find_event_file(log_dir: Path) -> Path | None:
+    """The first file named `events.out.tfevents.*` under `log_dir` (symbolic links are not
+    followed) that is an event file with logged scalars, or None."""
+    candidates = sorted(log_dir.rglob(f"{EVENT_FILE_PREFIX}*"))
+    candidates = [path for path in candidates if path.is_file() and not path.is_symlink()]
+    for path in candidates[:MAX_EVENT_FILES]:
+        try:
+            with open(path, "rb") as f:
+                data = f.read(MAX_EVENT_FILE_BYTES)
+        except OSError:
+            continue
+        if is_event_file_with_scalars(data):
+            return path
+    return None
 
 
 def _parse(code: str) -> ast.Module | None:
@@ -702,14 +903,13 @@ def evaluate_hydra_usage(training_file: str, config_file: str, model_file: str =
     max_score = 0.0
 
     logger.info("[HYDRA] Starting Hydra usage evaluation")
-    training_file = strip_comments(training_file)  # commented-out code earns nothing
+    # The code is parsed, so comments and string literals earn nothing.
+    training_tree = _parse(training_file)
     if config_file:
         config_file = YAML_COMMENT.sub(lambda m: m.group(1) or "", config_file)
 
     # Check for Hydra import
-    has_hydra_import = re.search(r"import\s+hydra", training_file) or re.search(
-        r"from\s+hydra", training_file
-    )
+    has_hydra_import = imports_hydra(training_tree)
     max_score += 0.2
     if has_hydra_import:
         score += 0.2
@@ -718,7 +918,7 @@ def evaluate_hydra_usage(training_file: str, config_file: str, model_file: str =
         logger.info("[HYDRA] ✗ Missing Hydra import: 0.0/0.2")
 
     # Check for @hydra.main decorator
-    has_hydra_decorator = re.search(r"@hydra\.main", training_file)
+    has_hydra_decorator = decorated_with_hydra_main(training_tree)
     max_score += 0.2
     if has_hydra_decorator:
         score += 0.2
@@ -727,7 +927,7 @@ def evaluate_hydra_usage(training_file: str, config_file: str, model_file: str =
         logger.info("[HYDRA] ✗ Missing @hydra.main decorator: 0.0/0.2")
 
     # Check for OmegaConf or DictConfig usage
-    has_config_usage = re.search(r"OmegaConf|DictConfig", training_file)
+    has_config_usage = uses_omegaconf(training_tree)
     max_score += 0.2
     if has_config_usage:
         score += 0.2
