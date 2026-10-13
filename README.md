@@ -244,28 +244,36 @@ The complete set of 31 gradeable challenges is available in
 
 ## Docker Environment
 
-TimeSeriesGym provides a Docker environment for reproducible agent execution and evaluation:
+TimeSeriesGym provides two Docker images for reproducible agent execution and evaluation, both
+built from `environment/Dockerfile`: the agents' base environment and the grader.
 
 ```bash
-# Build the base environment
+# Build the base environment of the agents' images (the default target)
 docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfile .
 
-# Run the environment
-docker run timeseriesgym-env
+# Build the grader
+docker build --platform=linux/amd64 --target grader -t timeseriesgym-grader \
+  -f environment/Dockerfile .
 ```
 
-The image is the agent's container, and everything copied into it is readable by the agent.
-`.dockerignore` therefore limits the build context to the `timeseriesgym` package, `environment/`,
-`pyproject.toml`, `README.md` and `LICENSE`, without `timeseriesgym/data/` (the Git LFS archive of
-raw challenge data, which holds test answers). Everything else in the checkout, such as `runs/`,
-prepared data and `.env` files, stays out of the image. Do not rely on other repository files
-inside it.
+An agent's container gets the challenge's public data, at `/home/data`, and nothing else from
+TimeSeriesGym: no private data, no graders and no TimeSeriesGym code. After the agent's container
+has stopped, `run_agent.py` grades the run in a separate container of `timeseriesgym-grader`, the
+only one that gets the challenge's private data (read-only, without network). See
+[agents/README.md](agents/README.md#grading-workflow), and its migration notes if you built agent
+images before this change.
+
+The agent's image copies only files of `environment/`. The grader copies the build context, which
+`.dockerignore` limits to the `timeseriesgym` package, `environment/`, `pyproject.toml`,
+`README.md` and `LICENSE`, without `timeseriesgym/data/` (the Git LFS archive of raw challenge
+data, which holds test answers). Everything else in the checkout, such as `runs/`, prepared data
+and `.env` files, stays out of both images. Do not rely on other repository files inside them.
 
 ### Environment Features
 
 - Conda environment with essential dependencies
 - Pre-installed common ML packages (configurable)
-- Grading server for submission validation
+- `validate_submission`: a format check against the sample submission (no answers, no score)
 - Agent instruction templates
 
 To build without heavy dependencies:
