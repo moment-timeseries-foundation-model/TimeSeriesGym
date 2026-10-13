@@ -692,5 +692,5 @@ package `timeseriesgym/predictor` (f5e9bda, e535b65, 56af8ea, b7626a4, 0e63610, 
 - OpenHands needs a container configuration with Sysbox, or `--allow-privileged-without-sysbox`,
   and `--agent-network bridge`.
 - Prepare gift-eval-short-horizon and time-series-library-long-horizon-forecast again.
-- The unit tests take about 7 minutes instead of 1: each sandboxed grading starts a Python
+- The unit tests take about 8 minutes instead of 1.5: each sandboxed grading starts a Python
   process that imports torch and pandas again (4 to 7 s).
