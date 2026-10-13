@@ -98,10 +98,20 @@ the medals are not comparable for those named under "Medals and leaderboards".
   after 25 epochs, 30 of 31 after 30 and 31 of 31 after 40. Ports with PyTorch's default
   momentum pass from 3 epochs, and the reference port with re-estimated statistics passes at
   every count. An untrained model and a one-layer convolution with average pooling score 0.49
-  to 0.51 at every count, so they still fail. A ResNet without its shortcuts also passes after
-  30 epochs: the accuracy test does not check the architecture. The threshold stays at 0.8,
-  because the accuracies are either about 0.5 or about 1.0. Grading a faithful port takes about
-  70 s.
+  to 0.51 at every count, so they still fail. A ResNet without its shortcuts also reached
+  accuracy 1.0 after 30 epochs; the architecture check below now fails it. The threshold stays
+  at 0.8, because the accuracies are either about 0.5 or about 1.0. Grading a faithful port
+  takes about 70 s.
+- **resnet-tensorflow-to-pytorch**: the test also checks the architecture (b402c61). A fresh
+  `ResNet` built with the grading arguments must give a gradient, in one forward and backward
+  pass on `x.pt`, to exactly as many trainable parameters as the Keras model of `resnet.py` has
+  with the same arguments: 504,258 here, as Keras' model summary counts them. Before, the
+  accuracy test alone accepted another model: on this data a linear model reaches accuracy 1.0,
+  and so does a ResNet without its shortcuts after 30 epochs. Every honest port measured uses
+  exactly 504,258: a port with Keras' settings, one with PyTorch's BatchNorm defaults, the
+  reference port and two Claude Code ports. A ResNet without its shortcuts uses 495,170, also
+  when it still defines the unused shortcut layers. The description states the rule and the
+  number.
 - **stomp-R-to-python**: each test also runs on a variant of its inputs, and passes only if the
   outputs match on both (d918a7c). The tests used only the public inputs, so outputs computed
   offline and pasted into the code passed. The variant reverses the inputs in time and maps
@@ -480,7 +490,8 @@ Three more, after reviews of agent runs:
   real downloads.
 - The integration tests are marked `network` (58249d6): `-m "not network"` deselects them.
 - `test_code_graders.py` covers the resnet sample budget and epoch count and the stomp variant
-  through the registry and `grade_code` (a296e48). 6 of its 13 tests fail before the fixes.
+  through the registry and `grade_code` (a296e48). 6 of its 13 tests fail before the fixes. The
+  architecture check adds 5 (b402c61); 2 of its 18 tests fail without that check.
 
 ## Packaging and CI
 
