@@ -54,6 +54,28 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
+### Running the CI Checks Locally
+
+GitHub Actions (`.github/workflows/ci.yml`) lints the code and runs the tests on Python 3.11 for
+every push and pull request. The same checks, locally:
+
+```bash
+# Lint and format check, with the ruff version CI uses (the dev extra allows any ruff >= 0.3.0)
+pip install ruff==0.6.9
+ruff check
+ruff format --check
+
+# Tests: CPU-only PyTorch first, so that pip skips the CUDA wheels
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+pip install -e .
+DEEPEVAL_TELEMETRY_OPT_OUT=YES python -m pytest -m "not network"
+```
+
+Apart from installing the dependencies, these tests need no network access and no Kaggle
+credentials. The tests marked `network`, in `tests/integration/`, download and prepare real
+competition data; with your Kaggle API token set up, run them with
+`python -m pytest tests/integration`.
+
 ### System Requirements
 
 - **Python**: 3.11 or higher (3.11.4 or later to run agents with `run_agent.py`)
