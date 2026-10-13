@@ -15,6 +15,7 @@ In this challenge, you will evaluate the time-series foundation model [Chronos](
    cd context-is-key-forecasting
    pip install -r requirements.txt
    ```
+   - `pip install -r requirements.txt` installs CiK's dependencies, not CiK itself: `cik_benchmark` and `run_baselines` import only if the root of the repository is on Python's module search path. When it runs a script file, Python adds the script's directory to that path, not the working directory, so a script saved outside the repository fails with `ModuleNotFoundError: No module named 'cik_benchmark'` (or `'run_baselines'`) even when you run it from the root. Save your scripts in the root of the repository, or run them with `PYTHONPATH=<path to context-is-key-forecasting>`.
 
 2. **Every subset in CiK provides an evaluation Task instance**
    - In `cik_benchmark/tasks/nn5_tasks.py`, the `__TASKS__` list contains all tasks for the NN5 dataset. Please run the evaluation on these Task instances.

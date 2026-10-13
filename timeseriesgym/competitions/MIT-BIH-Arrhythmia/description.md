@@ -32,7 +32,7 @@ The PhysioNet directory contains the entire MIT-BIH Arrhythmia Database. About h
 
 * **train_labels.h5** - Contains one-hot encoded labels for the training dataset in the "labels" dataset, of shape (N_train, 6). Each label corresponds to one of six classification categories: Normal (N), Premature Ventricular Contraction (V), Paced Beat (/), Atrial Premature Beat (A), Fusion Beat (F), and Noise (~).
 
-* **test_features.h5** - Contains the ECG signal segments for testing. It follows the same structure as the training features with a 'test' group containing two leads ("lead_1" and "lead_2") as datasets. Each lead contains ECG signal segments that have been preprocessed and normalized. These are the beats you need to classify.
+* **test_features.h5** - Contains the ECG signal segments for testing. It follows the same structure as the training features with a 'test' group containing two leads ("lead_1" and "lead_2") as datasets. Each lead contains ECG signal segments that have been preprocessed and normalized. These are the beats you need to classify. They come from 8 of the 48 recordings (records 101, 105, 114, 118, 124, 201, 210 and 217), and the training beats from the other 40: no recording is in both, and the files do not say which recording a beat comes from.
 
 * **sample_submission.h5** - Template submission file in the required format. Contains a dataset named 'submission' with dimensions (N_test, 6), where each row represents a one-hot encoded prediction across the six classes for a test beat. Use this as a reference for formatting your submissions.
 

@@ -29,17 +29,24 @@ class GradingInput:
 
 
 class Grader:
-    def __init__(self, name: str, grade_fn: str) -> None:
+    def __init__(self, name: str, grade_fn: str, lower_is_better: bool | None = None) -> None:
         self.name = name
         self.grade_fn = import_fn(grade_fn)
+        self.lower_is_better = lower_is_better
         assert isinstance(self.name, str), "Grader name must be a string."
         assert len(self.name) > 0, "Grader name cannot be empty."
+        assert lower_is_better in (None, True, False), "Grader lower_is_better must be a bool."
 
-    def is_lower_better(self, leaderboard: pd.DataFrame) -> bool:
+    def is_lower_better(self, leaderboard: pd.DataFrame | None = None) -> bool | None:
         """
-        Determines if a lower score is better based on the leaderboard.
-        Returns True if lower scores are better, False otherwise.
+        Determines if a lower score is better: the config's `grader.lower_is_better`, or else
+        the leaderboard's order. Returns True if lower scores are better, False otherwise, and
+        None if neither is known.
         """
+        if self.lower_is_better is not None:
+            return self.lower_is_better
+        if leaderboard is None:
+            return None
         scores = leaderboard["score"]
         top_score = scores.iloc[0]
         bottom_score = scores.iloc[-1]
@@ -202,6 +209,11 @@ def _score_from_json(score):
     return float(score)
 
 
+def _bool_or_none(value):
+    """An unknown score direction stays None ("not known"); `bool(None)` reported it as False."""
+    return None if value is None else bool(value)
+
+
 @dataclass(frozen=True)
 class CompetitionReport:
     competition_id: str
@@ -217,7 +229,7 @@ class CompetitionReport:
     above_median: bool | None
     submission_exists: bool
     valid_submission: bool
-    is_lower_better: bool
+    is_lower_better: bool | None
     created_at: datetime
     submission_path: str
 
@@ -237,7 +249,7 @@ class CompetitionReport:
             "above_median": bool(self.above_median),
             "submission_exists": bool(self.submission_exists),
             "valid_submission": bool(self.valid_submission),
-            "is_lower_better": bool(self.is_lower_better),
+            "is_lower_better": _bool_or_none(self.is_lower_better),
             "created_at": self.created_at.isoformat(),  # Serialize datetime
             "submission_path": self.submission_path,
         }
@@ -259,7 +271,7 @@ class CompetitionReport:
             "above_median": bool(data["above_median"]),
             "submission_exists": bool(data["submission_exists"]),
             "valid_submission": bool(data["valid_submission"]),
-            "is_lower_better": bool(data["is_lower_better"]),
+            "is_lower_better": _bool_or_none(data["is_lower_better"]),
             "created_at": datetime.fromisoformat(data["created_at"]),
             "submission_path": data["submission_path"],
         }

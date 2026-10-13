@@ -15,7 +15,7 @@ from timeseriesgym.grade_helpers import CodeCompetitionReport, CompetitionReport
 from timeseriesgym.registry import Competition, Registry
 from timeseriesgym.registry import registry as default_registry
 from timeseriesgym.utils import (
-    MAX_H5_BYTES,
+    MAX_SUBMISSION_BYTES,
     InvalidSubmissionError,
     get_logger,
     get_null_rank_info,
@@ -37,11 +37,12 @@ def _ensure_prepared(competition: Competition) -> None:
         )
 
 
-def _max_h5_bytes(competition: Competition) -> int:
-    """What the datasets of an HDF5 submission may declare: 8 times the size of the answers file
-    (a submission holds the same entries, maybe in a wider dtype), within 64 MiB and MAX_H5_BYTES.
+def _max_submission_bytes(competition: Competition) -> int:
+    """What an HDF5 or .npy submission may declare: 8 times the size of the answers file (a
+    submission holds the same entries, maybe in a wider dtype), within 64 MiB and
+    MAX_SUBMISSION_BYTES.
     """
-    return min(MAX_H5_BYTES, max(64 * 2**20, 8 * competition.answers.stat().st_size))
+    return min(MAX_SUBMISSION_BYTES, max(64 * 2**20, 8 * competition.answers.stat().st_size))
 
 
 def _competition_report(
@@ -135,7 +136,7 @@ def grade_sample(path_to_submission: Path, competition: Competition) -> Competit
     submission_exists = path_to_submission.is_file()
     try:
         _check_suffix(path_to_submission, competition)
-        submission_file = load_submissions(path_to_submission, _max_h5_bytes(competition))
+        submission_file = load_submissions(path_to_submission, _max_submission_bytes(competition))
     except Exception as e:  # e.g. a ragged CSV: invalid, rather than aborting a whole batch
         logger.warning(f"Invalid submission {path_to_submission}: {e}")
         score = None
@@ -149,10 +150,9 @@ def grade_sample(path_to_submission: Path, competition: Competition) -> Competit
 
     if competition_leaderboard is not None:
         rank_info = competition.grader.rank_score(score, competition_leaderboard)
-        is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
     else:
         rank_info = get_null_rank_info()
-        is_lower_better = None
+    is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
 
     return _competition_report(
         competition,
@@ -207,7 +207,7 @@ def grade_hyperparameter_search(
     # (inherited) competition leaderboard's scale, so it is not ranked: ranking it against an
     # RMSPE leaderboard counted -inf (an invalid search) as a gold medal.
     rank_info = get_null_rank_info()
-    is_lower_better = False
+    is_lower_better = competition.grader.is_lower_better()
 
     return _competition_report(
         competition,
@@ -246,7 +246,7 @@ def grade_feature_enhancement(
         submission_path=path_to_submission_folder,
         submission_exists=path_to_submission_folder.is_dir(),
         valid_submission=score is not None,
-        is_lower_better=False,
+        is_lower_better=competition.grader.is_lower_better(),
     )
 
 
@@ -327,7 +327,7 @@ def _validate_prediction_file(submission: Path, competition: Competition) -> tup
         return True, "Submission is valid. (It is checked when the submission folder is graded.)"
     try:
         score = grade_fn(
-            submission=load_submissions(submission, _max_h5_bytes(competition)),
+            submission=load_submissions(submission, _max_submission_bytes(competition)),
             answers=load_answers(competition.answers),
         )
     except Exception as e:

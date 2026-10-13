@@ -12,7 +12,7 @@ While isolated, infrequent PVCs are generally benign, frequent occurrences with 
 ### Technical Approach
 You will:
 
-- Implement six domain expert-defined heuristics as Labeling Functions (LFs)
+- Implement domain expert-defined heuristics as Labeling Functions (LFs): the original study used six, and five of them can be computed on the beats provided here
 - Use Snorkel, an open-source library, to model these heuristics within a factor graph framework
 - Generate probabilistic labels for each heartbeat instance
 
@@ -72,14 +72,16 @@ On an ECG, a PVC beat typically shows:
 
 ## Implementing Labeling Functions
 
-Based on these characteristics, we can implement six key heuristics as labeling functions:
+Based on these characteristics, the original study implemented six key heuristics as labeling functions:
 
-1. R-wave appears earlier than usual
+1. R-wave appears earlier than usual (this one cannot be computed here: each beat is a separate window, with no beat times or RR intervals)
 2. R-wave is taller than usual
 3. R-wave is wider than usual
 4. QRS-vector is directed opposite to the ST-vector
 5. QRS-complex is inverted
 6. Inverted R-wave is taller than usual
+
+These heuristics describe PVCs in the complete recordings of the original study. The beats here were prepared differently (fixed windows centred on a detected peak, cut from signals standardized per recording; see File Descriptions), so check on the data whether, and in which direction, a heuristic separates the beats before you rely on it.
 
 ![Example Labeling Functions](assets/Figure_3.jpg)
 
@@ -94,10 +96,10 @@ https://geekymedics.com/understanding-an-ecg/:
 
 To implement these heuristics effectively:
 1. **Signal Pre-processing**: Begin by removing baseline wandering using a forward/backward, fourth-order high-pass Butterworth filter.
-2. **Heartbeat Segmentation**: Segment ECG signals into individual beats by considering the time between alternate QRS-complexes as a heartbeat.
+2. **Heartbeat Segmentation**: The original study segmented each recording into beats, taking the time between alternate QRS-complexes as a heartbeat. Here the beats are already segmented, as fixed windows of 256 samples (see File Descriptions).
 3. **Feature Extraction**: Determine precise locations of QRS-complexes and T-waves using peak finding algorithms and RANSAC for baseline detection.
-4. **Threshold Determination**: For each heuristic, determine appropriate thresholds. For example, to identify an "early R-wave", use the Minimum Covariance Determinant algorithm to find the covariance of the most-normal subset of the frequency histogram, then set the threshold at 2 standard deviations from the estimated mean.
-5. **Patient-Specific Calibration**: To account for inter-patient variability, compute subject-specific thresholds for each heuristic automatically.
+4. **Threshold Determination**: For each heuristic, determine appropriate thresholds. For example, to identify a "wide R-wave", use the Minimum Covariance Determinant algorithm to find the covariance of the most-normal subset of the R-wave widths, then set the threshold at 2 standard deviations from the estimated mean.
+5. **Patient-Specific Calibration**: To account for inter-patient variability, the original study computed subject-specific thresholds for each heuristic. That is not possible here: the beats carry no record or patient ids, so the thresholds have to be set over all beats.
 
 You **MUST** use Snorkel to aggregate labeling function outputs. To install Snorkel, we recommend using pip:
 ```bash
@@ -108,8 +110,10 @@ pip install snorkel
 
 ### train_features.csv
 - Contains unlabeled ECG heartbeat segments that participants must classify
-- Each heartbeat is represented as a 256-point time series from modified limb lead II (MLII) ECG recordings
-- All signals have been preprocessed and normalized for consistency
+- Each heartbeat is a window of 256 consecutive samples (about 0.71 s at the database's 360 samples per second) of a recording's upper signal, in most recordings a modified limb lead II (MLII). The window is centred on a peak that a peak detector found in that signal (`scipy.signal.find_peaks`, with peaks at least 150 samples apart): for most beats the R peak, at column `128`
+- Normalization: each recording's whole signal was standardized (mean 0, standard deviation 1 over the recording) before the windows were cut; the windows themselves were not rescaled
+- Only the windows are provided: there are no RR intervals, beat times or record (patient) ids. The rows follow the order of the recordings and, within a recording, of time, but where one recording ends is not marked, and as most normal beats were left out, neighbouring rows are often not neighbouring beats
+- Selection: the beats come from 40 of the database's 48 recordings. Only windows with exactly one annotation, a normal beat or a PVC, were kept: all PVC windows, but each normal-beat window only with probability 0.15. PVCs are therefore a much larger share of the beats here than in the original recordings, where most beats are normal
 - File structure:
   - Column 1: Unique heartbeat identifier (ID)
   - Columns 2-257: Time series values representing a single heartbeat waveform

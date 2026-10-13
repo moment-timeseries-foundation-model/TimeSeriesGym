@@ -11,6 +11,9 @@ from timeseriesgym.grade import grade_sample
 from timeseriesgym.registry import Registry, registry
 from timeseriesgym.utils import in_ci
 
+# every test downloads and prepares the real competition data
+pytestmark = pytest.mark.network
+
 
 @pytest.fixture(scope="session")
 def tmp_dir():

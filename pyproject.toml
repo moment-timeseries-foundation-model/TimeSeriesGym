@@ -33,6 +33,7 @@ dependencies = [
   "pyquaternion>=0.9.9",
   "shapely>=2.0.5",
   "numpy==2.0.2",
+  "h5py>=3.11",
   "torch==2.6.0",
   "xgboost==2.1.1",
   "datasets==3.4.1",
@@ -53,7 +54,7 @@ timeseriesgym = "timeseriesgym.cli:main"
 
 [project.optional-dependencies]
 formatters = ["black>=23.3", "isort>=5.13"]
-dev = ["pytest>=8.2", "mypy>=1.10", "pre-commit>=3.7", "ruff>=0.3.0"]
+dev = ["pytest>=8.2", "mypy>=1.10", "pre-commit>=3.7", "ruff==0.6.9"]
 
 [tool.setuptools.package-data]
 timeseriesgym = ["competitions/**/*"]

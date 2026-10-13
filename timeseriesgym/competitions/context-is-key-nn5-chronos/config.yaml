@@ -12,6 +12,7 @@ dataset:
 
 grader:
   name: custom
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.context-is-key-nn5-chronos.grade:grade
 
 preparer: timeseriesgym.competitions.context-is-key-nn5-chronos.prepare:prepare

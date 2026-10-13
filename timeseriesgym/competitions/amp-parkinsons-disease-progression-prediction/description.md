@@ -79,6 +79,8 @@ where:
 
 The absolute difference between *A<sub>t</sub>* and *F<sub>t</sub>* is divided by half the sum of absolute values of the actual value plus one, *A<sub>t</sub>* + 1, and the forecast value plus one, *F<sub>t</sub>* + 1. The value of this calculation is summed for every fitted point *t* and divided again by the number of fitted points *n*.
 
+Medal thresholds come from the final Kaggle leaderboard, which was scored on Kaggle's hidden test set. The test set here is 10% of the patients in the competition's training data, so medals are only a rough guide to where a score would rank on Kaggle.
+
 ## Prizes
 - 1st Place - $25,000
 - 2nd Place - $20,000

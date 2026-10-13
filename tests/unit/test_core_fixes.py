@@ -373,6 +373,37 @@ def test_agent_environment_has_the_packages_of_shipped_helpers():
     assert "python-dotenv" in names
 
 
+def test_package_modules_import_only_declared_dependencies():
+    import ast
+    import importlib.metadata
+    import tomllib
+
+    def normalized(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    requirements = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["dependencies"]
+    declared = {normalized(re.split(r"[\s<>=!~;\[]", line)[0]) for line in requirements}
+    distributions = importlib.metadata.packages_distributions()
+    undeclared = set()
+    for path in sorted((REPO / "timeseriesgym").glob("*.py")):
+        for node in ast.parse(path.read_text()).body:  # module-level imports run on import
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                modules = [node.module]
+            else:
+                continue
+            for top in {module.split(".")[0] for module in modules}:
+                if top in sys.stdlib_module_names or top == "timeseriesgym":
+                    continue
+                for distribution in distributions.get(top, [top]):
+                    if normalized(distribution) not in declared:
+                        undeclared.add((path.name, normalized(distribution)))
+    # h5py (utils.py) was only installed as a dependency of tensorflow. tqdm is not declared
+    # either; kaggle, datasets and others install it.
+    assert {distribution for _, distribution in undeclared} <= {"tqdm"}, sorted(undeclared)
+
+
 # ---------------------------------------------------------------- grading reports
 
 
@@ -423,6 +454,27 @@ def test_grading_report_directory_is_created_with_its_parents(tmp_path):
     out = tmp_path / "new" / "results"  # failed after grading: `new` did not exist
     grade_jsonl(_jsonl(tmp_path / "s.jsonl", [entry]), out, Registry(data))
     assert len(list(out.glob("*_grading_report.json"))) == 1
+
+
+def test_reports_give_the_direction_of_the_score_without_a_leaderboard(tmp_path):
+    data = tmp_path / "data"
+    expected = {  # no leaderboard, a placeholder, a real one
+        "csdi-reproduce-pm25": True,
+        "time-series-library-long-horizon-forecast": True,
+        "ucr-anomaly-detection": False,
+        "new-york-city-taxi-fare-prediction": True,
+    }
+    entries = []
+    for competition_id in expected:
+        _prepared(data, competition_id, b"x")
+        missing = tmp_path / f"{competition_id}.csv"
+        entries.append({"competition_id": competition_id, "submission_path": str(missing)})
+    out = tmp_path / "reports"
+    grade_jsonl(_jsonl(tmp_path / "s.jsonl", entries), out, Registry(data))
+    (report_file,) = out.iterdir()
+    reports = json.loads(report_file.read_text())["competition_reports"]
+    # was false for the first three: bool(None), as the direction came from a leaderboard only
+    assert {r["competition_id"]: r["is_lower_better"] for r in reports} == expected
 
 
 def test_dict_scores_are_reported_as_json_objects():
@@ -1035,16 +1087,16 @@ def _declared_only(path: Path, n_values: int) -> Path:
 
 
 def test_h5_submissions_cannot_declare_more_data_than_the_cap(tmp_path):
-    from timeseriesgym.utils import MAX_H5_BYTES
+    from timeseriesgym.utils import MAX_SUBMISSION_BYTES
 
-    path = _declared_only(tmp_path / "submission.h5", MAX_H5_BYTES // 8 + 1)
+    path = _declared_only(tmp_path / "submission.h5", MAX_SUBMISSION_BYTES // 8 + 1)
     assert path.stat().st_size < 10_000
     with pytest.raises(InvalidSubmissionError, match="more than"):  # was read into memory
         load_submissions(path)
     small = _declared_only(tmp_path / "small.h5", 1000)
-    assert np.array_equal(load_submissions(small, max_h5_bytes=8000)["x"], np.zeros(1000))
+    assert np.array_equal(load_submissions(small, max_bytes=8000)["x"], np.zeros(1000))
     with pytest.raises(InvalidSubmissionError, match="more than 7999 bytes"):
-        load_submissions(small, max_h5_bytes=7999)
+        load_submissions(small, max_bytes=7999)
 
 
 def test_h5_submissions_are_capped_by_the_size_of_the_answers(tmp_path):
@@ -1072,3 +1124,55 @@ def test_validation_does_not_follow_h5_links_to_the_answers(tmp_path):
         f["submission"] = h5py.ExternalLink(str(competition.answers), "labels")
     valid, message = validate_submission(submission, competition)
     assert not valid and "ExternalLink" in message  # was valid: the answers graded themselves
+
+
+# ---------------------------------------------------------------- .npy submissions
+
+
+def _npy_header(path: Path, shape: tuple, stored: int = 0) -> Path:
+    """A float64 .npy file with the header of `shape` followed by `stored` values, written as a
+    sparse file: they read as zeros."""
+    with open(path, "wb") as f:
+        np.lib.format.write_array_header_1_0(
+            f, {"descr": "<f8", "fortran_order": False, "shape": shape}
+        )
+        f.truncate(f.tell() + 8 * stored)
+    return path
+
+
+def test_npy_submissions_cannot_declare_more_data_than_the_cap(tmp_path):
+    path = _npy_header(tmp_path / "submission.npy", (2**40,))  # 8 TiB declared in 128 bytes
+    with pytest.raises(InvalidSubmissionError, match="more than"):  # checked on the header
+        load_submissions(path)
+    small = tmp_path / "small.npy"
+    np.save(small, np.arange(1000.0))
+    assert np.array_equal(load_submissions(small, max_bytes=8000), np.arange(1000.0))
+    with pytest.raises(InvalidSubmissionError, match="more than 7999 bytes"):
+        load_submissions(small, max_bytes=7999)
+
+
+@pytest.mark.parametrize("how", ["zip", "truncated"])
+def test_npy_submissions_must_be_complete_arrays(tmp_path, how):
+    path = tmp_path / "submission.npy"
+    if how == "zip":  # np.load returned an NpzFile, whose members it reads on access
+        with open(path, "wb") as f:
+            np.savez(f, submission=np.zeros(3))
+    else:  # a ValueError from np.load
+        _npy_header(path, (1000,), stored=10)
+    with pytest.raises(InvalidSubmissionError, match="not a .npy array|less data"):
+        load_submissions(path)
+
+
+def test_npy_submissions_are_capped_by_the_size_of_the_answers(tmp_path):
+    answers = tmp_path / "answers.npy"
+    np.save(answers, np.zeros(50))
+    competition = _prepared(
+        tmp_path / "data", "moment-anomaly-detection-score", answers.read_bytes()
+    )
+    # 100 MiB of zeros in a sparse file, for 50 answers: np.load read all of it
+    n_values = 100 * 2**20 // 8
+    submission = _npy_header(tmp_path / "submission.npy", (n_values,), stored=n_values)
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "more than 67108864 bytes" in message
+    np.save(submission, np.zeros(50))
+    assert validate_submission(submission, competition)[0]
