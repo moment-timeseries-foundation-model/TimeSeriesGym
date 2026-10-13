@@ -313,3 +313,14 @@ def test_prepare_keeps_each_windows_scale_and_seasonal_naive_forecast(tmp_path):
     with h5py.File(public / "sample_submission.h5") as f:
         sample = f["submission"][()]
     assert np.isfinite(_grade(sample, answers))
+
+
+def test_the_leaderboard_is_a_placeholder_at_the_seasonal_naive_score():
+    from timeseriesgym.data import get_leaderboard
+    from timeseriesgym.registry import registry
+
+    competition = registry.get_competition("gift-eval-short-horizon")
+    rows = pd.read_csv(competition.leaderboard)
+    # the MAPE placeholder (score 0) is not on the new scale; one row is never ranked
+    assert rows[["teamName", "score"]].values.tolist() == [["seasonal_naive", 1.0]]
+    assert get_leaderboard(competition) is None
