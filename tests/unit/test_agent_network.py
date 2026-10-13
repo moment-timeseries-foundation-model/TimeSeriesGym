@@ -7,6 +7,7 @@ tests/integration/test_agent_network.py.
 import importlib
 import json
 import logging
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -205,6 +206,20 @@ def _registry_with(tmp_path, monkeypatch, entry):
     return Registry()
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"env_vars": {"OPENAI_API_KEY": "${{ secrets.TEST_OPENAI_KEY }}"}},
+        {"kwargs_type": "argparse", "kwargs": {"api-key": "${{ secrets.TEST_OPENAI_KEY }}"}},
+    ],
+)
+def test_agents_cannot_put_secrets_in_their_container(tmp_path, monkeypatch, entry):
+    monkeypatch.setenv("TEST_OPENAI_KEY", HOST_KEYS["openai"])
+    registry = _registry_with(tmp_path, monkeypatch, entry)
+    with pytest.raises(ValueError, match="model_proxy"):
+        registry.get_agent("x")
+
+
 def test_an_agents_proxy_config_is_parsed_and_never_printed(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_OPENAI_KEY", HOST_KEYS["openai"])
     proxy = {"providers": {"openai": {"key": "${{ secrets.TEST_OPENAI_KEY }}", "models": ["m"]}}}
@@ -212,3 +227,29 @@ def test_an_agents_proxy_config_is_parsed_and_never_printed(tmp_path, monkeypatc
     assert agent.model_proxy["keys"] == {"openai": HOST_KEYS["openai"]}
     assert HOST_KEYS["openai"] not in repr(agent)
     assert all(HOST_KEYS["openai"] not in str(v) for v in agent.env_vars.values())
+
+
+def _model_kwargs(kwargs: dict) -> set[str]:
+    """The model ids an agent's kwargs name (aide, MLAgentBench, OpenHands)."""
+    return {str(v) for k, v in kwargs.items() if re.search(r"(model|llm-name)$", k)}
+
+
+def test_shipped_agents_reach_their_models_through_the_proxy_only(monkeypatch):
+    from agents.registry import registry
+
+    for var in ("OPENAI", "ANTHROPIC", "OPENROUTER", "GEMINI"):
+        monkeypatch.setenv(f"{var}_API_KEY", f"test-{var.lower()}-key")
+    ids = []
+    for path in sorted((REPO / "agents").glob("*/config.yaml")):
+        contents = yaml.safe_load(path.read_text())
+        ids += [k for k, v in contents.items() if k != "defaults" and "start" in (v or {})]
+    assert {"aide", "aide/claude-3-5-sonnet", "mlagentbench", "openhands", "dummy"} <= set(ids)
+    for agent_id in ids:
+        agent = registry.get_agent(agent_id)
+        models = _model_kwargs(agent.kwargs)
+        if agent.model_proxy is None:
+            assert not models, agent_id
+            continue
+        allowed = set().union(*agent.model_proxy["models"].values())
+        assert models <= allowed, agent_id  # else the proxy refuses the agent's own calls
+        assert not any(v.startswith("test-") for v in map(str, agent.env_vars.values()))

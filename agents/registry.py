@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 from agents.model_proxy import parse_config as parse_model_proxy_config
-from agents.utils import parse_env_var_values
+from agents.utils import is_env_var
 from timeseriesgym.utils import get_logger
 
 logger = get_logger(__name__)
@@ -85,9 +85,16 @@ class Registry:
             env_vars = contents[agent_id].get("env_vars", {})
             privileged = contents[agent_id].get("privileged", False)
 
-            # env vars can be used both in kwargs and env_vars
-            kwargs = parse_env_var_values(kwargs)
-            env_vars = parse_env_var_values(env_vars)
+            # kwargs and env_vars reach the container, where agent code can read them: secrets
+            # (API keys) go to the model proxy, which keeps them on the host
+            for section, values in (("kwargs", kwargs), ("env_vars", env_vars)):
+                secret = sorted(k for k, v in values.items() if is_env_var(v))
+                if secret:
+                    raise ValueError(
+                        f"Agent `{agent_id}`: {section} {secret} would put a secret in the agent's "
+                        "container; give provider API keys to `model_proxy` instead (see "
+                        "agents/README.md)."
+                    )
             model_proxy = contents[agent_id].get("model_proxy")
             if model_proxy is not None:
                 model_proxy = parse_model_proxy_config(model_proxy)

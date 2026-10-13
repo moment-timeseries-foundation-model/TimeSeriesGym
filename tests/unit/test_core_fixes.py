@@ -294,6 +294,18 @@ def test_openhands_setup_script_runs(tmp_path):
     assert "--max_steps" in out.stdout
 
 
+def test_openhands_calls_its_model_through_the_proxy():
+    # the model proxy's URL is in OPENAI_BASE_URL; OPENAI_API_KEY holds a dummy
+    openhands = REPO / "agents" / "openhands"
+    spec = importlib.util.spec_from_file_location("oh_templates", openhands / "templates.py")
+    templates = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(templates)
+    llm = templates.config_template.template.split("[llm]")[1].split("\n[")[0]
+    assert 'base_url="${base_url}"' in llm
+    assert "base_url=OPENAI_BASE_URL" in (openhands / "setup.py").read_text()
+    assert 'OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")' in (openhands / "setup.py").read_text()
+
+
 def test_openhands_root_build_script_is_not_agent_writable():
     openhands = REPO / "agents" / "openhands"
     dockerfile = (openhands / "Dockerfile").read_text()
