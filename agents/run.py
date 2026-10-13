@@ -1,5 +1,6 @@
 import json
 import logging
+import string
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from environment.utils import (
     create_competition_container,
     extract_from_container,
     extract_from_container_sysbox,
+    put_file,
 )
 from timeseriesgym.registry import Competition
 from timeseriesgym.utils import purple
@@ -21,6 +23,21 @@ from timeseriesgym.utils import purple
 CONSTANTS = dotenv_values(Path(__file__).parent.resolve() / ".shared_env")
 DATA_DIR = "/home/data"  # the competition's public data, in the agent's container
 READY_FILE = "/run/timeseriesgym-ready"  # environment/entrypoint.sh: /home is ready for the agent
+INSTRUCTIONS = Path(__file__).parents[1] / "environment" / "instructions.txt"
+INSTRUCTIONS_PATH = "/home/instructions.txt"  # in the agent's container
+NO_NETWORK = (
+    "- This container has no internet access: nothing can be downloaded or installed. Use the "
+    "packages that are installed and the data in `/home/data/`"
+)
+
+
+def instructions(network: str) -> str:
+    """The agents' general instructions (environment/instructions.txt), with the line on the
+    network of their container: "none", or the Docker network run_agent.py was given."""
+    line = NO_NETWORK
+    if network != "none":
+        line = f"- This container is on the Docker network `{network}`: it may reach the internet"
+    return string.Template(INSTRUCTIONS.read_text()).substitute(network_access=line)
 
 
 def save_output(container: Container, save_dir: Path, container_config: dict) -> Path:
@@ -115,6 +132,8 @@ def run_in_container(
     the contract of its format check, `validate_submission`. The outputs are saved to
     `run_dir` whatever the agent's exit code.
 
+    The agents' instructions are written into the container with a line on its network.
+
     The container is on the Docker network `network`; the default, "none", gives it no network.
     An agent with a `model_proxy` config calls its models through a model proxy for this run
     (agents/model_proxy.py), which keeps the API keys on the host.
@@ -172,6 +191,7 @@ def run_in_container(
     try:
         time_start = time.monotonic()
         install_contract(container, contract)
+        put_file(container, INSTRUCTIONS_PATH, instructions(network).encode())
         container.start()
         exit_code, _ = container.exec_run(
             ["timeout", "60", "sh", "-c", f"while [ ! -e {READY_FILE} ]; do sleep 1; done"]

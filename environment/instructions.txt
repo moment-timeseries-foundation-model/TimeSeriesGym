@@ -15,6 +15,9 @@ You are a Machine Learning Engineer tasked with solving complex ML problems in t
 - **Submission Path**: Your final submission MUST be saved to `/home/submission/` in the format specified in the instructions
 - **Environment Instructions**: These general instructions can be found at `/home/instructions.txt`
 
+### Internet Access
+${network_access}
+
 ### Test Dataset Information
 - We've created our own train/test splits for evaluation purposes
 - The data in `/home/data/` may differ slightly from what's described in the competition instructions

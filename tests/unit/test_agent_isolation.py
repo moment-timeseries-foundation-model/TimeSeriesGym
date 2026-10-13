@@ -447,7 +447,7 @@ class _FakeAgentContainer:
         self.events.append("remove")
 
 
-def _run_agent_phase(tmp_path, monkeypatch, container) -> tuple[dict, list]:
+def _run_agent_phase(tmp_path, monkeypatch, container, **options) -> tuple[dict, list]:
     agents_run = importlib.import_module("agents.run")
     created = {}
 
@@ -472,6 +472,7 @@ def _run_agent_phase(tmp_path, monkeypatch, container) -> tuple[dict, list]:
         retain_container=False,
         run_dir=run_dir,
         logger=LOGGER,
+        **options,
     )
     assert exit_code == 0
     return created, competition
@@ -487,9 +488,10 @@ def test_the_agents_container_gets_only_the_public_data(tmp_path, monkeypatch):
     assert str(competition.private_dir) not in json.dumps(passed, default=str)
     assert created["env_vars"] == {"COMPETITION_ID": "spaceship-titanic", "K": "v"}
 
-    # the format check's contract, written into the created container before it starts
-    assert container.events[:2] == ["put_archive", "start"]
-    ((path, data),) = container.archives
+    # the format check's contract (and the instructions), written into the created container
+    # before it starts
+    assert container.events[:3] == ["put_archive", "put_archive", "start"]
+    (path, data), _ = container.archives
     assert path == "/opt/timeseriesgym"
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
         (member,) = tar.getmembers()
@@ -502,6 +504,28 @@ def test_the_agents_container_gets_only_the_public_data(tmp_path, monkeypatch):
     # no grading server to wait for; the agent starts once the entrypoint has prepared /home
     (_, wait) = next(e for e in container.events if isinstance(e, tuple))
     assert "/run/timeseriesgym-ready" in wait[-1] and "5000" not in " ".join(wait)
+
+
+def _archived_file(data: bytes) -> tuple[tarfile.TarInfo, bytes]:
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        (member,) = tar.getmembers()
+        return member, tar.extractfile(member).read()
+
+
+@pytest.mark.parametrize("network", ["none", "bridge"])
+def test_the_instructions_say_whether_the_container_has_internet_access(
+    tmp_path, monkeypatch, network
+):
+    container = _FakeAgentContainer()
+    _run_agent_phase(tmp_path, monkeypatch, container, network=network)
+    (path, data) = container.archives[1]
+    member, text = _archived_file(data)
+    assert (path, member.name, member.mode) == ("/home", "instructions.txt", 0o644)
+    text = text.decode()
+    template = (REPO / "environment" / "instructions.txt").read_text()
+    assert "${network_access}" in template and "$" not in text
+    assert ("has no internet access" in text) == (network == "none")
+    assert ("Docker network `bridge`" in text) == (network == "bridge")
 
 
 def test_images_from_before_the_format_check_are_refused(tmp_path, monkeypatch):

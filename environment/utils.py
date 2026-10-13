@@ -1,6 +1,9 @@
+import io
 import json
 import os
+import posixpath
 import tarfile
+import time
 import uuid
 from pathlib import Path
 
@@ -144,6 +147,17 @@ def extract_from_container(container: Container, container_file_path: str, local
         logger.warning(f"Nothing found in container at {container_file_path}.")
     except Exception as e:
         logger.error(f"Error extracting output file: {e}")
+
+
+def put_file(container: Container, path: str, data: bytes, mode: int = 0o644) -> bool:
+    """Writes a file into a (created, maybe not yet started) container, owned by root. Returns
+    whether Docker accepted it; raises docker.errors.NotFound if its directory does not exist."""
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        info = tarfile.TarInfo(posixpath.basename(path))
+        info.size, info.mode, info.mtime = len(data), mode, int(time.time())
+        tar.addfile(info, io.BytesIO(data))
+    return container.put_archive(posixpath.dirname(path), archive.getvalue())
 
 
 def create_competition_container(

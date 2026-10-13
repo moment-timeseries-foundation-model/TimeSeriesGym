@@ -5,14 +5,12 @@ The contract describes the challenge's public sample submission (and, for folder
 files their graders read). It holds nothing from the private data, so the agent may read it.
 """
 
-import io
 import json
-import tarfile
-import time
 
 import docker
 from docker.models.containers import Container
 
+from environment.utils import put_file
 from environment.validate_submission import CONTRACT_PATH, describe_sample
 from timeseriesgym.registry import Competition
 from timeseriesgym.utils import get_module_dir, load_yaml
@@ -125,13 +123,8 @@ def submission_contract(
 def install_contract(container: Container, contract: dict) -> None:
     """Writes the contract to CONTRACT_PATH in the (created, not yet started) container."""
     data = json.dumps(contract, indent=1).encode()
-    archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w") as tar:
-        info = tarfile.TarInfo(CONTRACT_PATH.name)
-        info.size, info.mode, info.mtime = len(data), 0o644, int(time.time())
-        tar.addfile(info, io.BytesIO(data))
     try:
-        ok = container.put_archive(CONTRACT_PATH.parent.as_posix(), archive.getvalue())
+        ok = put_file(container, CONTRACT_PATH.as_posix(), data)
     except docker.errors.NotFound:
         ok = False
     if not ok:
