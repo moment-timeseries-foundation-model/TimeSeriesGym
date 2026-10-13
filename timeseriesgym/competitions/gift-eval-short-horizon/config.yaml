@@ -12,6 +12,7 @@ dataset:
 
 grader:
   name: seasonal-naive-normalized-mean-absolute-scaled-error
+  lower_is_better: true
   grade_fn: timeseriesgym.competitions.gift-eval-short-horizon.grade:grade
 
 preparer: timeseriesgym.competitions.gift-eval-short-horizon.prepare:prepare

@@ -11,6 +11,7 @@ dataset:
 
 grader:
   name: python-code-grading
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.resnet-tensorflow-to-pytorch.grade:grade_code
 
 preparer: timeseriesgym.competitions.resnet-tensorflow-to-pytorch.prepare:prepare

@@ -150,10 +150,9 @@ def grade_sample(path_to_submission: Path, competition: Competition) -> Competit
 
     if competition_leaderboard is not None:
         rank_info = competition.grader.rank_score(score, competition_leaderboard)
-        is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
     else:
         rank_info = get_null_rank_info()
-        is_lower_better = None
+    is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
 
     return _competition_report(
         competition,
@@ -208,7 +207,7 @@ def grade_hyperparameter_search(
     # (inherited) competition leaderboard's scale, so it is not ranked: ranking it against an
     # RMSPE leaderboard counted -inf (an invalid search) as a gold medal.
     rank_info = get_null_rank_info()
-    is_lower_better = False
+    is_lower_better = competition.grader.is_lower_better()
 
     return _competition_report(
         competition,
@@ -247,7 +246,7 @@ def grade_feature_enhancement(
         submission_path=path_to_submission_folder,
         submission_exists=path_to_submission_folder.is_dir(),
         valid_submission=score is not None,
-        is_lower_better=False,
+        is_lower_better=competition.grader.is_lower_better(),
     )
 
 

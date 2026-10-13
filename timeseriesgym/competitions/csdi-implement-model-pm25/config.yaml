@@ -12,6 +12,7 @@ dataset:
 
 grader:
   name: custom
+  lower_is_better: true
   grade_fn: timeseriesgym.competitions.csdi-implement-model-pm25.grade:grade
 
 preparer: timeseriesgym.competitions.csdi-implement-model-pm25.prepare:prepare

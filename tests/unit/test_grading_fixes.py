@@ -210,6 +210,65 @@ def test_shipped_leaderboards_are_final_standings_of_their_competition(competiti
         assert source.REVISION in (COMPETITIONS / competition_id / "description.md").read_text()
 
 
+# What each challenge's score rewards, from its description: True where a lower score is better
+LOWER_IS_BETTER = {
+    "LANL-Earthquake-Prediction": True,  # MAE
+    "MIT-BIH-Arrhythmia": False,  # accuracy
+    "MIT-BIH-Arrhythmia-Weak-Supervision": False,  # accuracy
+    "amp-parkinsons-disease-progression-prediction": True,  # SMAPE+1
+    "ashrae-energy-prediction": True,  # RMSLE
+    "child-mind-institute-detect-sleep-states": False,  # mean average precision
+    "context-is-key-moirai": False,  # 1 if the results match the reference
+    "context-is-key-nn5-chronos": False,  # 1 if the results match the reference
+    "csdi-implement-model-pm25": True,  # MAE
+    "csdi-reproduce-pm25": True,  # MAE
+    "g2net-gravitational-wave-detection": False,  # ROC AUC
+    "gift-eval-short-horizon": True,  # normalized MASE
+    "hms-harmful-brain-activity-classification": True,  # KL divergence
+    "m5-forecasting-accuracy": True,  # WRMSSE
+    "moment-anomaly-detection-score": False,  # 1 if the scores match the reference
+    "new-york-city-taxi-fare-prediction": True,  # RMSE
+    "online-sales": True,  # RMSLE
+    "optiver-realized-volatility-prediction": True,  # RMSPE
+    "optiver-realized-volatility-prediction-hyperparameter-search": False,  # improvement
+    "optiver-realized-volatility-prediction-missing": True,  # RMSPE
+    "osic-pulmonary-fibrosis-progression": False,  # Laplace log likelihood
+    "ptb-xl-classification-challenge": False,  # accuracy
+    "ptb-xl-classification-challenge-feature-enhancement": False,  # overall score
+    "ptb-xl-classification-challenge-hyperparameter-search": False,  # improvement
+    "recruit-restaurant-visitor-forecasting": True,  # RMSLE
+    "resnet-tensorflow-to-pytorch": False,  # tests passed
+    "sberbank-russian-housing-market": True,  # RMSLE
+    "spaceship-titanic": False,  # accuracy
+    "stomp-R-to-python": False,  # tests passed
+    "time-series-exam-1-1": False,  # accuracy
+    "time-series-library-itransformer-weather-forecast": False,  # 1 if pred.npy matches
+    "time-series-library-long-horizon-forecast": True,  # MSE
+    "ucr-anomaly-detection": False,  # adjusted F1
+    "ventilator-pressure-prediction": True,  # MAE
+    "ventilator-pressure-prediction-missing": True,  # MAE
+}
+
+
+def test_every_challenge_configures_the_direction_of_its_score(tmp_path):
+    from timeseriesgym.registry import Registry
+
+    registry = Registry(tmp_path)
+    assert sorted(LOWER_IS_BETTER) == sorted(registry.list_competition_ids())
+    for competition_id, lower_is_better in LOWER_IS_BETTER.items():
+        competition = registry.get_competition(competition_id)
+        # was taken from the leaderboard only: None, reported as False, without a real one
+        assert competition.grader.is_lower_better() is lower_is_better, competition_id
+        leaderboard = get_leaderboard(competition)
+        ranked = not (
+            competition.hyperparameter_search_config or competition.feature_enhancement_config
+        )  # these scores are not on the (inherited) leaderboard's scale
+        if leaderboard is not None and ranked:
+            scores = leaderboard["score"]
+            assert bool(scores.iloc[0] < scores.iloc[-1]) is lower_is_better, competition_id
+            assert competition.grader.is_lower_better(leaderboard) is lower_is_better
+
+
 def _fake_kaggle_api(rows: int, teams: int):
     """A Kaggle client whose leaderboard view gives `rows` rows for `x`, which has `teams` teams."""
     entries = [
