@@ -268,6 +268,24 @@ ba20262, 7c8ab69, 1982829, 9d33b49, 2fea25d, 7184ca2, ee128f2, fe08ba1, bf7d9c8,
 ddba7bf, c044e1d, 9e5e756, 7c12345 and b8026f5. They change what agents are told, not how they are
 graded.
 
+Three more, after reviews of agent runs:
+
+- **MIT-BIH-Arrhythmia-Weak-Supervision** (both descriptions; fffb8ed). Old: beats were "a
+  256-point time series ... preprocessed and normalized", and the heuristics included an early
+  R-wave and per-patient thresholds. New: each beat is a 256-sample window centred on a detected
+  peak (for most beats the R peak), cut from a recording standardized as a whole, with no RR
+  intervals, beat times or record ids; normal beats were kept with probability 0.15, so PVCs are a
+  much larger share than in the original recordings. The early R-wave and the per-patient
+  calibration are marked as not computable here, and each heuristic is to be checked on the data
+  first. Reason: agents assumed the original PVC share and tried heuristics the data cannot
+  support.
+- **MIT-BIH-Arrhythmia** (255d75b). New: the test beats come from 8 of the 48 recordings, none of
+  them in the training data. Reason: the split is by recording, and agents validated on random
+  training beats.
+- **context-is-key-nn5-chronos, context-is-key-moirai** (0921392). New: `cik_benchmark` and
+  `run_baselines` import only with the repository root on the module search path, so scripts
+  saved elsewhere need `PYTHONPATH`. Reason: agents' scripts failed with `ModuleNotFoundError`.
+
 ## Tests
 
 - The amp sample-score constant is 124.93847 (821b7cd).
