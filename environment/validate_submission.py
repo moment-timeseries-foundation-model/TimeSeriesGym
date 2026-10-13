@@ -18,6 +18,8 @@ CONTRACT_PATH:
 - .pkl: the sample's structure (keys, lengths, kinds of values), plain data only.
 - .py: valid Python; missing classes, functions and arguments the grader runs are noted.
 - Folders (hyperparameter search, feature enhancement): the files their grader reads.
+- Predictors (`/home/submission/predictor/`): the grader's own format check of the directory,
+  `predictor_tools/contract.py` in the public data, which parses predict.py and never runs it.
 
 Standalone (the standard library, and numpy, pandas or h5py for those formats): it runs in the
 agent's image, which has no TimeSeriesGym code.
@@ -132,6 +134,8 @@ def check(target: Path, contract: dict) -> tuple[Path, list[str]]:
         return path, notes + _check_file(path, contract["file"], contract)
     if kind == "folder":
         return _check_folder(target, contract)
+    if kind == "predictor":
+        return _check_predictor(target, contract)
     raise ValueError(f"unknown contract kind {kind!r}")
 
 
@@ -232,6 +236,58 @@ def _check_folder(target: Path, contract: dict) -> tuple[Path, list[str]]:
             if not (where / name).is_file():
                 notes.append(f"{where / name} does not exist; it counts toward the score")
     return target, notes
+
+
+def _check_predictor(target: Path, contract: dict) -> tuple[Path, list[str]]:
+    """Predictor challenges: the folder `predictor` of the submission folder (or another folder,
+    or its predict.py alone), with the grader's format check, which never imports or runs it."""
+    c = contract["predictor"]
+    graded = Path(contract["submission_dir"]) / c["dir"]
+    if target.is_dir() and _same_path(target, Path(contract["submission_dir"])):
+        target = graded
+    rules = _load_tool(Path(c["tools"]) / "contract.py")
+    notes = []
+    try:
+        if target.is_dir():
+            rules.check_predictor(target, int(c["max_bytes"]), int(c["max_files"]))
+        elif target.is_file() and target.suffix == ".py":
+            rules.check_entry(target)
+            notes.append(f"pass the folder {target.parent} to check all of its files")
+        elif target.is_file():
+            raise FormatError(
+                f"this challenge takes a predictor, the folder {graded} with predict.py (see "
+                "description.md), not a file of predictions"
+            )
+        else:
+            raise FormatError(f"{target} does not exist")
+    except (rules.ContractError, OSError) as e:
+        raise FormatError(str(e)) from None
+    folder = target if target.is_dir() else target.parent
+    if not _same_path(folder, graded):
+        notes.append(f"only {graded} is graded")
+    notes.append(
+        f"it was not run: `python {contract['data_dir']}/check_predictor.py` runs it as the "
+        "grader does, on validation windows"
+    )
+    return target, notes
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+def _load_tool(path: Path):
+    """A module of the challenge's public tools (standard library only), from the read-only
+    public data."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"_tsgym_{path.stem}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _check_csv(path: Path, c: dict, contract: dict) -> list[str]:

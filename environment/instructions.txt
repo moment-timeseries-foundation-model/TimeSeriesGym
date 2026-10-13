@@ -36,7 +36,7 @@ You are a Machine Learning Engineer tasked with solving complex ML problems in t
 
 ### Predictor Submissions
 - Some competitions take a **predictor** instead of a file of predictions: the directory `/home/submission/predictor/` with a `predict.py`, which the grader runs on test data that are not in `/home/data/`. Their `description.md` says so and gives the interface
-- For these, validate `/home/submission/predictor/predict.py` (the validator checks its format only), and run `python /home/data/check_predictor.py` to run the predictor as the grader does
+- For these, check the directory with `validate_submission /home/submission/predictor` (it checks the format only and never runs it), and run `python /home/data/check_predictor.py` to run the predictor as the grader does
 
 ### Final Submission
 - Once validated, ensure your final submission file remains at `/home/submission/`

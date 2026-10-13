@@ -94,6 +94,17 @@ def submission_contract(
         contract["files"] = {FEATURE_ENHANCEMENT_PREDICTIONS: _describe(competition, options)}
         contract["project_files"] = [fe["model_code_file"], fe["training_file"]]
         contract["optional_project_files"] = [f"conf/{fe['config_file']}"]
+    elif competition.predictor_config is not None:
+        from timeseriesgym.predictor.grading import settings
+
+        config = settings(competition)
+        contract["kind"] = "predictor"
+        contract["predictor"] = {
+            "dir": "predictor",  # in the submission folder: what make_submission.py points at
+            "tools": f"{data_dir}/predictor_tools",  # the grader's format check, contract.py
+            "max_bytes": int(config["max_bytes"]),
+            "max_files": int(config["max_files"]),
+        }
     elif competition.coding_config is not None:
         file_contract = _code_contract(competition.coding_config)
         file_contract["suffix"] = sample.suffix

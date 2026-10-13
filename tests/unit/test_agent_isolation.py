@@ -341,6 +341,45 @@ def test_code_submissions_are_parsed_and_their_functions_listed(tmp_path):
     assert code == 1 and "not valid Python" in out
 
 
+def _predictor_competition(tmp_path: Path):
+    """gift-eval-short-horizon's public data as far as the format check reads them: the
+    sample predictor and the grader's format check in predictor_tools/."""
+    competition = _competition(tmp_path, "gift-eval-short-horizon", b"def predict(windows):\n")
+    tools = competition.public_dir / "predictor_tools"
+    tools.mkdir()
+    (tools / "contract.py").write_bytes((REPO / "timeseriesgym/predictor/contract.py").read_bytes())
+    return competition
+
+
+def test_predictor_submissions_are_checked_by_the_graders_format_check(tmp_path):
+    contract = _contract(tmp_path, _predictor_competition(tmp_path))
+    # was kind "none": the sample, sample_predictor/predict.py, is not a file of predictions
+    assert contract["kind"] == "predictor"
+    assert contract["predictor"]["dir"] == "predictor"
+    predictor = tmp_path / "submission" / "predictor"
+    predictor.mkdir()
+    marker = tmp_path / "ran"
+    (predictor / "predict.py").write_text(
+        f"open({str(marker)!r}, 'w').close()\n\ndef predict(windows):\n    return []\n"
+    )
+    (predictor / "weights.bin").write_bytes(b"\0" * 8)
+    for path in (None, predictor, predictor / "predict.py"):  # the submission folder by default
+        code, out = _validate(tmp_path, contract, path)
+        assert code == 0 and out.startswith(vs.VALID) and "check_predictor.py" in out, out
+    assert not marker.exists()  # parsed, never run
+
+    (predictor / "link").symlink_to(tmp_path / "ran")
+    code, out = _validate(tmp_path, contract)
+    assert code == 1 and "symlink" in out
+    (predictor / "link").unlink()
+    (predictor / "predict.py").write_text("def forecast(windows):\n    return []\n")
+    code, out = _validate(tmp_path, contract)
+    assert code == 1 and "function `predict`" in out
+    (tmp_path / "submission" / "submission.h5").write_bytes(b"")
+    code, out = _validate(tmp_path, contract, tmp_path / "submission" / "submission.h5")
+    assert code == 1 and "takes a predictor" in out
+
+
 def test_challenges_without_a_sample_file_are_not_checked(tmp_path):
     competition = _competition(tmp_path, "csdi-implement-model-pm25")
     contract = _contract(tmp_path, competition)  # its sample submission is a directory
