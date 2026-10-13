@@ -1,3 +1,4 @@
+import hashlib
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -115,12 +116,18 @@ def is_one_hot_encoded(xs: ndarray) -> bool:
     return is_one_hot
 
 
-def download_file(url: str, destination: Path) -> Path:
-    """Downloads `url` to `destination`; raises on any HTTP or network error.
+def download_file(url: str, destination: Path, md5: str | None = None) -> Path:
+    """Downloads `url` to `destination`; raises on any HTTP or network error, and, if `md5` is
+    given, when the file has another MD5 checksum (the file is then removed).
 
     `curl -f` fails on an HTTP error instead of saving the error page as the file.
     """
     subprocess.run(["curl", "-fsSL", "-o", str(destination), url], check=True)
+    if md5 is not None:
+        actual = hashlib.md5(destination.read_bytes()).hexdigest()
+        if actual != md5:
+            destination.unlink()
+            raise ValueError(f"`{url}` has the MD5 checksum {actual}, not the expected {md5}.")
     return destination
 
 

@@ -23,7 +23,7 @@ etc
 # Dataset
 
 - **labels.csv** - Input features and target `fare_amount` values for the training set (about 55M rows). There is no `train.csv`.
-- **test.csv** - Input features for the test set (about 10K rows). Your goal is to predict `fare_amount` for each row.
+- **test.csv** - Input features for the test set (about 10K rows). Your goal is to predict `fare_amount` for each row. Like the original competition's test set, it holds only rides that start and end in the New York City area (longitude -74.263242 to -72.986532 and latitude 40.568973 to 41.709555, the ranges of the original test set) with 1 to 6 passengers. The training set is not filtered this way.
 - **sample_submission.csv** - a sample submission file in the correct format (columns `key` and `fare_amount`). This file 'predicts' `fare_amount` to be $`11.35` for all rows, which is the mean `fare_amount` from the training set.
 
 ## Data fields

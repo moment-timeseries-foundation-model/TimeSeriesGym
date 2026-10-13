@@ -5,8 +5,10 @@ prepare) is unaffected.
 """
 
 import ast
+import hashlib
 import importlib
 import pickle
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.metrics import accuracy_score, root_mean_squared_error
+from sklearn.model_selection import train_test_split
 
 from timeseriesgym.competitions.utils import download_file
 from timeseriesgym.grade_helpers import Grader, GradingInput
@@ -560,6 +563,86 @@ def test_m5_prepare_keeps_prices_of_every_training_day(tmp_path):
     assert pd.read_csv(public / "sample_submission.csv").id.tolist() == sample.id.tolist()
 
 
+# ---------------------------------------------------------------- NYC taxi prepare
+
+
+def _nyc_raw(raw: Path) -> None:
+    rng = np.random.default_rng(0)
+    n = 12_000
+    times = pd.Timestamp("2012-01-01") + pd.to_timedelta(rng.integers(0, 10**8, n), unit="s")
+    train = pd.DataFrame(
+        {
+            "key": [f"{t}.{i:07d}" for i, t in enumerate(times)],
+            "fare_amount": rng.uniform(2.5, 60.0, n).round(2),
+            "pickup_datetime": times.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "pickup_longitude": rng.uniform(-74.02, -73.93, n),
+            "pickup_latitude": rng.uniform(40.70, 40.80, n),
+            "dropoff_longitude": rng.uniform(-74.02, -73.93, n),
+            "dropoff_latitude": rng.uniform(40.70, 40.80, n),
+            "passenger_count": rng.integers(1, 7, n),
+        }
+    )
+    # rows unlike Kaggle's test set: missing (0) or far-away coordinates, 0 or more than 6
+    # passengers, a missing dropoff
+    dirty = rng.choice(n, 1_200, replace=False)
+    changes = [
+        ("pickup_longitude", 0.0),
+        ("dropoff_latitude", 0.0),
+        ("pickup_latitude", 45.0),
+        ("dropoff_longitude", -75.5),
+        ("passenger_count", 0),
+        ("passenger_count", 9),
+        ("dropoff_latitude", np.nan),
+    ]
+    for j, i in enumerate(dirty):
+        column, value = changes[j % len(changes)]
+        train.loc[i, column] = value
+    # the edges of Kaggle's test ranges are inside
+    edge = rng.choice(np.setdiff1d(np.arange(n), dirty), 4, replace=False)
+    train.loc[edge, "pickup_longitude"] = -74.263242
+    train.loc[edge, "dropoff_longitude"] = -72.986532
+    train.loc[edge, "pickup_latitude"] = 40.568973
+    train.loc[edge, "dropoff_latitude"] = 41.709555
+    train.loc[edge, "passenger_count"] = [1, 6, 1, 6]
+    raw.mkdir(parents=True)
+    train.to_csv(raw / "train.csv", index=False)
+    (raw / "GCP-Coupons-Instructions.rtf").write_text("{\\rtf1}")
+
+
+def test_nyc_prepare_cleans_the_test_like_kaggle(tmp_path):
+    prepare = _module("new-york-city-taxi-fare-prediction", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    _nyc_raw(raw)
+    public.mkdir()
+    private.mkdir()
+    prepare(raw, public, private)
+
+    raw_train = pd.read_csv(raw / "train.csv", float_precision="round_trip")
+    old_train, old_test = train_test_split(raw_train, test_size=9914, random_state=0)
+    longitudes = old_test[["pickup_longitude", "dropoff_longitude"]]
+    latitudes = old_test[["pickup_latitude", "dropoff_latitude"]]
+    clean = (
+        old_test.passenger_count.between(1, 6)
+        & ((longitudes >= -74.263242) & (longitudes <= -72.986532)).all(axis=1)
+        & ((latitudes >= 40.568973) & (latitudes <= 41.709555)).all(axis=1)
+    )
+    assert 0 < (~clean).sum() < len(old_test)  # the uncleaned test held these rows
+
+    test = pd.read_csv(private / "test.csv", float_precision="round_trip")
+    # the same random sample without the rows outside Kaggle's test ranges, in the same order
+    pd.testing.assert_frame_equal(test, old_test[clean].reset_index(drop=True))
+    edges = old_test.key[old_test.pickup_longitude == -74.263242]
+    assert len(edges) > 0 and edges.isin(test.key).all()  # the ranges include their edges
+    # the training split is unchanged; the dropped test rows are not used
+    labels = pd.read_csv(public / "labels.csv", float_precision="round_trip")
+    pd.testing.assert_frame_equal(labels, old_train.reset_index(drop=True))
+    public_test = pd.read_csv(public / "test.csv", float_precision="round_trip")
+    pd.testing.assert_frame_equal(public_test, test.drop(columns="fare_amount"))
+    sample = pd.read_csv(public / "sample_submission.csv")
+    assert sample.key.tolist() == test.key.tolist()
+    assert (sample.fare_amount == 11.35).all()
+
+
 # ---------------------------------------------------------------- PTB-XL folds
 
 
@@ -586,6 +669,17 @@ def test_download_file_fails_instead_of_saving_an_error(tmp_path):
     assert dest.read_text() == "a,b\n1,2\n"
     with pytest.raises(subprocess.CalledProcessError):
         download_file((tmp_path / "missing.csv").as_uri(), tmp_path / "missing_copy.csv")
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+def test_download_file_checks_the_md5_checksum(tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("print(1)\n")
+    md5 = hashlib.md5(b"print(1)\n").hexdigest()
+    assert download_file(source.as_uri(), tmp_path / "a.py", md5=md5).read_text() == "print(1)\n"
+    with pytest.raises(ValueError, match="MD5 checksum"):  # e.g. a moved branch
+        download_file(source.as_uri(), tmp_path / "b.py", md5="0" * 32)
+    assert not (tmp_path / "b.py").exists()
 
 
 def test_stomp_prepare_files_and_failed_download(tmp_path, monkeypatch):
@@ -701,3 +795,40 @@ def test_mit_bih_download_fails_on_an_http_error(tmp_path, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         download.download_mitdb(tmp_path)
     assert len(calls) == 1
+
+
+def test_mit_bih_weak_supervision_downloads_are_pinned(tmp_path, monkeypatch):
+    import h5py
+
+    from timeseriesgym.utils import load_yaml
+
+    module = _module("MIT-BIH-Arrhythmia-Weak-Supervision", "prepare")
+    public, private = tmp_path / "public", tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    with h5py.File(public / "train_features.h5", "w") as f:
+        f["train/lead_1"] = np.zeros((3, 4))
+    with h5py.File(public / "train_labels.h5", "w") as f:
+        f["labels"] = np.eye(3)  # normal, PVC, other
+    for name in ("test_features.h5", "sample_submission.h5"):
+        (public / name).touch()
+    (private / "test_labels.h5").touch()
+    downloads = {}
+
+    def fake_download(url, destination, md5=None):
+        downloads[destination.name] = (url, md5)
+        destination.touch()
+        return destination
+
+    monkeypatch.setattr(module, "download_file", fake_download)
+    monkeypatch.setattr(module, "clone_repository", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: None)  # pdftotext
+    module.prepare(tmp_path / "raw", public, private)
+
+    # they were the moving `refs/heads/master` and `latest`, and unchecked
+    tutorial_url, tutorial_md5 = downloads["01_spam_tutorial.py"]
+    assert re.search("/snorkel-tutorials/[0-9a-f]{40}/", tutorial_url)
+    checksums = load_yaml(Path(module.__file__).parent / "checksums.yaml")["public"]
+    assert tutorial_md5 == checksums["01_spam_tutorial.py"]
+    docs_url, docs_md5 = downloads["snorkel-docs.pdf"]
+    assert "/v0.9.7/" in docs_url and re.fullmatch("[0-9a-f]{32}", docs_md5)

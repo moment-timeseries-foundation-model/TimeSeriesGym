@@ -24,6 +24,7 @@ dataset:
 
 grader:
   name: custom-hyperparameter-search-grading
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.optiver-realized-volatility-prediction-hyperparameter-search.grade:grade_hyperparameter_search
 
 hyperparameter_search_config:

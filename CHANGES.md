@@ -6,7 +6,8 @@ behave. Each entry gives the old and new behaviour, the reason, and the commit. 
 and speed-ups that change no output are listed at the end.
 
 Results produced before these changes are not directly comparable for the challenges named
-under "Scores and validity", "Hyperparameter search", "Feature enhancement" and "Prepared data".
+under "Scores and validity", "Hyperparameter search", "Feature enhancement" and "Prepared data";
+the medals are not comparable for those named under "Medals and leaderboards".
 
 ## Scores and validity
 
@@ -37,6 +38,14 @@ under "Scores and validity", "Hyperparameter search", "Feature enhancement" and 
 - **ucr-anomaly-detection**: the score averages over every dataset in the answers (229df50).
   It iterated over the submission's keys, so a submission with only the easiest dataset was
   scored on that one alone.
+- **gift-eval-short-horizon**: the score is GIFT-Eval's leaderboard metric, each dataset's MASE
+  divided by the seasonal naive forecast's MASE, geometric mean over the 5 datasets (4c2294b).
+  It was MAPE, which divides by max(|actual|, eps): a non-zero forecast where the actual value is
+  exactly 0 gave 9.1e14 on hierarchical_sales, so the seasonal naive forecast scored 1.8e14 and
+  the zero sample 0.9947. Lower is better: seasonal naive now scores 1.0, naive 1.02262, the zero
+  sample 5.63105 and a perfect forecast 0; per dataset, the seasonal naive and naive MASE equal
+  GIFT-Eval's published values to 1e-9. Infinite predictions are invalid, like NaN ones. MAPE is
+  still logged. The answers must be prepared again (see "Prepared data").
 - **moment-anomaly-detection-score, time-series-library-itransformer-weather-forecast**: the shape
   is checked before `np.isclose` (229df50). It broadcasts, so a (1, n) or scalar submission
   could match.
@@ -56,6 +65,11 @@ under "Scores and validity", "Hyperparameter search", "Feature enhancement" and 
   A 2.4 kB file declaring 3.2 GB of never-written data was read into memory and the grading
   process was OOM-killed. The largest legitimate submission (TSL long-horizon in float64)
   declares 3,684 MiB.
+- **.npy submissions**: the header is read first, and the array may declare at most the HDF5 cap
+  above and must store all the data it declares; a zip named `.npy` is invalid (d7a2382).
+  `np.load` read all the declared data (a sparse file of 100 MiB of zeros, for MOMENT's 50
+  answers, was read in full before the shape check), and returned a zip as an `NpzFile`. The
+  shipped MOMENT and TSL iTransformer samples load as before.
 - **Unreadable submissions**: a ragged CSV, a wrong suffix, an unreadable `.h5` or `.npy`, or a
   code submission that does not import, is reported as invalid instead of aborting the whole
   `timeseriesgym grade` batch (5e8750c). One bad agent file used to lose the report for every
@@ -120,16 +134,52 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
 
 ## Medals and leaderboards
 
-- **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 10 challenges
-  award no medals: context-is-key-moirai, context-is-key-nn5-chronos, gift-eval-short-horizon,
+- **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 9 challenges
+  award no medals: context-is-key-moirai, context-is-key-nn5-chronos,
   moment-anomaly-detection-score, ptb-xl-classification-challenge and its HPS and FE variants,
   time-series-exam-1-1, time-series-library-itransformer-weather-forecast, ucr-anomaly-detection
   (229df50). With one row, every score >= 0 was gold, even for lower-is-better metrics, and
   run-group medal totals counted every valid submission on them as gold.
+- **gift-eval-short-horizon**: `leaderboard.csv` lists the models of GIFT-Eval's own leaderboard
+  (Hugging Face space Salesforce/GIFT-Eval, revision 9d731e061162d5d8440204a2c455583d82e084d4 of
+  2026-10-09), each scored with the new metric from its published MASE on the 5 datasets
+  (b091026, dc7c088). It was a one-row placeholder (dummy, 0, on the MAPE scale), so no medals.
+  Kept: models marked `"testdata_leakage": "No"` with a result on all 5 datasets, 123 of 143;
+  the 20 others are flagged for leakage. Gold is rank 10 (0.71687), silver 24 (0.74775), bronze
+  49 (0.76343), median 0.77337; Seasonal_Naive scores 1.0 and Naive 1.02262. `leaderboard.py`
+  rebuilds the file from the pinned revision.
 - **Non-finite scores** never earn a medal (229df50).
+- **`is_lower_better` in reports** comes from each config's new `grader.lower_is_better`
+  (b94eb3b). It came from the leaderboard's order only, so without a real leaderboard it was None
+  and was written as false: wrong for csdi-implement-model-pm25, csdi-reproduce-pm25 and
+  time-series-library-long-horizon-forecast, where lower is better. A direction that is still
+  unknown (a config without the key) is written as null. Medals are ranked as before: a test
+  checks that every configured direction agrees with the challenge's real leaderboard.
 - **`awards_medals`** is now loaded into `Competition` but stays informational, as on Kaggle:
   new-york-city-taxi-fare-prediction and spaceship-titanic (`false`, real leaderboards) keep
   their medals (696cfe0).
+- **osic-pulmonary-fibrosis-progression**: `leaderboard.csv` lists all 2,097 teams of Kaggle's
+  final leaderboard (7b15e32); it listed the top 20, so Kaggle's rule ranked on 20 teams: gold at
+  rank 2 (-6.8311), silver 4 (-6.8347), bronze 8 (-6.8374), median -6.8395. Now gold is rank 14
+  (-6.8412), silver 104 (-6.8533), bronze 209 (-6.8683), median -6.8993. Scores do not change.
+- **recruit-restaurant-visitor-forecasting**: `leaderboard.csv` is Recruit's final standings,
+  2,150 rows (cbd8e31). It was another competition's leaderboard: 1,964 rows dated 2016-05-24 to
+  2016-08-30, before Recruit's data ends (2017-05-31), with none of Recruit's teams. Gold 0.43593
+  (rank 13) -> 0.51023 (rank 14), silver 0.44570 (98) -> 0.51810 (107), bronze 0.45034 (196) ->
+  0.51817 (215), median 0.48947 -> 0.53223.
+- **online-sales, sberbank-russian-housing-market, ashrae-energy-prediction**: `leaderboard.csv`
+  is the final standings, not Kaggle's public leaderboard (aab3d79); the teams, row counts and
+  medal ranks are the same. online-sales: gold 0.58432 -> 0.56957, silver 0.61887 -> 0.60111,
+  bronze 0.66117 -> 0.64400, median 0.73573 -> 0.71913. sberbank: gold 0.30843 -> 0.31227,
+  silver 0.31026 -> 0.31612, bronze 0.31035 -> 0.31649, median 0.32089 -> 0.32323. ashrae:
+  gold 0.939 -> 1.244, silver 0.955 -> 1.268, bronze 0.978 -> 1.280, median 1.108 -> 1.352.
+- **Leaderboard download** (`dev download-leaderboard --force`, `prepare --overwrite-leaderboard`):
+  refuses to write a leaderboard with fewer rows than 95% of Kaggle's team count (c85f491). The
+  view is paged and kaggle 1.6.17 cannot ask for more than its first page (20 rows), which is how
+  OSIC's file was truncated; with that client, every competition of more than 21 teams is refused.
+- **Shipped leaderboards** are tested to be in the leaderboard view's format (the final
+  standings, not the download's public leaderboard), ranked, with unique teams, and, where the
+  data have dates, dated after the data (556b87b).
 
 ## Prepared data and checksums
 
@@ -140,6 +190,16 @@ Rebuilding these challenges gives different files; results on the old data are n
   rows for 3,183 ids), so a perfect forecast scored SMAPE+1 72.97; it now scores 0. The sample
   submission scores 124.93847 (was 129.7763). Only `ground_truth.csv` and
   `sample_submission.csv` change.
+- **new-york-city-taxi-fare-prediction**: the test split is cleaned as Kaggle's test set was
+  (2bb750e). Rides with a pickup or dropoff outside the ranges of Kaggle's own `test.csv`
+  (longitude -74.263242 to -72.986532, latitude 40.568973 to 41.709555) or with 0 or more than
+  6 passengers are dropped from the same random sample. The test now has 9,638 rows (was
+  9,914): 233 lay outside the area (219 with a zero coordinate) and 45 had 0 passengers, 2 of
+  them both. The old test was a random sample of the raw training file, but the leaderboard
+  (gold 2.83377) was measured on Kaggle's clean test, and these rows dominated the error: two
+  agent submissions score RMSE 5.45 and 5.25 on the old test and 3.49 and 3.48 on the new one.
+  The sample submission scores 9.93913 (was 10.02927). `labels.csv` is unchanged; `test.csv`,
+  `sample_submission.csv` and the answers change, and the descriptions state the cleaning.
 - **ptb-xl-classification-challenge (and its HPS and FE variants)**: training uses PTB-XL folds
   1-8 (12,957 records; was folds 1-7, 11,320 records) (e5d3422). `train_fold` was
   `np.arange(0, 8)`, but the folds are numbered 1-10, so fold 8 was in no split.
@@ -157,14 +217,36 @@ Rebuilding these challenges gives different files; results on the old data are n
   PhysioNet 1.0.0 release (129bd2e, 80294d9). The old zip checksum held file times and could never
   match; the old h5 values could not be reproduced with the pinned libraries (upstream's sample has
   4,141 test beats, a rebuild 4,139). The download now fails on HTTP errors (bf41cd7).
-- **gift-eval-short-horizon**: unchanged. Its documented source is the Git LFS bundle, whose zip
-  matches `checksums.yaml`; the Hugging Face download path never matched it.
+- **MIT-BIH-Arrhythmia-Weak-Supervision**: the Snorkel tutorial is downloaded from a commit
+  (snorkel-tutorials 2ba84e4), not `refs/heads/master`, and the docs PDF from Release 0.9.7, not
+  `latest`; both are checked against an MD5 checksum, also with `--skip-verification` (7789b14).
+  The tutorial and the two extracted text files are unchanged; `snorkel-docs.pdf` differs from
+  the `latest` build in 66 bytes of build metadata.
+- **gift-eval-short-horizon**: the private `test.h5` also holds each test window's MASE scale
+  and seasonal naive forecast, computed from the public test inputs, as the new score needs the
+  windows' history: `labels` is now a group of `target`, `seasonal_error` and `seasonal_naive`,
+  and its checksum is regenerated (4c2294b; two more prepares verify). The zip and the public
+  files are unchanged. The documented source is the Git LFS bundle, whose zip matches
+  `checksums.yaml`; the Hugging Face download path never matched it.
 - **m5-forecasting-accuracy**: the public `sell_prices.csv` has every training week (6,597,201
   rows; was 4,088,360) (d64a36f). Days were compared as strings, so d_2..d_9 and d_200..d_999
   counted as later than d_1913. Scores do not change: the grader reads prices from the answers.
 - **LANL-Earthquake-Prediction**: test segment ids come from a seeded generator, duplicates are
   rejected, and the checksums are regenerated (7a8862f). Every prepare named the 2,500 segments
   differently, so checksums could never verify.
+- **LANL-Earthquake-Prediction**: the test is laid out as Kaggle's: every whole, non-overlapping
+  150,000-row segment inside one of the held-out earthquake cycles 13-17, 1,112 in all, labelled
+  with `time_to_failure` at its last row (6cd897f, 3c3dcb0). It was 500 random, possibly
+  overlapping 15,000-row windows from each of those cycles (2,500), which matched the training
+  distribution so closely that a 4-minute LightGBM on summary statistics scored better than
+  Kaggle's gold threshold (2.40159) and its rank-1 score (2.26589). No segment spans an
+  earthquake or touches a training row. The ids come from a generator seeded with a digest of the
+  private labels, and the files, answers and sample are in id order (they were grouped by
+  cycle), so neither ids nor order give a segment's position. `train.csv` (cycles 1-12) is
+  byte-identical, and prepare reads it in chunks instead of all 629M rows at once. On the new
+  test the sample scores 5.69625 (was 6.21077), the median of the training labels 3.00822, and
+  a LightGBM on 58 summary statistics of 150,000-row training windows 2.443 (2.415-2.443 over 5
+  seeds, about 10 CPU minutes), so no longer better than gold.
 - **Cloned task repositories**: shipped without `.git` (1568f6d) and pinned to commits (8dbe2b8;
   MOMENT to 37a8bde in 00279f6). The history held the reference solution (iTransformer), and
   moving branch heads changed the prepared data. The iTransformer prepare now also removes the
@@ -278,15 +360,60 @@ tolerances), and the two missing-data variants got their own descriptions (5bc01
 1568f6d, c81bfbb, 98b7880, fba602d, 7924a0a, 3383eff, 05da7da, 2110c7e, c011506, 3f97b77, a1ab71c,
 ba20262, 7c8ab69, 1982829, 9d33b49, 2fea25d, 7184ca2, ee128f2, fe08ba1, bf7d9c8, 8eb58e3, b51204b,
 21a5539, 630b7c3, 2c6a043, fa269d1, e30030e, 948a8c4, a9f20f7, f88e57a, cd734df, 617f82d, e232319,
-ddba7bf, c044e1d, 9e5e756, 7c12345 and b8026f5. They change what agents are told, not how they are
-graded. The three Optiver descriptions state the held-out time buckets (848cb92).
+ddba7bf, c044e1d, 9e5e756, 7c12345, b8026f5 and 9bf064a (the gift-eval metric). They change what
+agents are told, not how they are graded. The three Optiver descriptions state the held-out time
+buckets (848cb92).
+
+The descriptions of LANL-Earthquake-Prediction, amp-parkinsons-disease-progression-prediction and
+ashrae-energy-prediction, and a new README section, say that their medals compare scores on
+TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011, aab3d79): LANL's
+test segments are cut from Kaggle's training data, amp's test patients come from Kaggle's training
+data, and ashrae's leaderboard was scored on 2017-2018, its test set here on the end of 2016.
+
+Three more, after reviews of agent runs:
+
+- **MIT-BIH-Arrhythmia-Weak-Supervision** (both descriptions; fffb8ed). Old: beats were "a
+  256-point time series ... preprocessed and normalized", and the heuristics included an early
+  R-wave and per-patient thresholds. New: each beat is a 256-sample window centred on a detected
+  peak (for most beats the R peak), cut from a recording standardized as a whole, with no RR
+  intervals, beat times or record ids; normal beats were kept with probability 0.15, so PVCs are a
+  much larger share than in the original recordings. The early R-wave and the per-patient
+  calibration are marked as not computable here, and each heuristic is to be checked on the data
+  first. Reason: agents assumed the original PVC share and tried heuristics the data cannot
+  support.
+- **MIT-BIH-Arrhythmia** (255d75b). New: the test beats come from 8 of the 48 recordings, none of
+  them in the training data. Reason: the split is by recording, and agents validated on random
+  training beats.
+- **context-is-key-nn5-chronos, context-is-key-moirai** (0921392). New: `cik_benchmark` and
+  `run_baselines` import only with the repository root on the module search path, so scripts
+  saved elsewhere need `PYTHONPATH`. Reason: agents' scripts failed with `ModuleNotFoundError`.
 
 ## Tests
 
 - The amp sample-score constant is 124.93847 (821b7cd).
 - The slow gold-medal integration test skips challenges without a real leaderboard (696cfe0).
-- `test_data.py`'s prepare test has its decorators back (119d2b3); like the download test, it
-  needs Kaggle credentials.
+- `test_data.py`'s prepare test has its decorators back (119d2b3).
+- `test_data.py` runs offline (00b6f4e). Its six cases called the real Kaggle API, so they failed
+  on every machine without Kaggle credentials and were skipped in GitHub Actions. A fake Kaggle
+  API now serves a tiny synthetic zip per competition: the download test runs the real
+  `download_dataset`, and the prepare test runs the real `download_and_prepare_dataset` with each
+  competition's own prepare function. Its checksums are written to a temporary file, not compared
+  with the shipped ones, which belong to the real data. The integration tests still cover the
+  real downloads.
+- The integration tests are marked `network` (58249d6): `-m "not network"` deselects them.
+
+## Packaging and CI
+
+- **CI** (6ffafd5, 125551e): a GitHub Actions workflow runs ruff 0.6.9 (`check` and
+  `format --check`) and the tests not marked `network` on Python 3.11, with CPU-only PyTorch, for
+  pushes to `main` and for pull requests. It needs no secrets. README.md gives the same commands
+  for a local run.
+- **ruff** is pinned to 0.6.9 in the dev extra (1d50468), the version CI uses. The extra allowed
+  any ruff >= 0.3.0, and ruff 0.16.9 would reformat 32 files.
+- **pre-commit**: `.pre-commit-config.yaml` (9bdd682) runs the `ruff` and `ruff-format` hooks of
+  ruff-pre-commit v0.6.9. The README's `pre-commit install` had no configuration to install.
+- **h5py** is a declared dependency, `h5py>=3.11` (510d2bd). `timeseriesgym/utils.py` imports it,
+  but it was only installed because tensorflow depends on it.
 
 ## No change in behaviour
 

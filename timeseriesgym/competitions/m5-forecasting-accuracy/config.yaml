@@ -22,6 +22,7 @@ dataset:
 
 grader:
   name: weighted-root-mean-squared-scaled-error
+  lower_is_better: true
   grade_fn: timeseriesgym.competitions.m5-forecasting-accuracy.grade:grade
 
 preparer: timeseriesgym.competitions.m5-forecasting-accuracy.prepare:prepare

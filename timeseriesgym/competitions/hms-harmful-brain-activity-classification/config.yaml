@@ -22,6 +22,7 @@ dataset:
 
 grader:
   name: kl-divergence
+  lower_is_better: true
   grade_fn: timeseriesgym.competitions.hms-harmful-brain-activity-classification.grade:grade
 
 preparer: timeseriesgym.competitions.hms-harmful-brain-activity-classification.prepare:prepare
