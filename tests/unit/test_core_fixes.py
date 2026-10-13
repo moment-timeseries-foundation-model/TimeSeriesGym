@@ -1035,16 +1035,16 @@ def _declared_only(path: Path, n_values: int) -> Path:
 
 
 def test_h5_submissions_cannot_declare_more_data_than_the_cap(tmp_path):
-    from timeseriesgym.utils import MAX_H5_BYTES
+    from timeseriesgym.utils import MAX_SUBMISSION_BYTES
 
-    path = _declared_only(tmp_path / "submission.h5", MAX_H5_BYTES // 8 + 1)
+    path = _declared_only(tmp_path / "submission.h5", MAX_SUBMISSION_BYTES // 8 + 1)
     assert path.stat().st_size < 10_000
     with pytest.raises(InvalidSubmissionError, match="more than"):  # was read into memory
         load_submissions(path)
     small = _declared_only(tmp_path / "small.h5", 1000)
-    assert np.array_equal(load_submissions(small, max_h5_bytes=8000)["x"], np.zeros(1000))
+    assert np.array_equal(load_submissions(small, max_bytes=8000)["x"], np.zeros(1000))
     with pytest.raises(InvalidSubmissionError, match="more than 7999 bytes"):
-        load_submissions(small, max_h5_bytes=7999)
+        load_submissions(small, max_bytes=7999)
 
 
 def test_h5_submissions_are_capped_by_the_size_of_the_answers(tmp_path):
@@ -1072,3 +1072,55 @@ def test_validation_does_not_follow_h5_links_to_the_answers(tmp_path):
         f["submission"] = h5py.ExternalLink(str(competition.answers), "labels")
     valid, message = validate_submission(submission, competition)
     assert not valid and "ExternalLink" in message  # was valid: the answers graded themselves
+
+
+# ---------------------------------------------------------------- .npy submissions
+
+
+def _npy_header(path: Path, shape: tuple, stored: int = 0) -> Path:
+    """A float64 .npy file with the header of `shape` followed by `stored` values, written as a
+    sparse file: they read as zeros."""
+    with open(path, "wb") as f:
+        np.lib.format.write_array_header_1_0(
+            f, {"descr": "<f8", "fortran_order": False, "shape": shape}
+        )
+        f.truncate(f.tell() + 8 * stored)
+    return path
+
+
+def test_npy_submissions_cannot_declare_more_data_than_the_cap(tmp_path):
+    path = _npy_header(tmp_path / "submission.npy", (2**40,))  # 8 TiB declared in 128 bytes
+    with pytest.raises(InvalidSubmissionError, match="more than"):  # checked on the header
+        load_submissions(path)
+    small = tmp_path / "small.npy"
+    np.save(small, np.arange(1000.0))
+    assert np.array_equal(load_submissions(small, max_bytes=8000), np.arange(1000.0))
+    with pytest.raises(InvalidSubmissionError, match="more than 7999 bytes"):
+        load_submissions(small, max_bytes=7999)
+
+
+@pytest.mark.parametrize("how", ["zip", "truncated"])
+def test_npy_submissions_must_be_complete_arrays(tmp_path, how):
+    path = tmp_path / "submission.npy"
+    if how == "zip":  # np.load returned an NpzFile, whose members it reads on access
+        with open(path, "wb") as f:
+            np.savez(f, submission=np.zeros(3))
+    else:  # a ValueError from np.load
+        _npy_header(path, (1000,), stored=10)
+    with pytest.raises(InvalidSubmissionError, match="not a .npy array|less data"):
+        load_submissions(path)
+
+
+def test_npy_submissions_are_capped_by_the_size_of_the_answers(tmp_path):
+    answers = tmp_path / "answers.npy"
+    np.save(answers, np.zeros(50))
+    competition = _prepared(
+        tmp_path / "data", "moment-anomaly-detection-score", answers.read_bytes()
+    )
+    # 100 MiB of zeros in a sparse file, for 50 answers: np.load read all of it
+    n_values = 100 * 2**20 // 8
+    submission = _npy_header(tmp_path / "submission.npy", (n_values,), stored=n_values)
+    valid, message = validate_submission(submission, competition)
+    assert not valid and "more than 67108864 bytes" in message
+    np.save(submission, np.zeros(50))
+    assert validate_submission(submission, competition)[0]
