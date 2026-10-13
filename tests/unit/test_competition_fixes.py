@@ -467,6 +467,60 @@ def test_feature_rubric_scores_the_shipped_example_as_before():
     assert fe.evaluate_tensorboard_usage(train, example) == pytest.approx(0.8)  # no runs/ shipped
 
 
+def _flake8_reports(monkeypatch, fe, problems: str = ""):
+    """flake8 is not installed everywhere the tests run: a run of it that reports `problems`."""
+    run = subprocess.CompletedProcess([], 1 if problems else 0, problems, "")
+    monkeypatch.setattr(fe.subprocess, "run", lambda *args, **kwargs: run)
+
+
+FE_CONFIG = {
+    "model_code_file": "model.py",
+    "training_file": "train.py",
+    "config_file": "config.yaml",
+}
+
+
+@pytest.mark.parametrize(
+    "failed_check, old_score",
+    [
+        (None, 0.9375),
+        ("no event file", 0.8875),
+        ("a flake8 problem in each file", 0.93056),
+        ("an unannotated function", 0.90972),
+        ("no model section in the config", 0.8875),
+    ],
+)
+def test_feature_enhancement_score_is_the_accuracy_gated_by_the_rubric(
+    tmp_path, monkeypatch, failed_check, old_score
+):
+    fe = _fe()
+    project = tmp_path / "project"  # the shipped example, with the logs that training writes
+    shutil.copytree(Path(fe.__file__).parent / "example", project)
+    (project / "runs" / "x").mkdir(parents=True)
+    (project / "runs" / "x" / "events.out.tfevents.1.host").write_bytes(b"\0")
+    answers = pd.read_csv(project / "submission.csv")
+    answers.loc[:24, "label"] = (answers.loc[:24, "label"] + 1) % 5  # accuracy 0.75
+    _flake8_reports(monkeypatch, fe)
+    if failed_check == "no event file":
+        shutil.rmtree(project / "runs")
+    elif failed_check == "a flake8 problem in each file":
+        _flake8_reports(monkeypatch, fe, "train.py:1:1: E203 whitespace before ':'\n")
+    elif failed_check == "an unannotated function":
+        with open(project / "model.py", "a") as f:
+            f.write('\n\ndef helper(x):\n    """Return x."""\n    return x\n')
+    elif failed_check == "no model section in the config":
+        (project / "conf" / "config.yaml").write_text("name: run\n")
+
+    scores = fe.grade_feature_enhancement(project, answers, FE_CONFIG, project)
+    sub_scores = [scores["tensorboard_score"], scores["code_quality_score"], scores["hydra_score"]]
+    # the old score was the mean of the sub-scores and the accuracy
+    assert (sum(sub_scores) + scores["accuracy"]) / 4 == pytest.approx(old_score, abs=1e-5)
+    assert scores["accuracy"] == pytest.approx(0.75)
+    assert scores["overall_score"] == (0.75 if failed_check is None else 0.0)
+    assert scores["rubric_passed"] == (failed_check is None)
+    assert (min(sub_scores) == 1.0) == (failed_check is None)
+
+
 def test_feature_rubric_needs_a_working_flake8(tmp_path, monkeypatch):
     fe = _fe()
     files = [str(tmp_path / "model.py"), str(tmp_path / "train.py")]

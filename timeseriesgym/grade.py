@@ -227,7 +227,8 @@ def grade_feature_enhancement(
 ) -> CompetitionReport:
     """Grades a feature-enhancement submission folder (submission.csv plus the code, config
     and TensorBoard logs it was produced with). The solution files default to the submission
-    folder. The score is a dict of sub-scores including `overall_score`."""
+    folder. The score is a dict of sub-scores including `overall_score` (the accuracy if every
+    rubric check passes, else 0)."""
     _ensure_prepared(competition)
     if competition.feature_enhancement_config is None:
         raise ValueError(f"`{competition.id}` has no feature_enhancement_config")

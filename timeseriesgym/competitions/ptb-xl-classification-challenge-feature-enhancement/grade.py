@@ -27,10 +27,14 @@ def grade_feature_enhancement(
     solution_files_path: Path | None = None,
 ) -> dict:
     """
-    Grade the feature enhancement challenge based on three criteria:
+    Grade the feature enhancement challenge: the score is the model's test accuracy, gated by a
+    rubric of three engineering criteria:
     1. Traceability and logging with TensorBoard
     2. Code quality and documentation
     3. Hydra configuration management
+
+    Every check of the three criteria must pass (each criterion then scores 1.0), or the score
+    is 0. The criteria's sub-scores are reported but do not move the score.
 
     Args:
         submission_folder_path: Path to the submission folder
@@ -39,7 +43,8 @@ def grade_feature_enhancement(
         solution_files_path: Path to solution files
 
     Returns:
-        dict: Scores for each criterion and overall score
+        dict: Scores for each criterion, the accuracy, whether the rubric passed, and the
+            overall score (the accuracy if the rubric passed, else 0)
     """
     submission = load_submissions(submission_folder_path / "submission.csv")
 
@@ -61,43 +66,53 @@ def grade_feature_enhancement(
     except Exception as e:
         logger.warning(f"Failed to read config file: {e}")
 
-    # 1. Evaluate TensorBoard traceability (25%)
-    logger.info("\n----- Evaluating TensorBoard Usage (25% of total score) -----")
+    # 1. Evaluate TensorBoard traceability
+    logger.info("\n----- Evaluating TensorBoard Usage -----")
     tensorboard_score = evaluate_tensorboard_usage(training_code_file, solution_files_path)
 
-    # 2. Evaluate code quality and documentation (25%)
-    logger.info("\n----- Evaluating Code Quality (25% of total score) -----")
+    # 2. Evaluate code quality and documentation
+    logger.info("\n----- Evaluating Code Quality -----")
     code_quality_score = evaluate_code_quality(model_code_file, training_code_file)
 
-    # 3. Evaluate Hydra configuration usage (25%)
-    logger.info("\n----- Evaluating Hydra Configuration Usage (25% of total score) -----")
+    # 3. Evaluate Hydra configuration usage
+    logger.info("\n----- Evaluating Hydra Configuration Usage -----")
     hydra_score = evaluate_hydra_usage(training_code_file, config_file)
 
-    # 4. Calculate model accuracy (25%)
+    # 4. Calculate model accuracy
     accuracy = grade(submission, answers)
-    logger.info("\n----- Evaluating Model Accuracy (25% of total score) -----")
+    logger.info("\n----- Evaluating Model Accuracy -----")
     logger.info(f"[ACCURACY] Model prediction accuracy: {accuracy:.4f}/1.0")
 
-    # Calculate overall score (weighted average)
-    overall_score = (tensorboard_score + code_quality_score + hydra_score + accuracy) / 4
+    # The score is the accuracy if every check passes, else 0. It was the mean of the three
+    # criteria and the accuracy, so 75% of it came from keyword and AST checks: with the rubric
+    # passed, predicting the most frequent class for every ECG scored 0.888. A criterion's score
+    # is the summed weight of its passed checks over the summed weight of all of them, added in
+    # the same order, so it is exactly 1.0 if and only if all of them pass (lint: no problems).
+    rubric_passed = tensorboard_score == code_quality_score == hydra_score == 1.0
+    overall_score = accuracy if rubric_passed else 0.0
 
     scores = {
         "tensorboard_score": tensorboard_score,
         "code_quality_score": code_quality_score,
         "hydra_score": hydra_score,
         "accuracy": accuracy,
+        "rubric_passed": rubric_passed,
         "overall_score": overall_score,
     }
 
     logger.info("\n===== EVALUATION SUMMARY =====")
-    logger.info(f"TensorBoard score: {tensorboard_score:.2f}/1.0 (25% weight)")
-    logger.info(f"Code quality score: {code_quality_score:.2f}/1.0 (25% weight)")
-    logger.info(f"Hydra config score: {hydra_score:.2f}/1.0 (25% weight)")
-    logger.info(f"Model accuracy: {accuracy:.4f} (25% weight)")
-    logger.info(f"Overall score: {overall_score:.2f}/1.0")
+    logger.info(f"TensorBoard score: {tensorboard_score:.2f}/1.0")
+    logger.info(f"Code quality score: {code_quality_score:.2f}/1.0")
+    logger.info(f"Hydra config score: {hydra_score:.2f}/1.0")
+    logger.info(f"Model accuracy: {accuracy:.4f}")
+    logger.info(f"Every rubric check passed: {rubric_passed}")
+    logger.info(f"Overall score (the accuracy if every check passed, else 0): {overall_score:.4f}")
 
     # Print improvement suggestions
     logger.info("\n===== IMPROVEMENT SUGGESTIONS =====")
+
+    if not rubric_passed:
+        logger.info("[SUGGESTION] The score is 0 until every check marked ✗ above passes")
 
     if tensorboard_score < 1.0:
         logger.info("[SUGGESTION] To improve TensorBoard score:")
@@ -680,4 +695,5 @@ if __name__ == "__main__":
     print(f"Code Quality Score: {scores['code_quality_score']:.2f}/1.0")
     print(f"Hydra Config Score: {scores['hydra_score']:.2f}/1.0")
     print(f"Accuracy Score: {scores['accuracy']:.2f}/1.0")
+    print(f"Rubric Passed: {scores['rubric_passed']}")
     print(f"Overall Score: {scores['overall_score']:.2f}/1.0")

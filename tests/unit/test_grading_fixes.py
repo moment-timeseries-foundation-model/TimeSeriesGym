@@ -272,7 +272,7 @@ def test_feature_enhancement_grader_is_reachable(tmp_path, monkeypatch):
         )
     )
     assert isinstance(score, dict) and score["accuracy"] == pytest.approx(1.0)
-    assert 0.0 <= score["overall_score"] <= 1.0
+    assert not score["rubric_passed"] and score["overall_score"] == 0.0  # no TensorBoard logs
 
 
 # ---------------------------------------------------------------- RMSLE graders
