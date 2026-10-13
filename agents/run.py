@@ -103,11 +103,13 @@ def run_in_container(
     retain_container: bool,
     run_dir: Path,
     logger: logging.Logger,
+    network: str = "none",
 ) -> int:
     """
     Runs environment containing the competition and agent for a set maximum amount of time.
     The outputs are saved to `run_dir` whatever the agent's exit code.
 
+    The container is on the Docker network `network`; the default, "none", gives it no network.
     An agent with a `model_proxy` config calls its models through a model proxy for this run
     (agents/model_proxy.py), which keeps the API keys on the host.
 
@@ -120,6 +122,7 @@ def run_in_container(
         retain_container: Whether to retain the container after the run instead of removing it.
         run_dir: Path to the directory where all assets associated with the run are stored.
         logger: Logger for the run.
+        network: Docker network mode of the container.
 
     Returns:
         The exit code of the agent's start script.
@@ -149,6 +152,7 @@ def run_in_container(
             },
             container_image=image,
             privileged=agent.privileged,
+            network_mode=network,
         )
     except BaseException:
         if proxy is not None:

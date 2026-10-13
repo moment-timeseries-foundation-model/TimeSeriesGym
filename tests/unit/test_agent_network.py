@@ -7,7 +7,10 @@ tests/integration/test_agent_network.py.
 import importlib
 import json
 import logging
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -253,3 +256,95 @@ def test_shipped_agents_reach_their_models_through_the_proxy_only(monkeypatch):
         allowed = set().union(*agent.model_proxy["models"].values())
         assert models <= allowed, agent_id  # else the proxy refuses the agent's own calls
         assert not any(v.startswith("test-") for v in map(str, agent.env_vars.values()))
+
+
+# ---------------------------------------------------------------- the agents' network
+
+
+def test_runs_have_no_network_by_default(tmp_path, monkeypatch):
+    for agent in (_agent(), _agent(model_proxy=_config(monkeypatch))):
+        created, _ = _run(tmp_path, monkeypatch, agent)
+        assert created["network_mode"] == "none"
+
+
+def test_the_agent_network_is_an_explicit_choice(tmp_path, monkeypatch):
+    created, _ = _run(tmp_path, monkeypatch, _agent(), network="bridge")
+    assert created["network_mode"] == "bridge"
+
+
+def test_container_configs_cannot_choose_the_network():
+    from environment.utils import parse_container_config
+
+    for key in ("network", "network_mode", "networking_config"):
+        with pytest.raises(ValueError, match="--agent-network"):
+            parse_container_config({key: "bridge"})
+    for path in (REPO / "environment" / "config" / "container_configs").glob("*.json"):
+        parse_container_config(json.loads(path.read_text()))  # the shipped ones are fine
+
+
+def test_competition_containers_have_no_network_by_default():
+    from environment.utils import create_competition_container
+
+    created = []
+    client = SimpleNamespace(
+        containers=SimpleNamespace(
+            create=lambda **kw: created.append(kw) or SimpleNamespace(name="c")
+        )
+    )
+    create_competition_container(client, SimpleNamespace(id="x"), {}, {}, {})
+    create_competition_container(client, SimpleNamespace(id="x"), {}, {}, {}, network_mode="bridge")
+    assert [kw["network_mode"] for kw in created] == ["none", "bridge"]
+
+
+@pytest.mark.parametrize("network", ["host", "container:abc"])
+def test_run_agent_refuses_to_share_another_network_namespace(tmp_path, network):
+    competitions = tmp_path / "split.txt"
+    competitions.write_text("spaceship-titanic\n")
+    args = [
+        "--agent-id",
+        "dummy",
+        "--competition-set",
+        str(competitions),
+        "--agent-network",
+        network,
+    ]
+    out = subprocess.run(
+        [sys.executable, "run_agent.py", *args],
+        cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert out.returncode == 2 and "--agent-network cannot share" in out.stderr
+
+
+def test_run_agent_passes_the_network_to_each_run(tmp_path, monkeypatch):
+    import asyncio
+
+    run_agent = importlib.import_module("run_agent")
+    monkeypatch.setattr(run_agent, "args", SimpleNamespace(retain=False), raising=False)
+    seen = []
+    monkeypatch.setattr(run_agent, "run_in_container", lambda **kw: seen.append(kw) or 0)
+    task = run_agent.Task(
+        run_id="run-1",
+        seed=0,
+        image="img",
+        path_to_run_group=tmp_path,
+        path_to_run=tmp_path,
+        agent=SimpleNamespace(id="agent", name="img"),
+        competition=SimpleNamespace(id="x"),
+        container_config={},
+        agent_network="bridge",
+    )
+
+    async def run_one():
+        queue = asyncio.Queue()
+        queue.put_nowait(task)
+        worker = asyncio.create_task(run_agent.worker(0, queue, None, {}))
+        await queue.join()
+        worker.cancel()
+
+    asyncio.run(run_one())
+    assert seen[0]["network"] == "bridge"
+    assert run_agent.Task.__dataclass_fields__["agent_network"].default == "none"
