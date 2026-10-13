@@ -779,7 +779,8 @@ def test_run_metadata_records_the_agents_exit_code(tmp_path, monkeypatch, exit_c
     import asyncio
 
     run_agent = importlib.import_module("run_agent")
-    monkeypatch.setattr(run_agent, "args", SimpleNamespace(retain=False), raising=False)
+    args = SimpleNamespace(retain=False, skip_grading=True)
+    monkeypatch.setattr(run_agent, "args", args, raising=False)
     monkeypatch.setattr(run_agent, "run_in_container", lambda **kwargs: exit_code)
     task = run_agent.Task(
         run_id="run-1",

@@ -12,6 +12,7 @@ from typing import Any
 
 import docker
 
+from agents.grading import GRADER_IMAGE, GRADING_TIMEOUT, grade_run
 from agents.registry import Agent
 from agents.registry import registry as agent_registry
 from agents.run import run_in_container
@@ -93,6 +94,18 @@ async def worker(
                 f"{task.competition.id}"
             )
             task_output["success"] = False
+        try:
+            if not args.skip_grading:  # the agent's container has been removed
+                task_output["grading"] = await asyncio.to_thread(
+                    grade_run,
+                    client=client,
+                    competition=task.competition,
+                    run_dir=task.path_to_run,
+                    image=args.grader_image,
+                    container_config=task.container_config,
+                    logger=run_logger,
+                    timeout=args.grading_timeout,
+                )
         finally:
             tasks_outputs[task.run_id] = task_output
             queue.task_done()
@@ -112,6 +125,16 @@ async def main(args):
             "`I_ACCEPT_RUNNING_PRIVILEGED_CONTAINERS` is not set to `True`! Carefully consider if "
             "you wish to run this agent before continuing. See agents/README.md for more details."
         )
+    if not args.skip_grading:
+        try:
+            client.images.get(args.grader_image)
+        except docker.errors.ImageNotFound:
+            raise ValueError(
+                f"The grader image `{args.grader_image}` does not exist. Build it with "
+                f"`docker build --target grader -t {args.grader_image} -f environment/Dockerfile "
+                ".`, or pass --skip-grading and grade the run group with "
+                "experiments/make_submission.py and `timeseriesgym grade`."
+            ) from None
 
     run_group = f"{get_timestamp()}_run-group_{agent.name}"
 
@@ -265,6 +288,29 @@ if __name__ == "__main__":
         action="store_true",
         required=False,
         default=False,
+    )
+    parser.add_argument(
+        "--grader-image",
+        help="Docker image of the grading step, which grades each run with the private data in "
+        "a separate container after the agent's container has stopped.",
+        type=str,
+        required=False,
+        default=GRADER_IMAGE,
+    )
+    parser.add_argument(
+        "--skip-grading",
+        help="Do not grade the runs (grade them later with experiments/make_submission.py and "
+        "`timeseriesgym grade`).",
+        action="store_true",
+        required=False,
+        default=False,
+    )
+    parser.add_argument(
+        "--grading-timeout",
+        help="Seconds the grading of a run may take.",
+        type=int,
+        required=False,
+        default=GRADING_TIMEOUT,
     )
 
     args = parser.parse_args()

@@ -1,3 +1,24 @@
+# Two images. The agent's base image, timeseriesgym-env, is the default target:
+#   docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfile .
+# The grader grades each run in a separate container after the agent's container has stopped
+# (agents/grading.py):
+#   docker build --platform=linux/amd64 --target grader -t timeseriesgym-grader \
+#     -f environment/Dockerfile .
+
+FROM python:3.11-slim-bookworm AS grader
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    DEEPEVAL_TELEMETRY_OPT_OUT=YES
+
+COPY . /timeseriesgym
+RUN pip install -e /timeseriesgym
+
+# run_agent.py runs `timeseriesgym grade` in it as the invoking user, with no network
+WORKDIR /tmp
+ENTRYPOINT ["timeseriesgym"]
+
+# The agent's base image (the default target)
 FROM ubuntu:20.04
 
 # Avoid interactive dialog from apt-get and other packages requiring configuration

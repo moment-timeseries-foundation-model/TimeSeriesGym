@@ -1,24 +1,32 @@
-"""The agent's format check, against a contract derived from the sample submission
-(agents/validation.py, environment/validate_submission.py)."""
+"""The agent's format check (agents/validation.py, environment/validate_submission.py), and the
+grading step after the agent's container has stopped (agents/grading.py)."""
 
+import asyncio
+import importlib
 import io
 import json
+import logging
 import os
 import pickle
 import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import docker
 import h5py
 import numpy as np
 import pytest
+import requests
 
+from agents.grading import DATA_DIR, grade_run
 from agents.validation import submission_contract
 from environment import validate_submission as vs
 from timeseriesgym.registry import Registry
 
 REPO = Path(__file__).resolve().parents[2]
+LOGGER = logging.getLogger("test")
 HPS_ID = "optiver-realized-volatility-prediction-hyperparameter-search"
 FE_ID = "ptb-xl-classification-challenge-feature-enhancement"
 
@@ -353,3 +361,202 @@ def test_the_format_check_runs_without_timeseriesgym(tmp_path):
         text=True,
     )
     assert out.returncode == 0 and out.stdout.startswith(vs.VALID), out.stderr
+
+
+# ---------------------------------------------------------------- the grading step
+
+
+class _FakeGrader:
+    """A grader container: on `wait`, `behaviour` writes a report as `timeseriesgym grade` does."""
+
+    def __init__(self, behaviour):
+        self.behaviour, self.events, self.name = behaviour, [], "grader-x"
+
+    def start(self):
+        self.events.append("start")
+
+    def wait(self, timeout):
+        self.events.append(("wait", timeout))
+        return {"StatusCode": self.behaviour(self.kwargs)}
+
+    def logs(self):
+        return b"graded\n"
+
+    def kill(self):
+        self.events.append("kill")
+
+    def remove(self, force):
+        self.events.append("remove")
+
+
+def _grade(tmp_path, competition, behaviour, container_config=None, **kw):
+    grader = _FakeGrader(behaviour)
+
+    def create(**kwargs):
+        grader.kwargs = kwargs
+        return grader
+
+    client = SimpleNamespace(containers=SimpleNamespace(create=create))
+    run_dir = tmp_path / "runs" / "2026-01-01T00-00-00-GMT_run-group_agent:tag" / "run"
+    (run_dir / "submission").mkdir(parents=True, exist_ok=True)
+    result = grade_run(
+        client=client,
+        competition=competition,
+        run_dir=run_dir,
+        image="grader-image",
+        container_config=container_config or {},
+        logger=LOGGER,
+        **kw,
+    )
+    return result, grader, run_dir
+
+
+def _write_report(kwargs, valid=True) -> int:
+    output_dir = Path(kwargs["command"][kwargs["command"].index("--output-dir") + 1])
+    report = {"competition_reports": [{"score": 0.5, "valid_submission": valid}]}
+    (output_dir / "20260101_grading_report.json").write_text(json.dumps(report))
+    return 0
+
+
+def test_runs_are_graded_in_a_separate_container_with_the_private_data(tmp_path):
+    competition = _competition(tmp_path, "spaceship-titanic", SPACESHIP_SAMPLE)
+    config = {"runtime": "sysbox-runc", "gpus": "0", "mem_limit": "16g", "nano_cpus": 4e9}
+    result, grader, run_dir = _grade(tmp_path, competition, _write_report, config, timeout=60)
+    run_dir = run_dir.resolve()
+    kwargs = grader.kwargs
+    assert result["valid_submission"] and result["score"] == 0.5
+    assert result["report_path"] == str(run_dir / "grading" / "20260101_grading_report.json")
+    prepared = f"{DATA_DIR}/spaceship-titanic/prepared"
+    mounts = {(m["Source"], m["Target"], m["ReadOnly"]) for m in kwargs["mounts"]}
+    assert mounts == {
+        (str(competition.private_dir.resolve()), f"{prepared}/private", True),
+        (str(competition.public_dir.resolve()), f"{prepared}/public", True),
+        (str(run_dir), str(run_dir), True),
+        (str(run_dir / "grading"), str(run_dir / "grading"), False),
+    }
+    assert {m["Type"] for m in kwargs["mounts"]} == {"bind"} and "volumes" not in kwargs
+    assert kwargs["network_mode"] == "none" and kwargs["image"] == "grader-image"
+    assert kwargs["entrypoint"] == ["timeseriesgym"]
+    jsonl = run_dir / "grading" / "submission.jsonl"
+    assert kwargs["command"] == [
+        "grade",
+        "--submission",
+        str(jsonl),
+        "--output-dir",
+        str(run_dir / "grading"),
+        "--data-dir",
+        DATA_DIR,
+    ]
+    # the line make_submission.py writes for the run (no submission: graded as missing)
+    line = {"competition_id": "spaceship-titanic", "submission_path": str(run_dir / "submission")}
+    line["submission_path"] += "/submission.csv"
+    assert json.loads(jsonl.read_text()) == line
+    assert kwargs["user"] == f"{os.getuid()}:{os.getgid()}"
+    # resource limits, but not the agent's runtime, GPUs or privileges
+    assert kwargs["mem_limit"] == "16g" and kwargs["nano_cpus"] == 4_000_000_000
+    assert not {"runtime", "device_requests", "privileged"} & set(kwargs)
+    assert grader.events == ["start", ("wait", 60), "remove"]
+    assert (run_dir / "grading" / "grader.log").read_text() == "graded\n"
+
+
+def test_hyperparameter_search_runs_are_graded_with_the_line_of_make_submission(tmp_path):
+    competition = _competition(tmp_path, HPS_ID, b"row_id,target\n0-1,0.0\n")
+    result, grader, run_dir = _grade(tmp_path, competition, _write_report)
+    line = json.loads((run_dir / "grading" / "submission.jsonl").read_text())
+    assert line["solution_file_path"] == str(run_dir.resolve() / "code")
+    assert line["submission_path"] == str(run_dir.resolve() / "submission")
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout", "no report"])
+def test_grading_failures_are_reported_not_raised(tmp_path, failure):
+    competition = _competition(tmp_path, "spaceship-titanic", SPACESHIP_SAMPLE)
+
+    def behaviour(kwargs):
+        if failure == "timeout":
+            raise requests.exceptions.ReadTimeout("read timed out")
+        return 1 if failure == "exit" else 0
+
+    result, grader, _ = _grade(tmp_path, competition, behaviour)
+    expected = {"exit": "exited with code 1", "timeout": "took more", "no report": "no report"}
+    assert expected[failure] in result["error"]
+    assert grader.events[-1] == "remove"
+    assert ("kill" in grader.events) is (failure == "timeout")
+
+
+# ---------------------------------------------------------------- run_agent.py
+
+
+def _run_worker(monkeypatch, tmp_path, run, grade, skip_grading=False) -> dict:
+    run_agent = importlib.import_module("run_agent")
+    args = SimpleNamespace(
+        retain=False, skip_grading=skip_grading, grader_image="g", grading_timeout=7
+    )
+    monkeypatch.setattr(run_agent, "args", args, raising=False)
+    monkeypatch.setattr(run_agent, "run_in_container", run)
+    monkeypatch.setattr(run_agent, "grade_run", grade)
+    task = run_agent.Task(
+        run_id="run-1",
+        seed=0,
+        image="img",
+        path_to_run_group=tmp_path,
+        path_to_run=tmp_path,
+        agent=SimpleNamespace(id="agent", name="img"),
+        competition=SimpleNamespace(id="x"),
+        container_config={"mem_limit": "1g"},
+    )
+    outputs = {}
+
+    async def run_one():
+        queue = asyncio.Queue()
+        queue.put_nowait(task)
+        worker = asyncio.create_task(run_agent.worker(0, queue, "client", outputs))
+        await queue.join()
+        worker.cancel()
+
+    asyncio.run(run_one())
+    return outputs["run-1"]
+
+
+def test_each_run_is_graded_after_its_agent_phase(tmp_path, monkeypatch):
+    events = []
+
+    def run(**kwargs):
+        events.append("agent")
+        return 0
+
+    def grade(**kwargs):
+        events.append(("grade", kwargs["image"], kwargs["timeout"], kwargs["container_config"]))
+        return {"score": 0.5, "valid_submission": True}
+
+    output = _run_worker(monkeypatch, tmp_path, run, grade)
+    assert events == ["agent", ("grade", "g", 7, {"mem_limit": "1g"})]
+    assert output["success"] and output["grading"] == {"score": 0.5, "valid_submission": True}
+
+    events.clear()
+    assert "grading" not in _run_worker(monkeypatch, tmp_path, run, grade, skip_grading=True)
+    assert events == ["agent"]
+
+
+def test_failed_agent_phases_are_graded_too(tmp_path, monkeypatch):
+    def run(**kwargs):
+        raise RuntimeError("container failed")
+
+    output = _run_worker(monkeypatch, tmp_path, run, lambda **kw: {"error": "RuntimeError: x"})
+    # every run counts, as in make_submission.py: a run without a submission is graded invalid
+    assert output["success"] is False and output["grading"] == {"error": "RuntimeError: x"}
+
+
+def test_run_agent_needs_the_grader_image(tmp_path, monkeypatch):
+    run_agent = importlib.import_module("run_agent")
+
+    def missing(name):
+        raise docker.errors.ImageNotFound(name)
+
+    client = SimpleNamespace(images=SimpleNamespace(get=missing))
+    monkeypatch.setattr(run_agent.docker, "from_env", lambda: client)
+    monkeypatch.setattr(run_agent, "registry", run_agent.registry)  # main() replaces it
+    args = SimpleNamespace(
+        data_dir=str(tmp_path), agent_id="dummy", skip_grading=False, grader_image="missing"
+    )
+    with pytest.raises(ValueError, match="--skip-grading"):
+        asyncio.run(run_agent.main(args))
