@@ -272,8 +272,28 @@ graded.
 
 - The amp sample-score constant is 124.93847 (821b7cd).
 - The slow gold-medal integration test skips challenges without a real leaderboard (696cfe0).
-- `test_data.py`'s prepare test has its decorators back (119d2b3); like the download test, it
-  needs Kaggle credentials.
+- `test_data.py`'s prepare test has its decorators back (119d2b3).
+- `test_data.py` runs offline (00b6f4e). Its six cases called the real Kaggle API, so they failed
+  on every machine without Kaggle credentials and were skipped in GitHub Actions. A fake Kaggle
+  API now serves a tiny synthetic zip per competition: the download test runs the real
+  `download_dataset`, and the prepare test runs the real `download_and_prepare_dataset` with each
+  competition's own prepare function. Its checksums are written to a temporary file, not compared
+  with the shipped ones, which belong to the real data. The integration tests still cover the
+  real downloads.
+- The integration tests are marked `network` (58249d6): `-m "not network"` deselects them.
+
+## Packaging and CI
+
+- **CI** (6ffafd5, 125551e): a GitHub Actions workflow runs ruff 0.6.9 (`check` and
+  `format --check`) and the tests not marked `network` on Python 3.11, with CPU-only PyTorch, for
+  pushes to `main` and for pull requests. It needs no secrets. README.md gives the same commands
+  for a local run.
+- **ruff** is pinned to 0.6.9 in the dev extra (1d50468), the version CI uses. The extra allowed
+  any ruff >= 0.3.0, and ruff 0.16.9 would reformat 32 files.
+- **pre-commit**: `.pre-commit-config.yaml` (9bdd682) runs the `ruff` and `ruff-format` hooks of
+  ruff-pre-commit v0.6.9. The README's `pre-commit install` had no configuration to install.
+- **h5py** is a declared dependency, `h5py>=3.11` (510d2bd). `timeseriesgym/utils.py` imports it,
+  but it was only installed because tensorflow depends on it.
 
 ## No change in behaviour
 
