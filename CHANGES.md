@@ -149,6 +149,12 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
   49 (0.76343), median 0.77337; Seasonal_Naive scores 1.0 and Naive 1.02262. `leaderboard.py`
   rebuilds the file from the pinned revision.
 - **Non-finite scores** never earn a medal (229df50).
+- **`is_lower_better` in reports** comes from each config's new `grader.lower_is_better`
+  (b94eb3b). It came from the leaderboard's order only, so without a real leaderboard it was None
+  and was written as false: wrong for csdi-implement-model-pm25, csdi-reproduce-pm25 and
+  time-series-library-long-horizon-forecast, where lower is better. A direction that is still
+  unknown (a config without the key) is written as null. Medals are ranked as before: a test
+  checks that every configured direction agrees with the challenge's real leaderboard.
 - **`awards_medals`** is now loaded into `Competition` but stays informational, as on Kaggle:
   new-york-city-taxi-fare-prediction and spaceship-titanic (`false`, real leaderboards) keep
   their medals (696cfe0).
