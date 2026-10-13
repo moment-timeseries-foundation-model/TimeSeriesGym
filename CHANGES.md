@@ -56,6 +56,11 @@ under "Scores and validity", "Hyperparameter search", "Feature enhancement" and 
   A 2.4 kB file declaring 3.2 GB of never-written data was read into memory and the grading
   process was OOM-killed. The largest legitimate submission (TSL long-horizon in float64)
   declares 3,684 MiB.
+- **.npy submissions**: the header is read first, and the array may declare at most the HDF5 cap
+  above and must store all the data it declares; a zip named `.npy` is invalid (d7a2382).
+  `np.load` read all the declared data (a sparse file of 100 MiB of zeros, for MOMENT's 50
+  answers, was read in full before the shape check), and returned a zip as an `NpzFile`. The
+  shipped MOMENT and TSL iTransformer samples load as before.
 - **Unreadable submissions**: a ragged CSV, a wrong suffix, an unreadable `.h5` or `.npy`, or a
   code submission that does not import, is reported as invalid instead of aborting the whole
   `timeseriesgym grade` batch (5e8750c). One bad agent file used to lose the report for every
@@ -130,6 +135,10 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
 - **`awards_medals`** is now loaded into `Competition` but stays informational, as on Kaggle:
   new-york-city-taxi-fare-prediction and spaceship-titanic (`false`, real leaderboards) keep
   their medals (696cfe0).
+- **osic-pulmonary-fibrosis-progression**: `leaderboard.csv` lists all 2,097 teams of Kaggle's
+  final leaderboard (7b15e32); it listed the top 20, so Kaggle's rule ranked on 20 teams: gold at
+  rank 2 (-6.8311), silver 4 (-6.8347), bronze 8 (-6.8374), median -6.8395. Now gold is rank 14
+  (-6.8412), silver 104 (-6.8533), bronze 209 (-6.8683), median -6.8993. Scores do not change.
 
 ## Prepared data and checksums
 
@@ -157,6 +166,11 @@ Rebuilding these challenges gives different files; results on the old data are n
   PhysioNet 1.0.0 release (129bd2e, 80294d9). The old zip checksum held file times and could never
   match; the old h5 values could not be reproduced with the pinned libraries (upstream's sample has
   4,141 test beats, a rebuild 4,139). The download now fails on HTTP errors (bf41cd7).
+- **MIT-BIH-Arrhythmia-Weak-Supervision**: the Snorkel tutorial is downloaded from a commit
+  (snorkel-tutorials 2ba84e4), not `refs/heads/master`, and the docs PDF from Release 0.9.7, not
+  `latest`; both are checked against an MD5 checksum, also with `--skip-verification` (7789b14).
+  The tutorial and the two extracted text files are unchanged; `snorkel-docs.pdf` differs from
+  the `latest` build in 66 bytes of build metadata.
 - **gift-eval-short-horizon**: unchanged. Its documented source is the Git LFS bundle, whose zip
   matches `checksums.yaml`; the Hugging Face download path never matched it.
 - **m5-forecasting-accuracy**: the public `sell_prices.csv` has every training week (6,597,201
@@ -254,6 +268,12 @@ ba20262, 7c8ab69, 1982829, 9d33b49, 2fea25d, 7184ca2, ee128f2, fe08ba1, bf7d9c8,
 21a5539, 630b7c3, 2c6a043, fa269d1, e30030e, 948a8c4, a9f20f7, f88e57a, cd734df, 617f82d, e232319,
 ddba7bf, c044e1d, 9e5e756, 7c12345 and b8026f5. They change what agents are told, not how they are
 graded.
+
+The descriptions of LANL-Earthquake-Prediction, amp-parkinsons-disease-progression-prediction and
+ashrae-energy-prediction, and a new README section, say that their medals compare scores on
+TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011): LANL's segments
+have 15,000 rows (Kaggle's 150,000), amp's test patients come from Kaggle's training data, and
+ashrae's leaderboard is Kaggle's public one, of another period and driven by a label leak.
 
 ## Tests
 
