@@ -1,7 +1,9 @@
 import ast
+import io
 import os
 import re
 import subprocess
+import tokenize
 from pathlib import Path
 
 import pandas as pd
@@ -155,6 +157,7 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
     max_score = 0.0
 
     logger.info("[TENSORBOARD] Starting TensorBoard usage evaluation")
+    training_file = strip_comments(training_file)  # commented-out code earns nothing
 
     # Check for TensorBoard import
     has_tb_import = re.search(
@@ -200,7 +203,7 @@ def evaluate_tensorboard_usage(training_file: str, solution_path: Path) -> float
     has_logs = False
     for log_dir in tensorboard_log_dirs:
         log_path = solution_path / log_dir
-        if log_path.exists() and any(log_path.iterdir()):
+        if log_path.is_dir() and any(log_path.rglob("events.out.tfevents.*")):
             has_logs = True
             log_files = list(log_path.glob("**/*"))
             logger.info(f"[TENSORBOARD] Found {len(log_files)} log files in {log_dir}/")
@@ -276,17 +279,9 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
             return score
 
         # Check for module-level docstrings
-        model_docstring = False
-        if len(model_ast.body) > 0 and isinstance(model_ast.body[0], ast.Expr):
-            if hasattr(model_ast.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                if isinstance(model_ast.body[0].value, ast.Constant) and isinstance(
-                    model_ast.body[0].value.value, str
-                ):
-                    model_docstring = True
-                    score += 0.1
-            elif isinstance(model_ast.body[0].value, ast.Str):  # Older Python versions
-                model_docstring = True
-                score += 0.1
+        model_docstring = ast.get_docstring(model_ast) is not None
+        if model_docstring:
+            score += 0.1
 
         max_score += 0.1
         if model_docstring:
@@ -294,17 +289,9 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
         else:
             logger.info("[CODE QUALITY] ✗ Model file missing module docstring: 0.0/0.1")
 
-        training_docstring = False
-        if len(training_ast.body) > 0 and isinstance(training_ast.body[0], ast.Expr):
-            if hasattr(training_ast.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                if isinstance(training_ast.body[0].value, ast.Constant) and isinstance(
-                    training_ast.body[0].value.value, str
-                ):
-                    training_docstring = True
-                    score += 0.1
-            elif isinstance(training_ast.body[0].value, ast.Str):  # Older Python versions
-                training_docstring = True
-                score += 0.1
+        training_docstring = ast.get_docstring(training_ast) is not None
+        if training_docstring:
+            score += 0.1
 
         max_score += 0.1
         if training_docstring:
@@ -357,9 +344,7 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
             )
 
         # Check for docstring format (Args/Returns sections)
-        has_args_returns = has_docstring_sections(
-            model_file, ["Args", "Returns"]
-        ) or has_docstring_sections(training_file, ["Args", "Returns"])
+        has_args_returns = has_docstring_sections([model_ast, training_ast], ["Args", "Returns"])
         max_score += 0.1
         if has_args_returns:
             score += 0.1
@@ -397,69 +382,70 @@ def evaluate_code_quality(model_file: str, training_file: str) -> float:
 
 
 def has_type_hints(tree):
-    """Check if AST has type hints in function definitions."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            # Check return annotation
-            if node.returns:
-                return True
-
-            # Check arguments
-            for arg in node.args.args:
-                if arg.annotation:
-                    return True
-    return False
+    """Check that every function annotates its parameters (except self/cls) and its return; an
+    `__init__` may leave out `-> None`, as PEP 484 allows."""
+    functions = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
+    for node in functions:
+        args = node.args
+        params = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+        params = [arg for arg in params if arg is not None and arg.arg not in ("self", "cls")]
+        no_return = node.returns is None and node.name != "__init__"
+        if no_return or any(arg.annotation is None for arg in params):
+            return False
+    return bool(functions)
 
 
 def has_class_docstrings(tree):
-    """Check if classes have docstrings."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            # Check if first statement in class body is a docstring
-            if node.body and isinstance(node.body[0], ast.Expr):
-                if hasattr(node.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                    if isinstance(node.body[0].value, ast.Constant) and isinstance(
-                        node.body[0].value.value, str
-                    ):
-                        return True
-                elif isinstance(node.body[0].value, ast.Str):  # Older Python versions
-                    return True
-    return False
+    """Check that every class has a docstring."""
+    classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+    return bool(classes) and all(ast.get_docstring(node) is not None for node in classes)
 
 
 def has_function_docstrings(tree):
     """Check if functions have docstrings."""
     has_docs = False
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             # Skip very small helper functions (likely don't need docs)
             if len(node.body) <= 2:
                 continue
 
-            # Check if first statement in function body is a docstring
-            if node.body and isinstance(node.body[0], ast.Expr):
-                if hasattr(node.body[0].value, "value"):  # Python 3.8+ (ast.Constant)
-                    if isinstance(node.body[0].value, ast.Constant) and isinstance(
-                        node.body[0].value.value, str
-                    ):
-                        has_docs = True
-                    elif len(node.body) > 3:  # More than a tiny function without docs
-                        return False
-                elif isinstance(node.body[0].value, ast.Str):  # Older Python versions
-                    has_docs = True
-                else:
-                    # If we find a substantial function without docs, return False
-                    if len(node.body) > 3:  # More than a tiny function
-                        return False
+            if ast.get_docstring(node) is not None:
+                has_docs = True
+            elif len(node.body) > 3:  # More than a tiny function without docs
+                return False
     return has_docs
 
 
-def has_docstring_sections(code, sections):
-    """Check if docstrings contain specific sections."""
-    for section in sections:
-        if f"{section}:" in code:
-            return True
-    return False
+def has_docstring_sections(trees, sections):
+    """Check that each section appears in a docstring (not in comments or code)."""
+    documented = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+    docstrings = [
+        ast.get_docstring(node) or ""
+        for tree in trees
+        for node in ast.walk(tree)
+        if isinstance(node, documented)
+    ]
+    return all(any(f"{section}:" in doc for doc in docstrings) for section in sections)
+
+
+# A YAML comment: `#` at the start of a line or after whitespace, outside quoted strings (group 1,
+# which is kept: `name: "run #1"` is not a comment).
+YAML_COMMENT = re.compile(r"""("(?:[^"\\\n]|\\.)*"|'(?:[^'\n]|'')*')|(?:^|(?<=\s))#.*""", re.M)
+
+
+def strip_comments(code: str) -> str:
+    """Remove the comments from Python source, so that patterns in them are not matched."""
+    try:
+        tokens = [
+            token
+            for token in tokenize.generate_tokens(io.StringIO(code).readline)
+            if token.type != tokenize.COMMENT
+        ]
+        return tokenize.untokenize(tokens)
+    except (tokenize.TokenError, SyntaxError, ValueError):
+        # not valid Python: drop everything after a `#`
+        return re.sub(r"#.*", "", code)
 
 
 def check_linting(model_file_path: str, training_file_path: str) -> tuple[float, list[str]]:
@@ -579,6 +565,9 @@ def evaluate_hydra_usage(training_file: str, config_file: str) -> float:
     max_score = 0.0
 
     logger.info("[HYDRA] Starting Hydra usage evaluation")
+    training_file = strip_comments(training_file)  # commented-out code earns nothing
+    if config_file:
+        config_file = YAML_COMMENT.sub(lambda m: m.group(1) or "", config_file)
 
     # Check for Hydra import
     has_hydra_import = re.search(r"import\s+hydra", training_file) or re.search(

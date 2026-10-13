@@ -1,3 +1,5 @@
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -5,7 +7,16 @@ import pandas as pd
 from numpy import ndarray
 from scipy.special import softmax
 
-from timeseriesgym.utils import InvalidSubmissionError, get_logger
+from timeseriesgym.utils import (
+    RUNTIME_ONLY_HYPERPARAMETERS,
+    InvalidSubmissionError,
+    _values_differ,
+    get_logger,
+    have_different_hyperparameters,
+    have_hyperparameter_searching_attempt,
+    load_models,
+    load_submissions,
+)
 
 logger = get_logger(__name__)
 
@@ -104,6 +115,15 @@ def is_one_hot_encoded(xs: ndarray) -> bool:
     return is_one_hot
 
 
+def download_file(url: str, destination: Path) -> Path:
+    """Downloads `url` to `destination`; raises on any HTTP or network error.
+
+    `curl -f` fails on an HTTP error instead of saving the error page as the file.
+    """
+    subprocess.run(["curl", "-fsSL", "-o", str(destination), url], check=True)
+    return destination
+
+
 def get_ids_from_tf_records(tf_record_path: Path, id_feature: str = "image_name") -> list[str]:
     import tensorflow as tf  # Import only if needed, otherwise it slows down the module import
 
@@ -147,6 +167,53 @@ def prepare_for_accuracy_metric(
     y_true = answers[target_column].to_numpy()
 
     return {"y_true": y_true, "y_pred": y_pred}
+
+
+def prepare_for_id_matched_metric(
+    submission: pd.DataFrame,
+    answers: pd.DataFrame,
+    target_column: str,
+    id_columns: list[str],
+) -> dict:
+    """
+    Pairs each answer row with the submission row that has the same ids, in the answers' order,
+    so that a correct submission gets the same score in any row order.
+
+    The submission must contain exactly the answers' ids, each once.
+    """
+    for column in [*id_columns, target_column]:
+        assert column in answers.columns, f"Answers must have a `{column}` column"
+        if column not in submission.columns:
+            raise InvalidSubmissionError(f"Submission must have a `{column}` column")
+    if len(submission) != len(answers):
+        raise InvalidSubmissionError(
+            f"Submission length {len(submission)} does not match answer length {len(answers)}"
+        )
+
+    submission_ids = pd.MultiIndex.from_frame(submission[id_columns])
+    if submission_ids.has_duplicates:
+        raise InvalidSubmissionError(f"Submission has duplicate {id_columns} values")
+    rows = submission_ids.get_indexer(pd.MultiIndex.from_frame(answers[id_columns]))
+    if (rows < 0).any():
+        raise InvalidSubmissionError(
+            f"Submission and answers {id_columns} values do not match: "
+            f"{(rows < 0).sum()} answer rows have no submission row"
+        )
+
+    y_pred = submission[target_column].to_numpy()[rows]
+    y_true = answers[target_column].to_numpy()
+
+    return {"y_true": y_true, "y_pred": y_pred}
+
+
+def check_finite(values, name: str) -> None:
+    """Raises InvalidSubmissionError unless every value is a finite number."""
+    try:
+        finite = np.isfinite(np.asarray(values, dtype=float)).all()
+    except (TypeError, ValueError) as err:
+        raise InvalidSubmissionError(f"Submission `{name}` values must be numbers") from err
+    if not finite:
+        raise InvalidSubmissionError(f"Submission `{name}` values must be finite (no NaN or inf)")
 
 
 def prepare_for_auroc_metric(
@@ -194,3 +261,118 @@ def prepare_for_auroc_metric(
     }
 
     return roc_auc_inputs
+
+
+def has_default_hyperparameters(model, class_name: str) -> bool:
+    """
+    Whether `model` is an instance of `class_name` (module and qualified name, e.g.
+    `xgboost.sklearn.XGBRegressor`) whose `get_params()` equal those of `class_name()`, apart
+    from RUNTIME_ONLY_HYPERPARAMETERS.
+    """
+    cls = type(model)
+    if f"{cls.__module__}.{cls.__qualname__}" != class_name or not hasattr(model, "get_params"):
+        return False
+    params, defaults = model.get_params(), cls().get_params()
+    missing = object()
+    return not any(
+        _values_differ(params.get(key, missing), defaults.get(key, missing))
+        for key in (params.keys() | defaults.keys()) - RUNTIME_ONLY_HYPERPARAMETERS
+    )
+
+
+def _solution_sources(solution_path: Path) -> list[str]:
+    """The source of the solution script, or of the `.py` files under the solution directory.
+    A file that is not a regular file (symlinks under the directory are not followed) or is not
+    UTF-8 text is skipped with a warning, so one stray file does not stop the grading."""
+    paths = sorted(solution_path.rglob("*.py")) if solution_path.is_dir() else [solution_path]
+    sources = []
+    for path in paths:
+        try:
+            if not path.is_file() or (path != solution_path and path.is_symlink()):
+                raise OSError("not a regular file")
+            sources.append(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning(f"[WARNING] Skipped the solution file {path}: {e}")
+    return sources
+
+
+def grade_relative_improvement(
+    submission_folder_path: Path,
+    answers: pd.DataFrame,
+    hyperparameter_search_config: dict,
+    solution_file_path: Path | None,
+    sample_submission_path: Path | None,
+    grade_fn: Callable[[pd.DataFrame, pd.DataFrame], float],
+    lower_is_better: bool,
+    packages_to_look_for: list[str] | None = None,
+    default_baseline: str | None = None,
+) -> float:
+    """
+    Grades a hyperparameter search as the relative improvement of the improved submission's
+    score over the score of the challenge's sample submission, negated when lower scores are
+    better. The baseline files are written by the agent, so they only decide whether the
+    submission is valid: the baseline's score does not count. Raises ValueError if the sample
+    submission (`sample_submission_path`, the challenge's own file) is missing.
+
+    The solution code is required: `solution_file_path` is a script, or a directory whose `.py`
+    files are searched. Raises InvalidSubmissionError without it, or if the baseline or improved
+    submission cannot be graded. Returns -inf if the solution shows no hyperparameter search
+    with one of `packages_to_look_for` (see `have_hyperparameter_searching_attempt` for the
+    default list), if the two models have the same hyperparameters, or, when `default_baseline`
+    names a class, if the baseline model is not that class with default hyperparameters (see
+    `has_default_hyperparameters`).
+    """
+    if sample_submission_path is None or not Path(sample_submission_path).is_file():
+        raise ValueError(
+            "The sample submission is required to grade a hyperparameter search, but none was "
+            f"found at {sample_submission_path}."
+        )
+    # Checked first, before any submitted model is loaded.
+    if solution_file_path is None or not Path(solution_file_path).exists():
+        raise InvalidSubmissionError(
+            "Submission invalid! The solution code is required to grade a hyperparameter search, "
+            f"but none was found at {solution_file_path}."
+        )
+    logger.info("[INFO] Searching the solution code for a hyperparameter searching attempt.")
+    if not any(
+        have_hyperparameter_searching_attempt(source, packages_to_look_for=packages_to_look_for)
+        for source in _solution_sources(Path(solution_file_path))
+    ):
+        logger.info("[INFO] Hyperparameter searching attempt not found.")
+        return np.inf * -1
+
+    baseline_model = load_models(
+        submission_folder_path / hyperparameter_search_config["baseline_model_name"]
+    )
+    improved_model = load_models(
+        submission_folder_path / hyperparameter_search_config["improved_model_name"]
+    )
+    baseline_submission = load_submissions(
+        submission_folder_path / hyperparameter_search_config["baseline_submission_name"]
+    )
+    improved_submission = load_submissions(
+        submission_folder_path / hyperparameter_search_config["improved_submission_name"]
+    )
+
+    if not have_different_hyperparameters(baseline_model, improved_model):
+        logger.info("[INFO] The hyperparameters are the same as the baseline model.")
+        return np.inf * -1
+
+    if default_baseline is not None and not has_default_hyperparameters(
+        baseline_model.model, default_baseline
+    ):
+        logger.info(f"[INFO] The baseline model is not {default_baseline}() with defaults.")
+        return np.inf * -1
+
+    baseline_score = grade_fn(baseline_submission, answers)  # must be gradable; does not count
+    sample_score = grade_fn(load_submissions(Path(sample_submission_path)), answers)
+    improved_score = grade_fn(improved_submission, answers)
+
+    sign = -1 if lower_is_better else 1
+    improvement = sign * (improved_score - sample_score) / sample_score
+    logger.info(f"[INFO] Baseline score (not counted): {baseline_score}")
+    logger.info(f"[INFO] Sample submission score: {sample_score}")
+    logger.info(f"[INFO] Improved score: {improved_score}")
+    logger.info(f"[INFO] Improvement over the sample submission: {improvement}")
+
+    return improvement

@@ -6,9 +6,13 @@ from timeseriesgym.utils import InvalidSubmissionError
 
 
 def grade(submission: h5py.Dataset, answers: h5py.Dataset) -> float:
-    # Prepare for accuracy metric does all the basic checks
-    if len(submission) != len(answers):
-        raise InvalidSubmissionError("Submission must have the same length as the answers.")
+    # One row per beat and one column per class, exactly as in the answers: argmax over any
+    # other number of columns would still give class indices.
+    if np.shape(submission) != np.shape(answers):
+        raise InvalidSubmissionError(
+            f"Submission shape {np.shape(submission)} does not match answers shape "
+            f"{np.shape(answers)}"
+        )
 
     y_pred = np.argmax(submission, axis=1)
     y_true = np.argmax(answers, axis=1)

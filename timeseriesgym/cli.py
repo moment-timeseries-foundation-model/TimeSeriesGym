@@ -10,12 +10,11 @@ from timeseriesgym.data import (
 )
 from timeseriesgym.grade import (
     grade_code,
+    grade_feature_enhancement,
     grade_hyperparameter_search,
     grade_jsonl,
     grade_sample,
 )
-from timeseriesgym.judge import llm_judge
-from timeseriesgym.reasonableness import evaluate_reasonableness
 from timeseriesgym.registry import registry
 from timeseriesgym.utils import get_logger
 
@@ -23,6 +22,7 @@ logger = get_logger(__name__)
 
 
 def main():
+    competition_ids = registry.list_competition_ids()  # listed in the --competition-id help texts
     parser = argparse.ArgumentParser(description="Runs agents on Kaggle competitions.")
     subparsers = parser.add_subparsers(dest="command", help="Sub-command to run.")
 
@@ -34,7 +34,7 @@ def main():
     parser_prepare.add_argument(
         "-c",
         "--competition-id",
-        help=f"ID of the competition to prepare. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to prepare. Valid options: {competition_ids}",
         type=str,
         required=False,
     )
@@ -150,7 +150,7 @@ def main():
     )
     parser_grade_sample.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_sample.add_argument(
@@ -172,12 +172,13 @@ def main():
     )
     parser_grade_model.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_model.add_argument(
         "--solution-file-path",
-        help="Path to the solution script file.",
+        help="The solution code, a script or a directory of .py files (e.g. the run's code/), "
+        "which is checked for a hyperparameter search. Without it, the submission is invalid.",
         type=str,
         required=False,
         default=None,
@@ -201,10 +202,38 @@ def main():
     )
     parser_grade_code.add_argument(
         "competition_id",
-        help=f"ID of the competition to grade. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
         type=str,
     )
     parser_grade_code.add_argument(
+        "--data-dir",
+        help="Path to the directory where the data will be stored.",
+        required=False,
+        default=registry.get_data_dir(),
+    )
+
+    # Grade feature-enhancement sub-parser
+    parser_grade_fe = subparsers.add_parser(
+        name="grade-feature-enhancement",
+        help="Grade a feature-enhancement submission folder.",
+    )
+    parser_grade_fe.add_argument(
+        "folder_path",
+        help="Submission folder (submission.csv, model/training code, conf/, TensorBoard logs).",
+        type=str,
+    )
+    parser_grade_fe.add_argument(
+        "competition_id",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
+        type=str,
+    )
+    parser_grade_fe.add_argument(
+        "--solution-files-path",
+        help="Folder with the code, config and logs (default: the submission folder).",
+        required=False,
+        default=None,
+    )
+    parser_grade_fe.add_argument(
         "--data-dir",
         help="Path to the directory where the data will be stored.",
         required=False,
@@ -225,7 +254,7 @@ def main():
         "--competition-id",
         help=(
             "Name of the competition to download the leaderboard for. Valid options: "
-            f"{registry.list_competition_ids()}"
+            f"{competition_ids}"
         ),
         type=str,
         required=False,
@@ -249,7 +278,7 @@ def main():
     parser_cleanup.add_argument(
         "-c",
         "--competition-id",
-        help=f"ID of the competition to clean up. Valid options: {registry.list_competition_ids()}",
+        help=f"ID of the competition to clean up. Valid options: {competition_ids}",
         type=str,
         required=False,
     )
@@ -396,6 +425,14 @@ def main():
         )
         logger.info("Competition report:")
         logger.info(json.dumps(report.to_dict(), indent=4))
+    if args.command == "grade-feature-enhancement":
+        new_registry = registry.set_data_dir(Path(args.data_dir))
+        competition = new_registry.get_competition(args.competition_id)
+        report = grade_feature_enhancement(
+            Path(args.folder_path), competition, path_to_solution_files=args.solution_files_path
+        )
+        logger.info("Competition report:")
+        logger.info(json.dumps(report.to_dict(), indent=4))
     if args.command == "grade-code":
         new_registry = registry.set_data_dir(Path(args.data_dir))
         competition = new_registry.get_competition(args.competition_id)
@@ -465,6 +502,10 @@ def main():
             parser_cleanup.error("Either --all or --competition-id must be specified.")
 
     if args.command == "judge":
+        # imported here: deepeval (telemetry, files in the working directory) is only
+        # needed for the LLM judge
+        from timeseriesgym.judge import llm_judge
+
         llm_judge(args.config, args.model, args.json)
 
     if args.command == "evaluate-reasonableness":
@@ -473,16 +514,18 @@ def main():
             logger.error(f"Code folder not found: {code_folder}")
             return
 
-        result = evaluate_reasonableness(
-            str(code_folder), model=args.model, verbose=args.verbose
-        )
+        # imported here for the same reason as the judge: deepeval is only needed for this command
+        from timeseriesgym.reasonableness import evaluate_reasonableness
+
+        result = evaluate_reasonableness(str(code_folder), model=args.model, verbose=args.verbose)
 
         if args.json:
             print(json.dumps(result.to_dict(), indent=2))
         else:
             logger.info("Reasonableness evaluation results:")
             logger.info(f"  Is Reasonable: {result.is_reasonable}")
-            logger.info(f"  Score: {result.score:.4f}")
+            score = "not evaluated" if result.score is None else f"{result.score:.4f}"
+            logger.info(f"  Score: {score}")
             logger.info(f"  Threshold: {result.threshold:.4f}")
             logger.info(f"  Has Suspicious Patterns: {result.has_suspicious_patterns}")
             logger.info(f"  Has Modeling Patterns: {result.has_modeling_patterns}")

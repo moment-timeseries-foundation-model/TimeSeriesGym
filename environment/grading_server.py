@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -19,17 +20,28 @@ def run_validation(submission: Path) -> str:
     return message
 
 
+ALLOWED_SUFFIXES = {".csv", ".npy", ".h5", ".hdf5", ".pkl", ".py"}
+
+
 @app.route("/validate", methods=["POST"])
 def validate():
     submission_file = request.files["file"]
-    submission_path = Path("/tmp/submission_to_validate.csv")
-    submission_file.save(submission_path)
+    suffix = Path(submission_file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        return jsonify({"result": f"Unsupported submission file type {suffix!r}."}), 400
+    # A new root-only directory per upload: the agent can write to /tmp, so it could plant or
+    # swap a fixed path there that this root process then writes and reads, and concurrent
+    # uploads would overwrite each other. Keep the suffix: validation checks it against the
+    # sample submission's.
+    with tempfile.TemporaryDirectory(prefix="validate-") as upload_dir:
+        submission_path = Path(upload_dir) / f"submission{suffix}"
+        submission_file.save(submission_path)
 
-    try:
-        result = run_validation(submission_path)
-    except Exception as e:
-        # Server error
-        return jsonify({"error": "An unexpected error occurred.", "details": str(e)}), 500
+        try:
+            result = run_validation(submission_path)
+        except Exception as e:
+            # Server error
+            return jsonify({"error": "An unexpected error occurred.", "details": str(e)}), 500
 
     return jsonify({"result": result})
 

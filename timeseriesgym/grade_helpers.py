@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from timeseriesgym.utils import InvalidSubmissionError, get_logger, import_fn
@@ -20,8 +21,11 @@ class GradingInput:
     submission_folder_path: Path | None = None
     hyperparameter_search_config: dict | None = None
     solution_file_path: Path | None = None
+    sample_submission_path: Path | None = None
     submission_file_path: Path | None = None
     coding_config: dict | None = None
+    feature_enhancement_config: dict | None = None
+    solution_files_path: Path | None = None
 
 
 class Grader:
@@ -134,21 +138,26 @@ class Grader:
             num_teams
         )
 
+        no_medal = {
+            "gold_medal": False,
+            "silver_medal": False,
+            "bronze_medal": False,
+            "above_median": False,
+            "gold_threshold": gold_threshold,
+            "silver_threshold": silver_threshold,
+            "bronze_threshold": bronze_threshold,
+            "median_threshold": median_threshold,
+        }
+
         if score is None:
-            return {
-                "gold_medal": False,
-                "silver_medal": False,
-                "bronze_medal": False,
-                "above_median": False,
-                "gold_threshold": gold_threshold,
-                "silver_threshold": silver_threshold,
-                "bronze_threshold": bronze_threshold,
-                "median_threshold": median_threshold,
-            }
+            return no_medal
 
         assert isinstance(
             score, float | int
         ), f"Expected `score` to be a `float` or `int` but got a {type(score)}."
+
+        if not np.isfinite(score):  # e.g. -inf from an invalid hyperparameter search
+            return no_medal
 
         gold_medal = score <= gold_threshold if lower_is_better else score >= gold_threshold
         silver_medal = not gold_medal and (
@@ -173,10 +182,30 @@ class Grader:
         }
 
 
+def _score_to_json(score):
+    """Scores are written as strings (or None); dict scores (feature enhancement's sub-scores,
+    per-dataset errors) stay JSON objects instead of becoming their Python repr."""
+    if isinstance(score, dict):
+        return {str(k): _plain(v) for k, v in score.items()}
+    return str(score) if score is not None else None  # TODO: support non-float output better
+
+
+def _plain(value):
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _score_from_json(score):
+    if isinstance(score, dict) or score is None:
+        return score
+    return float(score)
+
+
 @dataclass(frozen=True)
 class CompetitionReport:
     competition_id: str
-    score: float | None
+    score: float | dict | None
     gold_threshold: float | None
     silver_threshold: float | None
     bronze_threshold: float | None
@@ -196,9 +225,7 @@ class CompetitionReport:
         # Convert all values to JSON-compatible types explicitly
         return {
             "competition_id": self.competition_id,
-            "score": str(self.score)
-            if self.score is not None
-            else None,  # TODO: find a better way to support none-float output
+            "score": _score_to_json(self.score),
             "gold_threshold": float(self.gold_threshold),
             "silver_threshold": float(self.silver_threshold),
             "bronze_threshold": float(self.bronze_threshold),
@@ -220,7 +247,7 @@ class CompetitionReport:
         data = data.copy()  # Avoid accidentally mutating the original dictionary
         typed_data = {
             "competition_id": data["competition_id"],
-            "score": float(data["score"]) if data["score"] is not None else None,
+            "score": _score_from_json(data["score"]),
             "gold_threshold": float(data["gold_threshold"]),
             "silver_threshold": float(data["silver_threshold"]),
             "bronze_threshold": float(data["bronze_threshold"]),

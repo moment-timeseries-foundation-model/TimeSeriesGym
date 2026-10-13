@@ -56,7 +56,7 @@ pre-commit install
 
 ### System Requirements
 
-- **Python**: 3.9 or higher
+- **Python**: 3.11 or higher (3.11.4 or later to run agents with `run_agent.py`)
 - **Storage**: Several GB (5-20GB depending on competitions)
 - **Memory**: At least 8GB RAM recommended
 - **Internet**: Required for dataset downloads
@@ -73,6 +73,7 @@ TimeSeriesGym provides a comprehensive command-line interface:
 | `grade-sample` | Grade a single competition submission |
 | `grade-hyperparameter-search` | Evaluate hyperparameter optimization results |
 | `grade-code` | Grade a Python code submission |
+| `grade-feature-enhancement` | Grade a feature-enhancement submission folder |
 | `judge` | Run LLM-as-a-judge evaluation on artifacts |
 | `evaluate-reasonableness` | Check if code makes a genuine modeling attempt |
 | `dev` | Tools for developers extending the benchmark |
@@ -126,7 +127,21 @@ Create a JSONL file with submission entries:
 ```json
 {"competition_id": "amp-parkinsons-disease-progression-prediction", "submission_path": "predictions1.csv"}
 {"competition_id": "ashrae-energy-prediction", "submission_path": "predictions2.csv"}
+{"competition_id": "optiver-realized-volatility-prediction-hyperparameter-search", "submission_path": "run/submission", "solution_file_path": "run/code"}
+{"competition_id": "ptb-xl-classification-challenge-feature-enhancement", "submission_path": "run/submission", "solution_files_path": "run/code"}
 ```
+
+For hyperparameter-search and feature-enhancement challenges, `submission_path` is the submission
+folder. Hyperparameter-search entries also need `solution_file_path`: the solution code, a script
+or a directory of `.py` files, which the graders require and check for a hyperparameter search.
+Feature-enhancement entries may give `solution_files_path` (note the plural): the folder with
+`model.py`, `train.py`, `conf/config.yaml` and the TensorBoard logs, by default the submission
+folder.
+
+`experiments/make_submission.py` writes these entries for a run group, one per run in its
+`metadata.json`, failed runs included: a run without a submission is graded as invalid, so every
+run counts in the report. It uses the run's `code/` directory (the agent's `/home/code`) as
+`solution_file_path`, and as `solution_files_path` when the submission folder has no `model.py`.
 
 Then run:
 
@@ -143,8 +158,25 @@ timeseriesgym grade-sample predictions.csv amp-parkinsons-disease-progression-pr
 #### Evaluating Hyperparameter Search Results
 
 ```bash
-timeseriesgym grade-hyperparameter-search search_results/ optiver-realized-volatility-prediction-hyperparameter-search
+timeseriesgym grade-hyperparameter-search run/submission/ \
+  optiver-realized-volatility-prediction-hyperparameter-search \
+  --solution-file-path run/code/
 ```
+
+`--solution-file-path` is required: without the solution code (a script or a directory of `.py`
+files) the submission is graded as invalid.
+
+#### Evaluating Feature-Enhancement Submissions
+
+```bash
+timeseriesgym grade-feature-enhancement run/submission/ \
+  ptb-xl-classification-challenge-feature-enhancement \
+  --solution-files-path run/code/
+```
+
+The score is a dict of sub-scores (TensorBoard, code quality, Hydra configuration, accuracy) and
+their mean, `overall_score`. Without `--solution-files-path`, the code, configuration and logs are
+read from the submission folder.
 
 #### Evaluating Code Submissions
 
@@ -207,7 +239,8 @@ resnet-tensorflow-to-pytorch
 
 ### Full Competition Set
 
-The complete set of 33 challenges is available in `TimeSeriesGym/experiments/splits/all.txt`.
+The complete set of 31 gradeable challenges is available in
+`TimeSeriesGym/experiments/splits/all.txt` (the two CSDI challenges have no grader yet).
 
 ## Docker Environment
 
@@ -220,6 +253,13 @@ docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfi
 # Run the environment
 docker run timeseriesgym-env
 ```
+
+The image is the agent's container, and everything copied into it is readable by the agent.
+`.dockerignore` therefore limits the build context to the `timeseriesgym` package, `environment/`,
+`pyproject.toml`, `README.md` and `LICENSE`, without `timeseriesgym/data/` (the Git LFS archive of
+raw challenge data, which holds test answers). Everything else in the checkout, such as `runs/`,
+prepared data and `.env` files, stays out of the image. Do not rely on other repository files
+inside it.
 
 ### Environment Features
 

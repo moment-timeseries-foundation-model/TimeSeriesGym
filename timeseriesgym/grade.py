@@ -1,9 +1,13 @@
 """High-level grading functionality"""
 
+import ast
 import json
+import numbers
+import sys
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 from tqdm import tqdm
 
 from timeseriesgym.data import get_leaderboard, is_dataset_prepared
@@ -11,6 +15,7 @@ from timeseriesgym.grade_helpers import CodeCompetitionReport, CompetitionReport
 from timeseriesgym.registry import Competition, Registry
 from timeseriesgym.registry import registry as default_registry
 from timeseriesgym.utils import (
+    MAX_H5_BYTES,
     InvalidSubmissionError,
     get_logger,
     get_null_rank_info,
@@ -22,6 +27,50 @@ from timeseriesgym.utils import (
 )
 
 logger = get_logger(__name__)
+
+
+def _ensure_prepared(competition: Competition) -> None:
+    if not is_dataset_prepared(competition, grading_only=True):
+        raise ValueError(
+            f"Dataset for competition `{competition.id}` is not prepared! "
+            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
+        )
+
+
+def _max_h5_bytes(competition: Competition) -> int:
+    """What the datasets of an HDF5 submission may declare: 8 times the size of the answers file
+    (a submission holds the same entries, maybe in a wider dtype), within 64 MiB and MAX_H5_BYTES.
+    """
+    return min(MAX_H5_BYTES, max(64 * 2**20, 8 * competition.answers.stat().st_size))
+
+
+def _competition_report(
+    competition: Competition,
+    score,
+    rank_info: dict,
+    submission_path: Path,
+    submission_exists: bool,
+    valid_submission: bool,
+    is_lower_better: bool | None,
+) -> CompetitionReport:
+    return CompetitionReport(
+        competition_id=competition.id,
+        score=score,
+        gold_threshold=rank_info["gold_threshold"],
+        silver_threshold=rank_info["silver_threshold"],
+        bronze_threshold=rank_info["bronze_threshold"],
+        median_threshold=rank_info["median_threshold"],
+        any_medal=rank_info["gold_medal"] or rank_info["silver_medal"] or rank_info["bronze_medal"],
+        gold_medal=rank_info["gold_medal"],
+        silver_medal=rank_info["silver_medal"],
+        bronze_medal=rank_info["bronze_medal"],
+        above_median=rank_info["above_median"],
+        submission_exists=submission_exists,
+        valid_submission=valid_submission,
+        is_lower_better=is_lower_better,
+        created_at=datetime.now(),
+        submission_path=str(submission_path),
+    )
 
 
 def grade_jsonl(
@@ -41,7 +90,17 @@ def grade_jsonl(
         submission_path = Path(str(submission["submission_path"]))
         competition_id = submission["competition_id"]
         competition = registry.get_competition(competition_id)
-        single_report = grade_sample(submission_path, competition)
+        # grade_sample does not handle code or hyperparameter-search submissions
+        if competition.hyperparameter_search_config is not None:
+            solution = submission.get("solution_file_path")
+            single_report = grade_hyperparameter_search(submission_path, competition, solution)
+        elif competition.coding_config is not None:
+            single_report = grade_code(submission_path, competition)
+        elif competition.feature_enhancement_config is not None:
+            solution = submission.get("solution_files_path")
+            single_report = grade_feature_enhancement(submission_path, competition, solution)
+        else:
+            single_report = grade_sample(submission_path, competition)
         competitions_reports.append(single_report)
 
     aggregated_report = aggregate_reports(competitions_reports)
@@ -53,33 +112,37 @@ def grade_jsonl(
         )
     )
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     with open(save_path, "w") as f:
         json.dump(aggregated_report, f, indent=2)
     logger.info(purple(f"Saved summary report to {save_path}"))
 
 
-def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
-    """Grades a submission for the given competition."""
-
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
-
+def _check_suffix(path_to_submission: Path, competition: Competition) -> None:
     if competition.sample_submission.suffix != path_to_submission.suffix:
         raise InvalidSubmissionError(
             f"Submission invalid! Submission file {path_to_submission.suffix} is different from "
             f"the expected file extension {competition.sample_submission.suffix}"
         )
 
-    score = None
+
+def grade_sample(path_to_submission: Path, competition: Competition) -> CompetitionReport:
+    """Grades a submission for the given competition. A submission that is missing, has the
+    wrong file type or cannot be read is graded as invalid."""
+
+    _ensure_prepared(competition)
+
     submission_exists = path_to_submission.is_file()
-    submission_file = load_submissions(path_to_submission)
-    answers = load_answers(competition.answers)
-    grading_input = GradingInput(submission=submission_file, answers=answers)
-    score = competition.grader(grading_input)
+    try:
+        _check_suffix(path_to_submission, competition)
+        submission_file = load_submissions(path_to_submission, _max_h5_bytes(competition))
+    except Exception as e:  # e.g. a ragged CSV: invalid, rather than aborting a whole batch
+        logger.warning(f"Invalid submission {path_to_submission}: {e}")
+        score = None
+    else:
+        answers = load_answers(competition.answers)
+        grading_input = GradingInput(submission=submission_file, answers=answers)
+        score = competition.grader(grading_input)
 
     valid_submission = score is not None
     competition_leaderboard = get_leaderboard(competition)
@@ -91,23 +154,14 @@ def grade_sample(path_to_submission: Path, competition: Competition) -> Competit
         rank_info = get_null_rank_info()
         is_lower_better = None
 
-    return CompetitionReport(
-        competition_id=competition.id,
-        score=score,
-        gold_threshold=rank_info["gold_threshold"],
-        silver_threshold=rank_info["silver_threshold"],
-        bronze_threshold=rank_info["bronze_threshold"],
-        median_threshold=rank_info["median_threshold"],
-        any_medal=rank_info["gold_medal"] or rank_info["silver_medal"] or rank_info["bronze_medal"],
-        gold_medal=rank_info["gold_medal"],
-        silver_medal=rank_info["silver_medal"],
-        bronze_medal=rank_info["bronze_medal"],
-        above_median=rank_info["above_median"],
+    return _competition_report(
+        competition,
+        score,
+        rank_info,
+        submission_path=path_to_submission,
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         is_lower_better=is_lower_better,
-        created_at=datetime.now(),
-        submission_path=str(path_to_submission),
     )
 
 
@@ -121,13 +175,14 @@ def grade_hyperparameter_search(
     specified in description
     competition: Competition object
     """
-    if not is_dataset_prepared(competition, grading_only=True):
+    _ensure_prepared(competition)
+    if not competition.sample_submission.is_file():  # the score is measured over it
         raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
+            f"The sample submission of `{competition.id}` is missing, and the score of a "
+            f"hyperparameter search is measured over it. Please run "
+            f"`timeseriesgym prepare -c {competition.id}` to prepare the dataset."
         )
 
-    score = None
     answers = load_answers(competition.answers)
     hyperparameter_search_config = competition.hyperparameter_search_config
 
@@ -142,56 +197,65 @@ def grade_hyperparameter_search(
         answers=answers,
         hyperparameter_search_config=hyperparameter_search_config,
         solution_file_path=Path(path_to_solution) if path_to_solution else None,
+        sample_submission_path=competition.sample_submission,
     )
     score = competition.grader(grading_input)
 
     submission_exists = path_to_submission_folder.is_dir()
-    valid_submission = score is not None
-    competition_leaderboard = get_leaderboard(competition)
+    valid_submission = score is not None and np.isfinite(score)
+    # The score is a relative improvement over the sample submission, not a value on the
+    # (inherited) competition leaderboard's scale, so it is not ranked: ranking it against an
+    # RMSPE leaderboard counted -inf (an invalid search) as a gold medal.
+    rank_info = get_null_rank_info()
+    is_lower_better = False
 
-    if competition_leaderboard is not None:
-        rank_info = competition.grader.rank_score(score, competition_leaderboard)
-        is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
-    else:
-        rank_info = get_null_rank_info()
-        is_lower_better = None
-
-    return CompetitionReport(
-        competition_id=competition.id,
-        score=score,
-        gold_threshold=rank_info["gold_threshold"],
-        silver_threshold=rank_info["silver_threshold"],
-        bronze_threshold=rank_info["bronze_threshold"],
-        median_threshold=rank_info["median_threshold"],
-        any_medal=rank_info["gold_medal"] or rank_info["silver_medal"] or rank_info["bronze_medal"],
-        gold_medal=rank_info["gold_medal"],
-        silver_medal=rank_info["silver_medal"],
-        bronze_medal=rank_info["bronze_medal"],
-        above_median=rank_info["above_median"],
+    return _competition_report(
+        competition,
+        score,
+        rank_info,
+        submission_path=path_to_submission_folder,
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         is_lower_better=is_lower_better,
-        created_at=datetime.now(),
-        submission_path=str(path_to_submission_folder),
+    )
+
+
+def grade_feature_enhancement(
+    path_to_submission_folder: Path,
+    competition: Competition,
+    path_to_solution_files: str | None = None,
+) -> CompetitionReport:
+    """Grades a feature-enhancement submission folder (submission.csv plus the code, config
+    and TensorBoard logs it was produced with). The solution files default to the submission
+    folder. The score is a dict of sub-scores including `overall_score`."""
+    _ensure_prepared(competition)
+    if competition.feature_enhancement_config is None:
+        raise ValueError(f"`{competition.id}` has no feature_enhancement_config")
+
+    grading_input = GradingInput(
+        submission_folder_path=path_to_submission_folder,
+        answers=load_answers(competition.answers),
+        feature_enhancement_config=competition.feature_enhancement_config,
+        solution_files_path=Path(path_to_solution_files or path_to_submission_folder),
+    )
+    score = competition.grader(grading_input)
+    return _competition_report(
+        competition,
+        score,
+        get_null_rank_info(),  # dict scores are not on a leaderboard's scale
+        submission_path=path_to_submission_folder,
+        submission_exists=path_to_submission_folder.is_dir(),
+        valid_submission=score is not None,
+        is_lower_better=False,
     )
 
 
 def grade_code(path_to_submission: Path, competition: Competition) -> CompetitionReport:
-    """Grades a code submission for the given competition."""
+    """Grades a code submission for the given competition. A submission with the wrong file
+    type, or one the grader rejects (e.g. it does not import), is graded as invalid."""
 
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
 
-    if competition.sample_submission.suffix != path_to_submission.suffix:
-        raise InvalidSubmissionError(
-            f"Submission invalid! Submission file {path_to_submission.suffix} is different from "
-            f"the expected file extension {competition.sample_submission.suffix}"
-        )
-
-    scores = None
     submission_exists = path_to_submission.is_file()
     answers = load_answers(competition.answers)
     coding_config = competition.coding_config
@@ -202,23 +266,30 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
             f"Please define the coding config in the competition config file"
         )
 
-    grading_input = GradingInput(
-        submission_file_path=path_to_submission,
-        answers=answers,
-        coding_config=coding_config,
-    )
-    scores = competition.grader(grading_input)
+    try:
+        _check_suffix(path_to_submission, competition)
+    except InvalidSubmissionError as e:
+        logger.warning(str(e))
+        scores = None
+    else:
+        grading_input = GradingInput(
+            submission_file_path=path_to_submission,
+            answers=answers,
+            coding_config=coding_config,
+        )
+        scores = competition.grader(grading_input)
 
     valid_submission = scores is not None
+    scores = scores or {}  # the Grader returns None for a rejected submission
     return CodeCompetitionReport(
         competition_id=competition.id,
-        defined_classes=scores["defined_classes"],
-        initialized_classes=scores["initialized_classes"],
-        defined_class_methods=scores["defined_class_methods"],
-        executed_class_methods=scores["executed_class_methods"],
-        defined_functions=scores["defined_functions"],
-        executed_functions=scores["executed_functions"],
-        test_metric=scores["test_metric"],
+        defined_classes=scores.get("defined_classes"),
+        initialized_classes=scores.get("initialized_classes"),
+        defined_class_methods=scores.get("defined_class_methods"),
+        executed_class_methods=scores.get("executed_class_methods"),
+        defined_functions=scores.get("defined_functions"),
+        executed_functions=scores.get("executed_functions"),
+        test_metric=scores.get("test_metric"),
         submission_exists=submission_exists,
         valid_submission=valid_submission,
         created_at=datetime.now(),
@@ -226,12 +297,92 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
     )
 
 
-def validate_submission(submission: Path, competition: Competition) -> tuple[bool, str]:
+def _validate_python_source(submission: Path) -> tuple[bool, str]:
+    try:
+        ast.parse(submission.read_bytes(), filename=submission.name)
+    except Exception as e:  # SyntaxError, ValueError (null bytes), RecursionError, ...
+        return False, f"Submission invalid! {submission.name} is not valid Python: {e}"
+    return (
+        True,
+        "Submission is valid. (It was only parsed: its classes and functions are run and "
+        "checked when the submission is graded.)",
+    )
+
+
+def _prediction_grader(competition: Competition):
+    """The function that scores a single prediction file. Hyperparameter-search and
+    feature-enhancement graders take a whole folder; their modules score each of its prediction
+    files with `grade`."""
+    if (
+        competition.hyperparameter_search_config is None
+        and competition.feature_enhancement_config is None
+    ):
+        return competition.grader.grade_fn
+    return getattr(sys.modules[competition.grader.grade_fn.__module__], "grade", None)
+
+
+def _validate_prediction_file(submission: Path, competition: Competition) -> tuple[bool, str]:
+    grade_fn = _prediction_grader(competition)
+    if grade_fn is None:
+        return True, "Submission is valid. (It is checked when the submission folder is graded.)"
+    try:
+        score = grade_fn(
+            submission=load_submissions(submission, _max_h5_bytes(competition)),
+            answers=load_answers(competition.answers),
+        )
+    except Exception as e:
+        return (
+            False,
+            f"Submission invalid! The attempt to grade the submission has resulted in the "
+            f"following error message:\n{e}",
+        )
+    if score is None or (isinstance(score, numbers.Real) and not np.isfinite(score)):
+        return False, f"Submission invalid! The grader could not score it (score: {score})."
+    return True, "Submission is valid."
+
+
+def _validate_hyperparameter_search_folder(
+    folder: Path, competition: Competition, solution_file_path: Path | None
+) -> tuple[bool, str]:
+    config = competition.hyperparameter_search_config
+    submissions = [config["baseline_submission_name"], config["improved_submission_name"]]
+    models = [config["baseline_model_name"], config["improved_model_name"]]
+    missing = [name for name in submissions + models if not (folder / name).is_file()]
+    if missing:
+        return False, f"Submission invalid! {folder} is missing {', '.join(missing)}."
+    if solution_file_path is not None and not Path(solution_file_path).exists():
+        return False, f"Submission invalid! The solution code {solution_file_path} does not exist."
+    for name in submissions:
+        valid, message = _validate_prediction_file(folder / name, competition)
+        if not valid:
+            return False, f"{name}: {message}"
+    # the models are agent-written pickles / TorchScript: never loaded here
+    return (
+        True,
+        "Submission is valid. (When it is graded, the solution code, which is required, is "
+        "checked for a hyperparameter search, and the models are loaded and compared.)",
+    )
+
+
+def validate_submission(
+    submission: Path, competition: Competition, solution_file_path: Path | None = None
+) -> tuple[bool, str]:
     """
     Validates a submission for the given competition by actually running the competition grader.
     This is designed for end users, not developers (we assume that the competition grader is
     correctly implemented and use that for validating the submission, not the other way around).
+    For challenges whose submission is a folder, a single file is validated as one of its
+    prediction files. `solution_file_path` is the solution code of a hyperparameter-search
+    folder (a script or a directory, as for `grade_hyperparameter_search`).
+
+    The in-container grading server runs this as root on files the agent uploads, so agent code
+    is never imported here: code submissions are only parsed, models are not loaded, and pickles
+    are decoded with an allowlist of plain types (see `load_submissions`).
     """
+    if competition.hyperparameter_search_config is not None and submission.is_dir():
+        _ensure_prepared(competition)
+        return _validate_hyperparameter_search_folder(submission, competition, solution_file_path)
+
     if not submission.is_file():
         return False, f"Submission invalid! Submission file {submission} does not exist."
 
@@ -242,45 +393,13 @@ def validate_submission(submission: Path, competition: Competition) -> tuple[boo
             f"extension.",
         )
 
-    if not is_dataset_prepared(competition, grading_only=True):
-        raise ValueError(
-            f"Dataset for competition `{competition.id}` is not prepared! "
-            f"Please run `timeseriesgym prepare -c {competition.id}` to prepare the dataset."
-        )
+    _ensure_prepared(competition)
 
-    try:
-        if competition.hyperparameter_search_config is not None and submission.is_dir():
-            grading_input = GradingInput(
-                submission_folder_path=submission,
-                answers=load_answers(competition.answers),
-                hyperparameter_search_config=competition.hyperparameter_search_config,
-            )
-        elif competition.coding_config is not None and submission.is_file():
-            grading_input = GradingInput(
-                submission_file_path=submission,
-                answers=load_answers(competition.answers),
-                coding_config=competition.coding_config,
-            )
-        elif submission.is_file():
-            grading_input = GradingInput(
-                submission_file=load_submissions(submission),
-                answers=load_answers(competition.answers),
-            )
-        else:
-            return (
-                False,
-                "Submission invalid! If the submission is a directory "
-                "only for hyperparameter search tasks",
-            )
-        competition.grader(grading_input)
-    except Exception as e:
-        return (
-            False,
-            f"Submission invalid! The attempt to grade the submission has resulted in the "
-            f"following error message:\n{e}",
-        )
+    if competition.coding_config is not None:
+        # importing the submission (as the code grader does) would run it as root
+        return _validate_python_source(submission)
 
-    return True, "Submission is valid."
+    return _validate_prediction_file(submission, competition)
 
 
 def aggregate_reports(competition_reports: list[CompetitionReport]) -> dict:
@@ -290,10 +409,14 @@ def aggregate_reports(competition_reports: list[CompetitionReport]) -> dict:
     performance per competition, otherwise sum metrics
     """
 
-    total_gold_medals = sum(report.gold_medal for report in competition_reports)
-    total_silver_medals = sum(report.silver_medal for report in competition_reports)
-    total_bronze_medals = sum(report.bronze_medal for report in competition_reports)
-    total_above_median = sum(report.above_median for report in competition_reports)
+    # code-competition reports have no medal fields
+    def medals(field: str) -> int:
+        return sum(bool(getattr(report, field, False)) for report in competition_reports)
+
+    total_gold_medals = medals("gold_medal")
+    total_silver_medals = medals("silver_medal")
+    total_bronze_medals = medals("bronze_medal")
+    total_above_median = medals("above_median")
     total_submissions = sum(report.submission_exists for report in competition_reports)
     total_valid_submissions = sum(report.valid_submission for report in competition_reports)
 

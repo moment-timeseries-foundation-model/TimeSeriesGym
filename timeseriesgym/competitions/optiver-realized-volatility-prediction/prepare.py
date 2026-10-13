@@ -44,11 +44,6 @@ def prepare(raw: Path, public: Path, private: Path):
         f"{len(old_train_ids)}."
     )
 
-    assert set(new_train_ids).intersection(new_test_ids) == set(), (
-        f"Expected the new train and test instances to be disjoint. Got an intersection of "
-        f"{set(new_train_ids).intersection(new_test_ids)}."
-    )
-
     for new_train_id in new_train_ids:
         shutil.copytree(
             src=raw / "book_train.parquet" / new_train_id,
@@ -88,7 +83,7 @@ def prepare(raw: Path, public: Path, private: Path):
 
     assert len(actual_stock_ids) == len(new_test_ids), (
         f"Expected the new test instances to have {len(new_test_ids)} unique stock IDs. Got "
-        f"{len(test_df['stock_id'].unique())} unique stock IDs."
+        f"{len(actual_stock_ids)} unique stock IDs."
     )
 
     sample_submission = test_df.copy()

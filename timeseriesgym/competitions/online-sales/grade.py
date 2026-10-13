@@ -1,6 +1,6 @@
-import numpy as np
 import pandas as pd
 
+from timeseriesgym.metrics import root_mean_squared_log_error
 from timeseriesgym.utils import InvalidSubmissionError
 
 
@@ -16,7 +16,7 @@ def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
             f"shape {answers_array.shape}"
         )
 
-    log_squared_error = (np.log(submission_array + 1) - np.log(answers_array + 1)) ** 2
-    mean_squared_log_error = log_squared_error[~np.isnan(log_squared_error)].mean()
-
-    return np.sqrt(mean_squared_log_error)
+    # Missing answers are not scored. Dropping every NaN term, as before, also dropped the
+    # cells where a prediction < -1 made the log undefined, so submissions could choose which
+    # cells counted.
+    return root_mean_squared_log_error(answers_array, submission_array)

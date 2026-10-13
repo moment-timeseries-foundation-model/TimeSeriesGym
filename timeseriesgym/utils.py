@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pickle
+import shutil
 import sys
 import time
 import uuid
@@ -146,11 +147,100 @@ def load_answers(path_to_answers: Path) -> Any:
         )
 
 
-def load_submissions(path_to_submission: Path) -> Any:
+# The only globals a pickled submission may reference: containers and numbers, including numpy
+# scalars (numpy 1.x and 2.x module paths). Unpickling anything else can run arbitrary code;
+# numpy arrays are left out too, as their shape (and so their memory) is set by the file.
+_PLAIN_PICKLE_GLOBALS = {
+    *(("builtins", name) for name in ("list", "dict", "tuple", "set", "frozenset", "complex")),
+    ("collections", "defaultdict"),
+    ("collections", "OrderedDict"),
+    ("_codecs", "encode"),  # bytes in protocol 2 pickles
+    ("numpy", "dtype"),
+    ("numpy.core.multiarray", "scalar"),
+    ("numpy._core.multiarray", "scalar"),
+}
+
+
+class _PlainPickleUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "__builtin__":  # the name in protocol 0-2 pickles
+            module = "builtins"
+        if (module, name) not in _PLAIN_PICKLE_GLOBALS:
+            raise InvalidSubmissionError(
+                f"Submission invalid! The pickle references `{module}.{name}`; submissions may "
+                "only contain plain containers, strings and numbers (numpy scalars included)."
+            )
+        return super().find_class(module, name)
+
+
+def load_plain_pickle(file) -> Any:
+    """Unpickles an agent-written file without running its code: only the globals in
+    `_PLAIN_PICKLE_GLOBALS` can be loaded."""
+    return _PlainPickleUnpickler(file).load()
+
+
+MAX_H5_OBJECTS = 1_000_000
+MAX_H5_DEPTH = 32
+# The data that the datasets of an HDF5 submission may declare in total: load_arbitrary_h5 reads
+# all of it into memory, and a small file can declare much more (a chunked dataset that was never
+# written reads as its fill value). The largest submission, TSL long-horizon in float64, is 3.6 GiB.
+MAX_H5_BYTES = 4 * 2**30
+
+
+def check_h5_self_contained(h5_file: h5py.File, max_bytes: int = MAX_H5_BYTES) -> None:
+    """Raises InvalidSubmissionError unless every object in the agent-written file is a group or
+    a dataset, reached by a hard link, with its data stored in the file itself, and the datasets
+    declare at most `max_bytes` of data in total.
+
+    Soft and external links, virtual datasets and external raw storage make HDF5 read other
+    files (as root, in the grading server), e.g. the private answers. Walks the link names
+    without following them; the caps also stop hard-link cycles.
+    """
+    stack, count, declared = [(h5_file, "", 0)], 0, 0
+    while stack:
+        group, prefix, depth = stack.pop()
+        if depth > MAX_H5_DEPTH:
+            raise InvalidSubmissionError(
+                f"Submission invalid! HDF5 groups are nested deeper than {MAX_H5_DEPTH} levels."
+            )
+        for key in group:
+            name = f"{prefix}/{key}"
+            count += 1
+            if count > MAX_H5_OBJECTS:
+                raise InvalidSubmissionError(
+                    f"Submission invalid! More than {MAX_H5_OBJECTS} HDF5 objects."
+                )
+            link = group.get(key, getlink=True)
+            if not isinstance(link, h5py.HardLink):
+                raise InvalidSubmissionError(
+                    f"Submission invalid! {name} is an HDF5 {type(link).__name__}; store the "
+                    "data in the file itself."
+                )
+            obj = group.get(key)
+            if isinstance(obj, h5py.Group):
+                stack.append((obj, name, depth + 1))
+            elif not isinstance(obj, h5py.Dataset):
+                raise InvalidSubmissionError(
+                    f"Submission invalid! {name}: only HDF5 groups and datasets are allowed."
+                )
+            elif obj.is_virtual or obj.external:
+                raise InvalidSubmissionError(
+                    f"Submission invalid! {name}: virtual or externally stored HDF5 datasets "
+                    "are not allowed."
+                )
+            else:
+                declared += (obj.size or 0) * obj.dtype.itemsize
+                if declared > max_bytes:
+                    raise InvalidSubmissionError(
+                        f"Submission invalid! The HDF5 datasets hold more than {max_bytes} bytes."
+                    )
+
+
+def load_submissions(path_to_submission: Path, max_h5_bytes: int = MAX_H5_BYTES) -> Any:
     supported_formats = [".csv", ".h5", ".hdf5", ".pkl", ".npy"]
 
     if not path_to_submission.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! Submission file {path_to_submission} does not exist."
         )
 
@@ -159,11 +249,12 @@ def load_submissions(path_to_submission: Path) -> Any:
 
     elif path_to_submission.suffix.lower() == ".h5" or path_to_submission.suffix.lower() == ".hdf5":
         with h5py.File(path_to_submission, "r") as submission_file:
+            check_h5_self_contained(submission_file, max_h5_bytes)
             return load_arbitrary_h5(submission_file["submission"])
 
     elif path_to_submission.suffix.lower() == ".pkl":
         with open(path_to_submission, "rb") as f:
-            return pickle.load(f)
+            return load_plain_pickle(f)
 
     elif path_to_submission.suffix == ".npy":
         return np.load(path_to_submission)
@@ -177,7 +268,7 @@ def load_submissions(path_to_submission: Path) -> Any:
 
 def load_scripts(path_to_scripts: Path) -> str:
     if not path_to_scripts.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! script file {path_to_scripts} does not exist."
         )
 
@@ -189,7 +280,7 @@ def load_scripts(path_to_scripts: Path) -> str:
 
 def load_models(path_to_models: Path) -> Model:
     if not path_to_models.is_file():
-        return InvalidSubmissionError(
+        raise InvalidSubmissionError(
             f"Submission invalid! model file {path_to_models} does not exist."
         )
 
@@ -292,42 +383,57 @@ def is_compressed(fpath: Path) -> bool:
     return fpath.suffix in [".zip", ".tar", ".gz", ".tgz", ".tar.gz", ".rar", ".7z"]
 
 
+ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest date a zip entry can hold
+
+
+def _write_zip_entry(archive: zipfile.ZipFile, file_path: Path, arcname: Path) -> None:
+    """Like `ZipFile.write`, with a fixed date and permissions (0644, or 0755 if executable)."""
+    info = zipfile.ZipInfo.from_file(file_path, arcname, strict_timestamps=False)
+    info.date_time = ZIP_DATE_TIME
+    executable = (info.external_attr >> 16) & 0o111
+    info.external_attr = (0o100755 if executable else 0o100644) << 16
+    info.compress_type = archive.compression
+    with open(file_path, "rb") as source, archive.open(info, "w") as target:
+        shutil.copyfileobj(source, target, 1024 * 1024)
+
+
 def compress(src: Path, compressed: Path, exist_ok: bool = False) -> None:
-    """Compresses the contents of a source directory to a compressed file."""
+    """Compresses the contents of a source directory to a compressed file.
+
+    Files are added in sorted order. Zip entries also get a fixed date and permissions, so the
+    same files give the same zip, whatever the directory order, mtimes or umask.
+    """
     assert src.exists(), f"Source directory `{src}` does not exist."
     assert src.is_dir(), f"Expected a directory, but got `{src}`."
     if not exist_ok:
         assert not compressed.exists(), f"Compressed file `{compressed}` already exists."
 
     tqdm_desc = f"Compressing {src.name} to {compressed.name}"
-    file_paths = [path for path in src.rglob("*") if path.is_file()]
+    file_paths = sorted(path for path in src.rglob("*") if path.is_file())
     total_files = len(file_paths)
-
-    def zip_compress(src: Path, compressed: Path):
-        with zipfile.ZipFile(compressed, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
-                zipf.write(file_path, arcname=file_path.relative_to(src))
-
-    def sevenz_compress(src: Path, compressed: Path):
-        with py7zr.SevenZipFile(compressed, "w") as archive:
-            for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
-                archive.write(file_path, arcname=file_path.relative_to(src))
 
     # Determine the compression format from the destination file suffix
     if compressed.suffix == ".zip":
-        zip_compress(src, compressed)
+        archive = zipfile.ZipFile(compressed, "w", zipfile.ZIP_DEFLATED)
     elif compressed.suffix == ".7z":
-        sevenz_compress(src, compressed)
+        archive = py7zr.SevenZipFile(compressed, "w")
     else:
         raise NotImplementedError(f"Unsupported compression format: `{compressed.suffix}`.")
+
+    with archive:
+        for file_path in tqdm(file_paths, desc=tqdm_desc, unit="file", total=total_files):
+            if isinstance(archive, zipfile.ZipFile):
+                _write_zip_entry(archive, file_path, file_path.relative_to(src))
+            else:
+                archive.write(file_path, arcname=file_path.relative_to(src))
 
 
 def extract(
     compressed: Path, dst: Path, recursive: bool = False, already_extracted: set | None = None
 ) -> None:
+    """Extracts the contents of a compressed file to a destination directory."""
     if already_extracted is None:
         already_extracted = set()
-    """Extracts the contents of a compressed file to a destination directory."""
 
     # pre-conditions
     assert compressed.exists(), f"File `{compressed}` does not exist."
@@ -508,7 +614,9 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
             if name == "":
                 continue
 
-            layer_type = type(module).__name__
+            # loaded TorchScript modules are all RecursiveScriptModule; the layer kind (Conv1d,
+            # ReLU, ...) is kept in `original_name`
+            layer_type = getattr(module, "original_name", type(module).__name__)
             # pull out the usual hyperparams for this layer
             params = {}
             for attr in (
@@ -522,7 +630,10 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
                 "bias",  # Conv2d, Linear
             ):
                 if hasattr(module, attr):
-                    params[attr] = getattr(module, attr)
+                    value = getattr(module, attr)
+                    if value is None or isinstance(value, torch.Tensor):
+                        value = value is not None  # `bias`: whether there is one
+                    params[attr] = value
 
             # capture shapes of any weight/bias tensors
             shapes = {}
@@ -535,38 +646,29 @@ def have_different_hyperparameters_torch(m1: nn.Module, m2: nn.Module):
     a1 = extract_architecture(m1)
     a2 = extract_architecture(m2)
 
-    # find layers present in one but not the other
-    only_in_1 = set(a1) - set(a2)
-    only_in_2 = set(a2) - set(a1)
-
-    if not (not only_in_1 and not only_in_2):
+    # layers present in one model but not the other
+    if set(a1) != set(a2):
         return True
 
-    # for layers in common, compare layer-type, hyperparams, shapes
-    diffs = {}
+    # for layers in common, compare layer type, hyperparameters and parameter shapes
+    for name in a1:
+        if a1[name] != a2[name]:
+            return True
+    return False
 
-    for name in set(a1).intersection(a2):
-        t1, p1, s1 = a1[name]
-        t2, p2, s2 = a2[name]
-        layer_diffs = {}
-        if t1 != t2:
-            layer_diffs["type"] = (t1, t2)
-        if s1 != s2:
-            layer_diffs["param_shapes"] = (s1, s2)
-        if layer_diffs:
-            diffs[name] = layer_diffs
 
-    if diffs == {}:
-        return False
-    else:
-        return True
+# Settings that do not change what XGBoost learns while every other hyperparameter has its
+# default (no row or column subsampling, so the seed is unused): a default baseline may set them,
+# and two models that differ only in them have the same hyperparameters.
+RUNTIME_ONLY_HYPERPARAMETERS = frozenset({"n_jobs", "nthread", "verbosity", "random_state"})
 
 
 def have_different_hyperparameters(baseline_model: Model, improved_model: Model) -> bool:
     """
-    Check if two models have different hyperparameters.
+    Check if two models have different hyperparameters. For models with `get_params()`, the
+    settings in RUNTIME_ONLY_HYPERPARAMETERS are not compared.
     """
-    if type(baseline_model) != type(improved_model):
+    if type(baseline_model) is not type(improved_model):
         raise InvalidSubmissionError(
             f"Models are of different types: {type(baseline_model)} and {type(improved_model)}"
         )
@@ -575,56 +677,165 @@ def have_different_hyperparameters(baseline_model: Model, improved_model: Model)
         return have_different_hyperparameters_torch(baseline_model.model, improved_model.model)
 
     if isinstance(baseline_model, PickleModel) and isinstance(improved_model, PickleModel):
-        baseline_dict = baseline_model.model.__dict__
-        improved_dict = improved_model.model.__dict__
+        baseline, improved = baseline_model.model, improved_model.model
+        if hasattr(baseline, "get_params") and hasattr(improved, "get_params"):
+            # scikit-learn API (also XGBoost, LightGBM, CatBoost wrappers): compare the
+            # hyperparameters themselves, not fitted state such as the booster object.
+            baseline_dict, improved_dict = baseline.get_params(), improved.get_params()
+            for key in RUNTIME_ONLY_HYPERPARAMETERS:
+                improved_dict.pop(key, None)
+        else:
+            baseline_dict = {k: v for k, v in vars(baseline).items() if not k.endswith("_")}
+            improved_dict = {k: v for k, v in vars(improved).items() if not k.endswith("_")}
 
         for key in improved_dict:
             if key not in baseline_dict or improved_dict[key] is None:
                 continue
-            if baseline_dict[key] != improved_dict[key]:
+            if _values_differ(baseline_dict[key], improved_dict[key]):
                 return True
 
     return False
+
+
+def _values_differ(a: Any, b: Any) -> bool:
+    """NaN-aware inequality. XGBoost's default `missing=nan` made identical models compare as
+    different (nan != nan), so the same-hyperparameters check never fired."""
+    if isinstance(a, float) and isinstance(b, float) and np.isnan(a) and np.isnan(b):
+        return False
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        try:
+            return not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True)
+        except TypeError:
+            return not np.array_equal(np.asarray(a), np.asarray(b))
+    try:
+        return bool(a != b)
+    except (TypeError, ValueError):  # objects whose comparison is ambiguous
+        return repr(a) != repr(b)
+
+
+# The calls that run a hyperparameter search, by import path. Where the call only creates a
+# search object, the value names the methods that run it, and the code must call one of them too
+# (`optuna.create_study()` searches nothing until `study.optimize(...)`). An empty value: a call
+# of the API, or of something inside it, counts.
+HYPERPARAMETER_SEARCH_CALLS = {
+    "optuna.create_study": ("optimize", "ask"),
+    "optuna.load_study": ("optimize", "ask"),
+    "optuna.study.create_study": ("optimize", "ask"),
+    "optuna.integration.OptunaSearchCV": ("fit",),
+    "ray.tune.run": (),
+    "ray.tune.Tuner": ("fit",),
+    "wandb.agent": (),
+    "hyperopt.fmin": (),
+    "sklearn.model_selection.GridSearchCV": ("fit",),
+    "sklearn.model_selection.RandomizedSearchCV": ("fit",),
+    "sklearn.model_selection.HalvingGridSearchCV": ("fit",),
+    "sklearn.model_selection.HalvingRandomSearchCV": ("fit",),
+    "bayes_opt.BayesianOptimization": ("maximize", "suggest"),
+    "nevergrad.optimizers": ("minimize", "ask"),
+    "sigopt": (),
+    "ax": (),
+    "pytorch_lightning.tuner": (),
+}
+
+
+def _is_within(dotted: str, api: str) -> bool:
+    return dotted == api or dotted.startswith(api + ".")
 
 
 def have_hyperparameter_searching_attempt(solution_code: str, packages_to_look_for=None) -> bool:
     """
-    Check if the solution code contains hyperparameter searching attempts.
+    Check if the solution code runs a hyperparameter search with a search library.
+
+    The code is parsed, not run. It must call one of HYPERPARAMETER_SEARCH_CALLS, through the
+    names it was imported as, and, where that call only creates the search, a method that runs
+    it. `packages_to_look_for` limits the search to the calls inside the listed modules or APIs
+    (e.g. `["optuna"]`); an entry with none of them counts when the code calls it or something
+    inside it. Importing a library does not count, nor does reading an attribute
+    (`optuna.__version__`) or calling another part of the module (`train_test_split`).
     """
-    # Check for common hyperparameter searching libraries
-    # TODO: add regex
+    import ast
+
     if packages_to_look_for is None:
-        hyperparameter_searching_libraries = [
-            "optuna",
-            "ray.tune",
-            "wandb",
-            "mlflow",
-            "hyperopt",
-            "sklearn.model_selection",
-            "bayes_opt",
-            "sigopt",
-            "nevergrad",
-            "ax",
-            "pytorch_lightning.tuner",
-        ]
+        search_calls = dict(HYPERPARAMETER_SEARCH_CALLS)
     else:
-        hyperparameter_searching_libraries = packages_to_look_for
+        search_calls = {}
+        for entry in packages_to_look_for:
+            selected = {
+                api: runs
+                for api, runs in HYPERPARAMETER_SEARCH_CALLS.items()
+                if _is_within(api, entry)
+            }
+            search_calls.update(selected or {entry: ()})
 
-    for library in hyperparameter_searching_libraries:
-        import_str = f"import {library}"
-        from_str = f"from {library}"
-        if import_str in solution_code:
-            # count if used twice, so not just imported
-            if solution_code.count(import_str) > 1:
-                return True
-        elif from_str in solution_code:
-            # get actual function name
-            function_names = solution_code.split(from_str)[1].split(",")
-            for function_name in function_names:
-                if solution_code.count(function_name.strip()) > 1:
-                    return True
+    try:
+        tree = ast.parse(solution_code)
+    except (SyntaxError, ValueError, RecursionError):  # not Python, null bytes, too deep
+        return False
 
-    return False
+    # local name -> the dotted path it was imported as
+    imported = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    imported[alias.asname] = alias.name
+                else:  # `import a.b` binds `a`
+                    top = alias.name.split(".")[0]
+                    imported[top] = top
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                imported[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+
+    def dotted_name(node) -> str | None:
+        attrs = []
+        while isinstance(node, ast.Attribute):
+            attrs.append(node.attr)
+            node = node.value
+        if not isinstance(node, ast.Name) or node.id not in imported:
+            return None
+        return ".".join([imported[node.id], *reversed(attrs)])
+
+    callees = [node.func for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    called = {dotted_name(func) for func in callees} - {None}
+    methods = {func.attr for func in callees if isinstance(func, ast.Attribute)}
+    return any(
+        any(_is_within(name, api) for name in called) and (not runs or bool(methods & set(runs)))
+        for api, runs in search_calls.items()
+    )
+
+
+def clone_repository(
+    url: str, destination: Path, branch: str | None = None, commit: str | None = None
+) -> Path:
+    """Clone a repository for a challenge's public data, without its `.git`.
+
+    Agents get these repositories as task material. Their git history must not be part of it:
+    earlier commits can contain the reference solution (e.g. the full implementation that a
+    challenge asks the agent to complete) or files that prepare scripts delete afterwards.
+    With `commit`, exactly that commit is fetched, so prepared data (and its checksums) do not
+    change when the upstream branch moves; otherwise the head of `branch` (or the default
+    branch) is cloned shallowly.
+    """
+    import shutil
+    import subprocess
+
+    destination = Path(destination)
+    if commit is not None:
+        destination.mkdir(parents=True, exist_ok=False)
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "remote", "add", "origin", url],
+            ["git", "fetch", "-q", "--depth", "1", "origin", commit],
+            ["git", "checkout", "-q", "--detach", "FETCH_HEAD"],
+        ):
+            subprocess.run(cmd, cwd=destination, check=True)
+    else:
+        cmd = ["git", "clone", "--depth", "1", "--single-branch"]
+        if branch is not None:
+            cmd += ["--branch", branch]
+        subprocess.run([*cmd, url, str(destination)], check=True)
+    shutil.rmtree(destination / ".git")
+    return destination
 
 
 logger = get_logger(__name__)

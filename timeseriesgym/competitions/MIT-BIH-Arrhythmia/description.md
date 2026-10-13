@@ -24,13 +24,13 @@ The MIT-BIH Arrhythmia Database contains 48 half-hour excerpts of two-channel am
 
 The recordings were digitized at 360 samples per second per channel with 11-bit resolution over a 10 mV range. Two or more cardiologists independently annotated each record; disagreements were resolved to obtain the computer-readable reference annotations for each beat (approximately 110,000 annotations in all) included with the database.
 
-This directory contains the entire MIT-BIH Arrhythmia Database. About half (25 of 48 complete records, and reference annotation files for all 48 records) of this database has been freely available here since PhysioNet's inception in September 1999. The 23 remaining signal files, which had been available only on the MIT-BIH Arrhythmia Database CD-ROM, were posted here in February 2005.
+The PhysioNet directory contains the entire MIT-BIH Arrhythmia Database. About half (25 of 48 complete records, and reference annotation files for all 48 records) of this database has been freely available here since PhysioNet's inception in September 1999. The 23 remaining signal files, which had been available only on the MIT-BIH Arrhythmia Database CD-ROM, were posted here in February 2005. The files provided for this challenge do not contain these records themselves: they hold preprocessed, normalized beat segments of 256 samples per lead, cut from the records (see File Descriptions).
 
 ## File Descriptions
 
 * **train_features.h5** - Contains the ECG signal segments for training. The file has a group structure with a 'train' group containing two leads ("lead_1" and "lead_2") as datasets. In most records, the upper signal is a modified limb lead II (MLII) and the lower signal is usually a modified lead V1. Each lead contains ECG signal segments that have been preprocessed and normalized. Access the data with `h5py` using the path structure 'train/LEAD_NUMBER' (e.g., 'train/lead_1', 'train/lead_2').
 
-* **train_labels.h5** - Contains one-hot encoded labels for the training dataset under the "labels" group. Each label corresponds to one of six classification categories: Normal (N), Premature Ventricular Contraction (V), Paced Beat (/), Atrial Premature Beat (A), Fusion Beat (F), and Noise (~).
+* **train_labels.h5** - Contains one-hot encoded labels for the training dataset in the "labels" dataset, of shape (N_train, 6). Each label corresponds to one of six classification categories: Normal (N), Premature Ventricular Contraction (V), Paced Beat (/), Atrial Premature Beat (A), Fusion Beat (F), and Noise (~).
 
 * **test_features.h5** - Contains the ECG signal segments for testing. It follows the same structure as the training features with a 'test' group containing two leads ("lead_1" and "lead_2") as datasets. Each lead contains ECG signal segments that have been preprocessed and normalized. These are the beats you need to classify.
 
@@ -63,8 +63,8 @@ with h5py.File('test_features.h5', 'r') as f:
     lead_2_test = f['test/lead_2'][()]
 
 # Check shapes
-print(f"Lead 1 training data shape: {mlii_train.shape}")
-print(f"Training labels shape: {mlii_labels.shape}")
+print(f"Lead 1 training data shape: {lead_1_train.shape}")
+print(f"Training labels shape: {labels.shape}")
 ```
 
 ### Class Mapping
@@ -95,7 +95,7 @@ Each submission must be in HDF5 format (`.h5` file) containing your predictions 
 
 ### Requirements
 - File format: HDF5 (.h5)
-- Dataset name within the file: labels
+- Dataset name within the file: submission
 - Matrix shape: (N, 6) where N is the number of test beats
 - Values: 0 or 1. Each row must sum to 1
 

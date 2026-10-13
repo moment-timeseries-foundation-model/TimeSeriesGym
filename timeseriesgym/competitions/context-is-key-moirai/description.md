@@ -29,7 +29,7 @@ In this challenge you will evaluate the time-series foundation model [MOIRAI](ht
    ```python
    from run_baselines import experiment_moirai
 
-   result, _ = experiment_moirai(model_size="small", n_samples=50)
+   result, _ = experiment_moirai(model_size="small", n_samples=50, output_folder="<output_folder_path>")
    ```
 
 5. **Save your results**
@@ -65,7 +65,7 @@ result = {
 
 ## Evaluation
 - We will compare your `submission.pkl` against our reference output.
-- **Score = 100** if your results match exactly.
+- **Score = 1** if your results match exactly.
 - **Score = 0** if the file is missing, incorrect, or fabricated without a real run.
 
 > ⚠ Any attempt to “hard-code” or copy the reference results without running the evaluation will be flagged as an integrity violation.

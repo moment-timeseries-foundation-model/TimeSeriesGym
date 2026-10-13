@@ -74,7 +74,6 @@ RUN mkdir /private && chmod 700 /private
 # Copy over relevant files
 COPY environment/grading_server.py /private/grading_server.py
 COPY environment/instructions.txt /home/instructions.txt
-COPY environment/instructions_obfuscated.txt /home/instructions_obfuscated.txt
 COPY environment/validate_submission.sh /home/validate_submission.sh
 COPY environment/entrypoint.sh /entrypoint.sh
 

@@ -1,9 +1,7 @@
 from copy import deepcopy
 from pathlib import Path
 
-from timeseriesgym.utils import get_logger, read_csv
-
-logger = get_logger(__name__)
+from timeseriesgym.utils import read_csv
 
 
 def prepare(raw: Path, public: Path, private: Path) -> None:
