@@ -15,36 +15,40 @@ The sandbox process
 - runs as the user `sandbox` (TIMESERIESGYM_SANDBOX_USER) when grading runs as root and that
   user exists, as in the grading container; otherwise as the grading user (see below);
 - gets a scrubbed environment (no credentials; HOME and TMPDIR are its work directory), a copy
-  of the submission and of the public input data in a fresh work directory, and stdin from
-  /dev/null;
+  of the submission (regular files of at most 2 GiB, not links) and of the public input data in
+  a fresh work directory, and stdin from /dev/null;
 - runs with limits: wall clock (TIMESERIESGYM_SANDBOX_TIMEOUT_SEC, default per challenge), the
   memory of all its processes together (TIMESERIESGYM_SANDBOX_MEMORY_MB, default 3/4 of the
   machine's or container's memory; measured every 0.1 s), CPU time (never binding before the
-  wall clock), 1 GiB per written file, no core dumps, no new privileges (setuid binaries do not
-  raise them), and first place for the kernel's OOM killer;
+  wall clock), 1 GiB per written file, 8192 tasks for the sandbox user, no core dumps, no new
+  privileges (setuid binaries do not raise them), and first place for the kernel's OOM killer;
+- cannot open sockets (a seccomp filter on x86-64 and arm64; socketpair(2) and pipes work), so
+  it reaches no network and no local service;
 - is confined by Landlock where the kernel has it (Linux 5.13 and later): it can read only the
-  system and Python directories, the timeseriesgym package and its work directory, write only
-  its work directory and /dev/shm, open no TCP connections (Linux 6.7), and signal no process
-  outside the sandbox (Linux 6.12).
+  system and Python directories, the timeseriesgym package (not data kept in it: a checkout's
+  Git LFS archive holds answers) and its work directory, write only its work directory and
+  /dev/shm, open no devices but /dev/null, /dev/zero, /dev/full, the random devices and GPUs,
+  trace no process outside the sandbox, and signal none (Linux 6.12).
 Before agent code runs, the sandbox checks that it cannot open the challenge's private files
 (the answers and the raw data); if it can, grading stops with a SandboxError. When the run ends,
 every process it started is killed, also those that left its session or process group: the
 grading process is their subreaper, so none can escape its tree.
 
-What the two modes give. As root with a sandbox user (the grading container): the sandbox can
-read only what that user may read and Landlock allows, and can neither signal nor trace the
-grading process. As a normal user on a host, there is no other user to switch to, so the sandbox
-has the grading user's uid and Landlock alone keeps it from the answers, from the user's home
-directory (credentials included) and from other processes. Without Landlock (older kernels,
-other operating systems, or a seccomp policy that blocks it), the answers are readable, and code
-grading stops with a SandboxError; TIMESERIESGYM_SANDBOX_UNCONFINED=1 runs it anyway, for
-submissions that are trusted. Grading as root without a sandbox user is refused: agent code
-would run as root. Not covered: memory allocated faster than it is measured (the OOM killer,
-which takes sandbox processes first, is the backstop) and files in tmpfs such as /dev/shm,
-which count as no process's memory; UDP and UNIX-socket traffic; disk use beyond the per-file
-cap (bounded by the time limit); and in host mode, connecting to pathname UNIX sockets that the
-user can reach (e.g. Docker's), the user's process quota, and, below Linux 6.12, signals to the
-user's other processes. Sandbox runs in one grading process are serialized.
+What the two modes give. As root with a sandbox user (the grading container), the sandbox can
+read only what that user may read and Landlock allows, and it can neither signal nor trace the
+grading process. As a normal user on a host, there is no other user to switch to: the sandbox
+has the grading user's uid, and Landlock and the seccomp filter alone keep it from the answers,
+the user's files (credentials included) and other processes. That boundary is narrower than a
+container's: the sandbox shares /dev/shm and the process quota with the user's other programs,
+and below Linux 6.12 it can signal them. Without Landlock (older kernels, other operating
+systems, or a seccomp policy that blocks it) the answers are readable, so grading stops with a
+SandboxError; TIMESERIESGYM_SANDBOX_UNCONFINED=1 runs trusted submissions anyway. Grading as root
+without a sandbox user is refused: agent code would run as root. In both modes, memory allocated
+faster than it is measured is caught only by the OOM killer, which takes sandbox processes
+first; files in tmpfs such as /dev/shm count as no process's memory; and disk use beyond the
+per-file cap is bounded only by the time limit. The grading process must not start other
+subprocesses while a sandbox runs (as a user, those would count as the sandbox's); sandbox runs
+in one grading process are serialized.
 """
 
 import contextlib
@@ -82,7 +86,9 @@ MAX_JSON_BYTES = 2**20
 MAX_ARRAY_BYTES = 64 * 2**20
 MAX_JSON_DEPTH = 16
 MAX_PROBE_FILES = 32  # protected files whose readability is checked, per protected directory
-KILL_ROUNDS = 100
+KILL_SEC = 30  # for every process the sandbox started to be gone after SIGKILL
+MAX_AGENT_FILE_BYTES = 2 * 2**30  # a submitted file copied into the sandbox
+NPROC = 8192  # RLIMIT_NPROC, as the sandbox user: its tasks (threads included) on the machine
 POLL_SEC = 0.1  # how often the memory of the sandbox processes is measured
 DRAIN_SEC = 30
 LOG_CHARS = 4000
@@ -91,6 +97,8 @@ LANDLOCK = True  # whether to confine the sandbox with Landlock where the kernel
 CHILD = Path(__file__).with_name("sandbox_child.py")
 PACKAGE_DIR = Path(__file__).resolve().parent
 _SYSTEM_DIRS = ("/usr", "/lib", "/lib32", "/lib64", "/libx32", "/bin", "/sbin", "/etc")
+# Devices the sandbox may open: not terminals, for example. GPUs are added where present.
+_DEVICES = ("/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom")
 _PASSED_ENV = (
     "LANG",
     "LC_ALL",
@@ -233,6 +241,8 @@ def run(
     """
     ids = sandbox_user()
     protected = list(protected)
+    if (PACKAGE_DIR / "data").exists():  # in a checkout: the Git LFS archive, with the answers
+        protected.append(PACKAGE_DIR / "data")
     with _LOCK:
         root = Path(tempfile.mkdtemp(prefix="timeseriesgym-sandbox-"))
         try:
@@ -243,7 +253,7 @@ def run(
                     {
                         "entrypoint": entrypoint,
                         "job": job,
-                        "limits": _rlimits(limits),
+                        "limits": _rlimits(limits, ids),
                         "landlock": LANDLOCK,
                         "rules": _landlock_rules(root, work, protected),
                         "protected": _probe_paths(protected),
@@ -263,7 +273,8 @@ def _work_dir(
     root: Path, ids: tuple[int, int] | None, agent_files: dict[str, Path], data: dict[str, Path]
 ) -> Path:
     os.chmod(root, 0o755 if ids else 0o700)
-    (root / "package").mkdir()
+    (root / "package").mkdir(mode=0o755)
+    os.chmod(root / "package", 0o755)  # whatever the umask
     # Only the package is importable from here: the directory it is in may hold other things
     # (an editable checkout holds the tests, or the data).
     (root / "package" / "timeseriesgym").symlink_to(PACKAGE_DIR)
@@ -295,18 +306,26 @@ def _copy_agent_file(src: Path, dst: Path) -> None:
             f"Submission invalid! {src} cannot be read without following a link: {e.strerror}"
         ) from None
     with os.fdopen(fd, "rb") as f:
-        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
             raise InvalidSubmissionError(f"Submission invalid! {src} is not a regular file.")
+        if st.st_size > MAX_AGENT_FILE_BYTES:
+            raise InvalidSubmissionError(
+                f"Submission invalid! {src} is larger than {MAX_AGENT_FILE_BYTES // 2**30} GiB."
+            )
         with open(dst, "xb") as out:
             shutil.copyfileobj(f, out, 2**20)
 
 
-def _rlimits(limits: Limits) -> dict[str, int]:
+def _rlimits(limits: Limits, ids) -> dict[str, int]:
     # Memory is limited by _wait, over all sandbox processes together: an address-space or data
     # limit per process would count what thread pools and CUDA only reserve (2.7 GB of data
     # mappings once torch is imported on 64 cores).
     cpu = limits.timeout_sec * max(8, os.cpu_count() or 1)  # never before the wall clock
-    return {"RLIMIT_CPU": cpu, "RLIMIT_FSIZE": FILE_BYTES, "RLIMIT_CORE": 0}
+    rlimits = {"RLIMIT_CPU": cpu, "RLIMIT_FSIZE": FILE_BYTES, "RLIMIT_CORE": 0}
+    if ids:  # for the grading user's uid, the count would include all of the user's processes
+        rlimits["RLIMIT_NPROC"] = NPROC
+    return rlimits
 
 
 def _related(path: Path, protected: list[Path]) -> bool:
@@ -347,30 +366,36 @@ def _extra_sys_path(protected: Iterable[Path]) -> list[str]:
         resolved = _resolved([path]) if path else []
         if resolved and resolved[0].exists() and resolved[0] != cwd:
             if not _related(resolved[0], keep):
-                extra.append(path)
+                extra.append(str(resolved[0]))  # relative entries would name the work directory
     return extra
 
 
 def _landlock_rules(root: Path, work: Path, protected: Iterable[Path]) -> list[tuple[str, str]]:
     """What the sandbox may access. A directory that holds a protected path, or lies inside
-    one, is left out (the probe then decides whether grading can go on)."""
+    one, is left out (the probe then decides whether grading can go on), except the package's
+    own directory, of which only the protected parts are."""
     keep = _resolved(protected)
-    read = [Path(p) for p in _SYSTEM_DIRS] + _python_paths() + [PACKAGE_DIR, root / "package"]
+    read = [Path(p) for p in _SYSTEM_DIRS] + _python_paths()
     rules = [(str(p), "read") for p in dict.fromkeys(read) if not _related(p, keep)]
-    rules += [("/proc", "proc"), ("/sys", "proc"), ("/dev", "dev"), ("/dev/shm", "shm")]
+    rules.append((str(PACKAGE_DIR), "list"))
+    rules += [(str(p), "read") for p in sorted(PACKAGE_DIR.iterdir()) if not _related(p, keep)]
+    rules.append((str(root / "package"), "read"))
+    rules += [("/proc", "proc"), ("/sys", "proc"), ("/dev/shm", "shm")]
+    gpus = [*Path("/dev").glob("nvidia*"), Path("/dev/dri")]
+    rules += [(str(p), "dev") for p in [*map(Path, _DEVICES), *gpus]]
     rules.append((str(work), "write"))
     return rules
 
 
 def _probe_paths(protected: Iterable[Path]) -> list[str]:
-    """The protected paths, and for each directory up to MAX_PROBE_FILES files inside it: file
-    permissions can differ from those of the directory."""
+    """The protected files, and for each protected directory up to MAX_PROBE_FILES files inside
+    it (file permissions can differ from the directory's), which the sandbox must be unable to
+    open. Listing a directory's names is not checked."""
     probe = []
     for path in map(Path, protected):
-        if not path.exists():
-            continue
-        probe.append(str(path))
-        if path.is_dir():
+        if path.is_file():
+            probe.append(str(path))
+        elif path.is_dir():
             found = []
             for parent, dirs, files in os.walk(path):
                 dirs.sort()
@@ -406,7 +431,7 @@ def _start(root: Path, work: Path, job_file: Path, ids, limits: Limits) -> Run:
         was_subreaper = _set_subreaper(True)
         try:
             proc, before = _popen(work, job_file, ids, out, err, write_fd)
-            exceeded = _wait(proc, before, limits)
+            exceeded = _wait(proc, before, limits, ids[0] if ids else None)
             status = _read_status(read_fd)
         finally:
             os.close(read_fd)
@@ -442,7 +467,7 @@ def _popen(work: Path, job_file: Path, ids, out, err, write_fd: int):
     return proc, before
 
 
-def _wait(proc: subprocess.Popen, before: set[int], limits: Limits) -> str | None:
+def _wait(proc: subprocess.Popen, before: set[int], limits: Limits, uid: int | None) -> str | None:
     """Waits for the sandbox, within its time and memory limits, then kills every process it
     started. Returns the limit it exceeded ("time" or "memory"), if any."""
     deadline = time.monotonic() + limits.timeout_sec
@@ -457,11 +482,12 @@ def _wait(proc: subprocess.Popen, before: set[int], limits: Limits) -> str | Non
             if time.monotonic() > deadline:
                 exceeded = "time"
                 break
-            if limits.memory_bytes and _memory(_tree(before)) > limits.memory_bytes:
+            used = _memory(_of_user(_tree(before), uid)) if limits.memory_bytes else 0
+            if used > (limits.memory_bytes or 0):
                 exceeded = "memory"
                 break
     finally:
-        _kill_tree(before, proc.pid)
+        _kill_tree(before, proc.pid, uid)
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=DRAIN_SEC)
     return exceeded
@@ -511,6 +537,8 @@ def _check_status(status: str, ids, log: str) -> None:
             f"The grading sandbox imported timeseriesgym from {info['package']}, not from "
             f"{PACKAGE_DIR}."
         )
+    if not ids and not info.get("sockets_denied"):
+        logger.warning("Agent code can open sockets here (no seccomp filter for this machine).")
     if info["readable"]:
         logger.warning(
             f"{UNCONFINED_ENV}=1: agent code ran with read access to private files, e.g. "
@@ -549,7 +577,8 @@ def _set_subreaper(on: bool) -> bool:
         return False
     previous = ctypes.c_int(0)
     prctl(_PR_GET_CHILD_SUBREAPER, ctypes.byref(previous), 0, 0, 0)
-    prctl(_PR_SET_CHILD_SUBREAPER, ctypes.c_ulong(int(on)), 0, 0, 0)
+    if prctl(_PR_SET_CHILD_SUBREAPER, *map(ctypes.c_ulong, (int(on), 0, 0, 0))) != 0:
+        raise SandboxError(f"prctl(PR_SET_CHILD_SUBREAPER) failed: errno {ctypes.get_errno()}")
     return bool(previous.value)
 
 
@@ -576,14 +605,44 @@ def _children() -> dict[int, int]:
     return parents
 
 
-def _running(pid: int) -> bool:
-    """Whether any thread of the process can still run: the leader of a thread group whose main
-    thread has exited shows state Z while its other threads go on."""
+_SIGKILL_BIT = 1 << (signal.SIGKILL - 1)
+
+
+def _status(path: str) -> dict[str, str]:
+    try:
+        lines = Path(path).read_text(errors="replace").splitlines()
+    except OSError:
+        return {}
+    return dict(line.split(":", 1) for line in lines if ":" in line)
+
+
+def _alive(pid: int) -> bool:
+    """Whether any thread of the process can still run its code: it is not a zombie and has no
+    SIGKILL pending (a thread with one still in the kernel, e.g. writing back a large file,
+    exits when it leaves). The leader of a thread group whose main thread has exited shows
+    state Z while its other threads go on."""
     try:
         tids = os.listdir(f"/proc/{pid}/task")
     except OSError:
         return False
-    return any((_proc_stat(f"{pid}/task/{tid}") or ("X",))[0] not in "ZX" for tid in tids)
+    for tid in tids:
+        fields = _status(f"/proc/{pid}/task/{tid}/status")
+        state = fields.get("State", "X").strip()[:1]
+        try:
+            pending = int(fields.get("SigPnd", "0"), 16) | int(fields.get("ShdPnd", "0"), 16)
+        except ValueError:
+            pending = 0
+        if state not in "ZX" and not pending & _SIGKILL_BIT:
+            return True
+    return False
+
+
+def _of_user(pids: list[int], uid: int | None) -> list[int]:
+    """The processes whose real, effective or saved uid is `uid` (all of them for None): as
+    root, the sandbox's are those of the sandbox user, whatever else this process started."""
+    if uid is None:
+        return pids
+    return [p for p in pids if str(uid) in _status(f"/proc/{p}/status").get("Uid", "").split()[:3]]
 
 
 def _descendants(exclude: set[int]) -> list[int]:
@@ -627,7 +686,7 @@ def _tree(exclude: set[int]) -> list[int]:
     return found
 
 
-def _kill_tree(before: set[int], child: int) -> None:
+def _kill_tree(before: set[int], child: int, uid: int | None) -> None:
     """SIGKILL every process the sandbox started until none can run, and reap those that became
     this process's children (except `child`, which Popen reaps). A process with a fatal signal
     pending cannot fork, so each round catches the few forked just before it."""
@@ -635,10 +694,15 @@ def _kill_tree(before: set[int], child: int) -> None:
         with contextlib.suppress(OSError):
             os.killpg(child, signal.SIGKILL)
         return
-    for round_ in range(KILL_ROUNDS):
-        pids = _descendants(before)
-        if round_ and not any(_running(p) for p in pids):
+    deadline = time.monotonic() + KILL_SEC
+    first = True
+    while True:
+        pids = _of_user(_descendants(before), uid)
+        if not first and not any(_alive(p) for p in pids):
             break
+        if time.monotonic() > deadline:
+            raise SandboxError("Processes started by agent code survive SIGKILL.")
+        first = False
         for pid in pids:
             with contextlib.suppress(OSError):
                 os.kill(pid, signal.SIGKILL)
@@ -647,9 +711,7 @@ def _kill_tree(before: set[int], child: int) -> None:
                 with contextlib.suppress(OSError):
                     os.waitpid(pid, os.WNOHANG)
         time.sleep(0.01)
-    else:
-        raise SandboxError("Processes started by agent code survive SIGKILL.")
-    for pid in _descendants(before):
+    for pid in _of_user(_descendants(before), uid):
         if pid != child:
             with contextlib.suppress(OSError):
                 os.waitpid(pid, os.WNOHANG)

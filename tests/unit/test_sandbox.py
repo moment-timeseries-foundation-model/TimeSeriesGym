@@ -255,6 +255,15 @@ def _unless_it_could(action: str) -> str:
     return STOMP_SUBMISSION + f"\ntry:\n    {action}\n    stomp = None\nexcept OSError:\n    pass\n"
 
 
+def test_agent_code_cannot_read_the_answers_in_a_checkout(tmp_path):
+    data = sandbox.PACKAGE_DIR / "data"  # the Git LFS archive of raw data, with the answers
+    files = sorted(p for p in data.glob("*") if p.is_file()) if data.is_dir() else []
+    if not files:
+        pytest.skip("no data in the package directory")
+    report = _grade_stomp(tmp_path, _unless_it_could(f"open({str(files[0])!r}, 'rb').close()"))
+    assert report.test_metric == "2/2"  # was 0/2: the archive was readable
+
+
 @pytest.mark.parametrize("family", ["AF_UNIX", "AF_INET", "AF_INET6"])
 def test_agent_code_cannot_open_sockets(tmp_path, family):
     # A UNIX socket could reach a service of the host (a session bus, Docker) outside the sandbox.
@@ -509,6 +518,16 @@ def test_a_model_that_ends_its_process_is_invalid(tmp_path):
     from xgboost import XGBRegressor
 
     assert not _grade_optiver(tmp_path, XGBRegressor(), _Exit()).valid_submission  # ended it
+
+
+def test_a_huge_model_file_is_invalid_without_being_copied(tmp_path, caplog):
+    from xgboost import XGBRegressor
+
+    competition, folder = _optiver_submission(tmp_path, XGBRegressor(), XGBRegressor(max_depth=4))
+    os.truncate(folder / "model.pkl", 3 * 2**30)  # sparse: 3 GiB that take no space
+    report = grade_hyperparameter_search(folder, competition, str(tmp_path / "search.py"))
+    assert not report.valid_submission
+    assert "model.pkl is larger than 2 GiB" in caplog.text  # it was copied, then not loaded
 
 
 def test_a_linked_model_file_is_invalid(tmp_path):
