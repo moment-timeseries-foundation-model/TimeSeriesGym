@@ -376,14 +376,17 @@ def test_leakscan_finds_copied_label_runs_and_skips_uninformative_ones():
 
 def _competition(data: Path, cid: str, competition_dir: Path):
     """The competition as registered, with its data in `data`; its prepare_fn is the copy of
-    the challenge's prepare.py in `competition_dir` (which reads that directory's files)."""
+    the challenge's prepare.py in `competition_dir` (which reads that directory's files),
+    imported as a module of a package made of that directory, so that its relative imports
+    resolve there."""
     import dataclasses
+    import types
 
-    spec = importlib.util.spec_from_file_location(
-        f"toy_prepare_{cid}", competition_dir / "prepare.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    name = f"toy_{competition_dir.parent.name}_{cid.replace('-', '_')}"
+    package = types.ModuleType(name)
+    package.__path__ = [str(competition_dir)]
+    sys.modules[name] = package
+    module = importlib.import_module(f"{name}.prepare")
     competition = Registry(data).get_competition(cid)
     return dataclasses.replace(competition, prepare_fn=module.prepare), module
 
@@ -461,8 +464,9 @@ def _perfect_predictor(root: Path, ws: pw.WindowSet, answers) -> Path:
     pred = root / "perfect"
     pred.mkdir()
     index, table = {}, {}
+    labels = pg.label_arrays(ws, answers)
     for w in ws.windows:
-        rows = answers[w.dataset] if ws.challenge == "tsl" else answers[w.dataset][0]
+        rows = labels[w.dataset]
         key = f"{w.dataset}|{w.item_id}|{w.start}|{len(w.target)}"
         index[key] = f"k{len(index)}"
         table[index[key]] = np.nan_to_num(rows[w.slot])
@@ -496,11 +500,13 @@ def test_gift_answers_may_hold_more_than_the_labels(gift):
     GIFT-Eval's normalized MASE) are read the same way."""
     competition, _ = gift
     ws = pg.test_windows(competition, with_labels=True)
-    answers = load_answers(competition.answers)
-    group = {"target": answers, "seasonal_error": np.zeros(1), "seasonal_naive": answers}
-    pg.check_windows(ws, group)
-    for name, a in pg.label_arrays(ws, group).items():
-        assert np.array_equal(a, answers[name][0], equal_nan=True)
+    labels = pg.label_arrays(ws, load_answers(competition.answers))
+    compound = ws.to_native(labels)
+    group = {"target": compound, "seasonal_error": np.zeros(1), "seasonal_naive": compound}
+    for answers in (compound, group):
+        pg.check_windows(ws, answers)
+        for name, a in pg.label_arrays(ws, answers).items():
+            assert np.array_equal(a, labels[name], equal_nan=True)
 
 
 def test_gift_public_data_hold_no_test_label(gift):
@@ -824,7 +830,8 @@ def tsl(tmp_path_factory):
     rng = np.random.default_rng(2)
     for group, name, rows, freq in TSL_TOY:
         _toy_csv(source / group / f"{name}.csv", rows, freq, rng)
-    competition, module = _competition(root / "data", TSL, COMPETITIONS / TSL)
+    shutil.copytree(COMPETITIONS / TSL, root / "competition")
+    competition, module = _competition(root / "data", TSL, root / "competition")
 
     def download_folder(url, output, quiet=False, use_cookies=False):
         for group, name, _, _ in TSL_TOY:
@@ -981,9 +988,9 @@ def test_the_local_check_gets_the_metric_with_its_modules(tmp_path):
     grade = tmp_path / "grade.py"
     grade.write_text("import numpy as np\nfrom .mase import mase\nfrom . import other\n")
     assert prepare.metric_files(grade) == [grade, tmp_path / "mase.py", tmp_path / "other.py"]
-    assert prepare.metric_files(COMPETITIONS / GIFT / "grade.py") == [
-        COMPETITIONS / GIFT / "grade.py"
-    ]
+    for cid in (GIFT, TSL):
+        files = prepare.metric_files(COMPETITIONS / cid / "grade.py")
+        assert files[0].name == "grade.py" and all(f.is_file() for f in files)
 
 
 def test_the_public_tools_are_standalone():
