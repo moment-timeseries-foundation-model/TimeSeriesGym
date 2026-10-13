@@ -51,6 +51,9 @@ class _FakeContainer:
     def start(self):
         pass
 
+    def put_archive(self, path, data):  # files a run may copy in before the start
+        return True
+
     def exec_run(self, cmd, **kwargs):
         self.execs.append((cmd, kwargs))
         if tuple(cmd) == mp.ModelProxy.relay_wait_command:
@@ -87,6 +90,8 @@ def _run(tmp_path, monkeypatch, agent, container=None, created=None, **options):
 
     monkeypatch.setattr(agents_run, "create_competition_container", create)
     monkeypatch.setattr(agents_run, "save_output", lambda c, run_dir, cfg: None)
+    # a run that also derives a format contract from the competition's files gets an empty one
+    monkeypatch.setattr(agents_run, "submission_contract", lambda c, **kw: {}, raising=False)
     competition = SimpleNamespace(id="x", public_dir=tmp_path, private_dir=tmp_path)
     exit_code = agents_run.run_in_container(
         client=None,
@@ -164,6 +169,7 @@ def test_a_run_whose_container_cannot_be_created_closes_its_proxy(tmp_path, monk
 
     monkeypatch.setattr(agents_run.ModelProxy, "for_agent", for_agent)
     monkeypatch.setattr(agents_run, "create_competition_container", create)
+    monkeypatch.setattr(agents_run, "submission_contract", lambda c, **kw: {}, raising=False)
     competition = SimpleNamespace(id="x", public_dir=tmp_path, private_dir=tmp_path)
     with pytest.raises(RuntimeError, match="docker said no"):
         agents_run.run_in_container(
