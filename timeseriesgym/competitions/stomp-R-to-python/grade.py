@@ -11,7 +11,32 @@ from timeseriesgym.grade_code_helper import (
 )
 from timeseriesgym.utils import get_logger
 
+from . import hidden_variant
+
 logger = get_logger(__name__)
+
+
+def _case_passes(stomp_func, args: dict, ref_data, query_data, expected, case: str) -> bool:
+    """Whether `stomp` on these inputs returns the `expected` columns (mp, pi, ...) and, for
+    join similarity, None for the right and left profiles."""
+    try:
+        query = None if query_data is None else np.array(query_data)
+        outputs = stomp_func(**{**args, "ref_data": np.array(ref_data), "query_data": query})
+    except Exception as e:
+        logger.error(f"Error calling the stomp function ({case}): {e}")
+        return False
+    if not (isinstance(outputs, tuple) and len(outputs) == 6):
+        return False
+    try:
+        mp_outputs = np.column_stack(outputs[: expected.shape[1]])
+        is_output_close = mp_outputs.shape == expected.shape and np.allclose(
+            mp_outputs, expected, rtol=1e-3, atol=1e-5
+        )
+    except Exception as e:
+        logger.error(f"Error testing stomp outputs for {case}: {e}")
+        return False
+    # rmp, rpi, lmp, lpi should all be None in join similarity
+    return bool(is_output_close) and (query_data is None or all(o is None for o in outputs[2:]))
 
 
 def grade_code(
@@ -43,53 +68,37 @@ def grade_code(
         f"{function_scores['total_functions']}",
     }
 
-    # task-specific grading: outputs need to be consistent with the answers
+    # task-specific grading: outputs need to be consistent with the answers. Each test case
+    # passes only if the outputs also match on its hidden variant (hidden_variant.py).
     stomp_func = load_attr(submission_module, attr_name="stomp", attr_type="function")
     test_metric_pass, total_test_metric = 0, 2
 
     if stomp_func:
-        # test case in config.yaml: only ref_data is provided (self-join)
-        try:
-            stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
-            outputs = stomp_func(**stomp_args)
-        except Exception as e:
-            logger.error(f"Error calling the stomp function (self-join): {e}")
-            outputs = None
-
+        stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
+        ref_data = stomp_args["ref_data"]
+        query_data = np.load(coding_config["input_data_dir"] / "query_data.npy")
         true_outputs = answers.to_numpy()
-        true_outputs = true_outputs[:, :6]  # outputs for self-join
-        if isinstance(outputs, tuple) and len(outputs) == 6:
-            try:
-                mp_outputs = np.column_stack(outputs)
-                is_output_close = np.allclose(mp_outputs, true_outputs, rtol=1e-3, atol=1e-5)
+        n_query_windows = len(query_data) - int(stomp_args["window_size"]) + 1
+        variant = hidden_variant.transform
 
-                if is_output_close:
-                    test_metric_pass += 1
-            except Exception as e:
-                logger.error(f"Error testing stomp outputs for self-join: {e}")
+        # test case in config.yaml: only ref_data is provided (self-join)
+        self_join = true_outputs[:, :6]
+        cases = [
+            (ref_data, None, self_join, "self-join"),
+            (variant(ref_data), None, hidden_variant.expected_self_join(self_join), "self-join"),
+        ]
+        if all(_case_passes(stomp_func, stomp_args, *case) for case in cases):
+            test_metric_pass += 1
 
         # task-specific test case: both ref_data and query_data are provided (join similarity)
-        try:
-            stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
-            stomp_args["query_data"] = np.load(coding_config["input_data_dir"] / "query_data.npy")
-            outputs = stomp_func(**stomp_args)
-        except Exception as e:
-            logger.error(f"Error calling the stomp function (join similarity): {e}")
-            outputs = None
-
-        true_outputs = answers.to_numpy()
-        true_outputs = true_outputs[:, 6:]  # outputs for join similarity
-        if isinstance(outputs, tuple) and len(outputs) == 6:
-            try:
-                mp_outputs = np.column_stack(outputs[:2])
-                is_output_close = np.allclose(mp_outputs, true_outputs, rtol=1e-3, atol=1e-5)
-                # rmp, rpi, lmp, lpi should all be None in join similarity
-                is_output_none = all(o is None for o in outputs[2:])
-
-                if is_output_close and is_output_none:
-                    test_metric_pass += 1
-            except Exception as e:
-                logger.error(f"Error testing stomp outputs for join similarity: {e}")
+        join = true_outputs[:, 6:]
+        variant_join = hidden_variant.expected_join(join, n_query_windows)
+        cases = [
+            (ref_data, query_data, join, "join similarity"),
+            (variant(ref_data), variant(query_data), variant_join, "join similarity"),
+        ]
+        if all(_case_passes(stomp_func, stomp_args, *case) for case in cases):
+            test_metric_pass += 1
 
     scores["test_metric"] = f"{test_metric_pass}/{total_test_metric}"
     return scores

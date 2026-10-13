@@ -51,6 +51,8 @@ Submissions will be evaluated based on the following three criteria:
 
   The outputs are compared with those of the R implementation using `numpy.allclose(rtol=1e-3, atol=1e-5)`. For self-join all six outputs are compared; for join similarity `mp` and `pi` are compared, and `rmp`, `rpi`, `lmp` and `lpi` must be None. Follow the conventions of the R code: profile indices are 1-based, as in R, and entries that are never updated keep their initial values (`Inf` in matrix profiles, `-Inf` in profile indices).
 
+  Each test is also run on input series that you are not given (of the same length, with the same `window_size`), and passes only if the outputs match the R implementation's on both the provided and the unseen inputs. Outputs for the provided data stored in the code therefore fail.
+
 The following sample code illustrates how outputs are obtained using your implemented `stomp` function:
 
 ```python
