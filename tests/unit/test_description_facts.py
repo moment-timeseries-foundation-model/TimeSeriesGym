@@ -76,3 +76,11 @@ def test_weak_supervision_descriptions_state_how_the_beats_were_made(name):
     assert "compute subject-specific thresholds for each heuristic automatically" not in text
     assert 'to identify an "early R-wave"' not in text
     assert "check on the data whether, and in which direction, a heuristic separates" in text
+
+
+@pytest.mark.parametrize("competition_id", ["context-is-key-nn5-chronos", "context-is-key-moirai"])
+def test_cik_descriptions_say_the_repository_must_be_on_the_module_path(competition_id):
+    text = " ".join((_directory(competition_id) / "description.md").read_text().split())
+    # agents' scripts outside the repository failed with ModuleNotFoundError
+    assert "`PYTHONPATH=<path to context-is-key-forecasting>`" in text
+    assert "ModuleNotFoundError: No module named 'cik_benchmark'" in text
