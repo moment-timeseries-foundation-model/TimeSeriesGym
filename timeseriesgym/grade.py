@@ -118,6 +118,12 @@ def grade_jsonl(
     logger.info(purple(f"Saved summary report to {save_path}"))
 
 
+def _private_paths(competition: Competition) -> tuple[Path, ...]:
+    """What agent code run while grading must not be able to read: the answers and the raw
+    data they are prepared from."""
+    return (competition.answers, competition.private_dir, competition.raw_dir)
+
+
 def _check_suffix(path_to_submission: Path, competition: Competition) -> None:
     if competition.sample_submission.suffix != path_to_submission.suffix:
         raise InvalidSubmissionError(
@@ -276,6 +282,7 @@ def grade_code(path_to_submission: Path, competition: Competition) -> Competitio
             submission_file_path=path_to_submission,
             answers=answers,
             coding_config=coding_config,
+            private_paths=_private_paths(competition),
         )
         scores = competition.grader(grading_input)
 

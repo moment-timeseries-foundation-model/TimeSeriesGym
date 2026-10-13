@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from timeseriesgym.sandbox import SandboxError
 from timeseriesgym.utils import InvalidSubmissionError, get_logger, import_fn
 
 logger = get_logger(__name__)
@@ -26,6 +27,9 @@ class GradingInput:
     coding_config: dict | None = None
     feature_enhancement_config: dict | None = None
     solution_files_path: Path | None = None
+    # The challenge's private files, for graders that run agent code: the sandbox it runs in
+    # must not be able to read them (timeseriesgym/sandbox.py).
+    private_paths: tuple[Path, ...] | None = None
 
 
 class Grader:
@@ -60,6 +64,8 @@ class Grader:
         except InvalidSubmissionError as e:
             logger.warning(f"Invalid submission: {e}")
             return None
+        except SandboxError:  # the grading setup cannot run agent code: not the submission's fault
+            raise
         except Exception as e:
             try:
                 fpath = inspect.getfile(self.grade_fn)
