@@ -328,6 +328,26 @@ def test_agent_code_that_ends_its_process_is_invalid(tmp_path, code):
     assert not _grade_stomp(tmp_path, code + STOMP_SUBMISSION).valid_submission
 
 
+def test_what_agent_code_leaves_in_its_directory_is_removed(tmp_path, monkeypatch):
+    base = Path(tempfile.mkdtemp())
+    try:
+        os.chmod(base, 0o755)  # the sandbox user must reach its work directory
+        monkeypatch.setattr(tempfile, "tempdir", str(base))
+        leave = textwrap.dedent("""
+            import os
+            os.makedirs("locked/inside")
+            os.chmod("locked", 0)
+            os.chdir(os.environ["TMPDIR"])
+            for _ in range(2000):  # deeper than shutil.rmtree can recurse
+                os.mkdir("d")
+                os.chdir("d")
+            """)
+        assert _grade_stomp(tmp_path, leave + STOMP_SUBMISSION).test_metric == "2/2"
+        assert not list(base.iterdir())
+    finally:
+        subprocess.run(["rm", "-rf", "--", str(base)], check=False)
+
+
 def test_forged_sandbox_outputs_are_invalid(tmp_path):
     # Agent code runs in the same process as the sandbox half: it can replace what that writes.
     forge = """

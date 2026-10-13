@@ -233,8 +233,8 @@ def run(
     """
     ids = sandbox_user()
     protected = list(protected)
-    with _LOCK, tempfile.TemporaryDirectory(prefix="timeseriesgym-sandbox-") as tmp:
-        root = Path(tmp)
+    with _LOCK:
+        root = Path(tempfile.mkdtemp(prefix="timeseriesgym-sandbox-"))
         try:
             work = _work_dir(root, ids, agent_files or {}, data or {})
             job_file = root / "job.json"
@@ -256,7 +256,7 @@ def run(
             os.chmod(job_file, 0o644)
             yield _start(root, work, job_file, ids, limits)
         finally:
-            _make_removable(root)
+            _remove(root)
 
 
 def _work_dir(
@@ -655,14 +655,21 @@ def _kill_tree(before: set[int], child: int) -> None:
                 os.waitpid(pid, os.WNOHANG)
 
 
-def _make_removable(root: Path) -> None:
-    """Agent code may have left directories it took the permissions of."""
-    for path, dirs, _ in os.walk(root):
-        for name in dirs:
-            full = os.path.join(path, name)
-            with contextlib.suppress(OSError):
-                if not os.path.islink(full):
-                    os.chmod(full, 0o700)
+def _remove(root: Path) -> None:
+    """Removes a sandbox's directory, whatever agent code left in it: directories it took the
+    permissions of, or nested too deep for shutil.rmtree, which recurses."""
+    try:
+        for path, dirs, _ in os.walk(root):
+            for name in dirs:
+                full = os.path.join(path, name)
+                with contextlib.suppress(OSError):
+                    if not os.path.islink(full):
+                        os.chmod(full, 0o700)
+        shutil.rmtree(root)
+    except (OSError, RecursionError):
+        subprocess.run(["rm", "-rf", "--", str(root)], check=False)
+    if os.path.lexists(root):
+        logger.warning(f"Could not remove the grading sandbox's directory {root}.")
 
 
 # ---------------------------------------------------------------- reading sandbox outputs
