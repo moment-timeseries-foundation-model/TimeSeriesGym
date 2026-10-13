@@ -575,6 +575,31 @@ hyperparameter_search_config:
   improved_model_name: model.pkl
 ```
 
+### 3.6 Format Check for Agents (`submission_format`, Optional)
+
+Agents check their submission with `validate_submission` before they finish. Their container
+has no answers and no grader, so the check compares the submission with the sample submission
+only (`agents/validation.py` derives its contract from the sample when a run starts): for a CSV,
+its columns and number of rows, the values of its id columns in the same order, and values of
+the kinds of the sample's. The id columns are those whose values are not all the same in the
+sample, so a sample submission should hold the real test ids and one constant prediction.
+
+Where that does not describe a valid submission, set `submission_format` in `config.yaml`,
+e.g. for detected events (as `child-mind-institute-detect-sleep-states` does), whose rows are not
+the sample's, so that neither rows nor ids are checked:
+
+```yaml
+submission_format:
+  fixed_rows: false
+```
+
+or to name the id columns, instead of the columns that vary in the sample:
+
+```yaml
+submission_format:
+  id_columns: [row_id]
+```
+
 ## Step 4: Register the Competition
 
 Add your competition to the appropriate split files:

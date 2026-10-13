@@ -21,6 +21,14 @@ This guide details how to run and evaluate various AI agents with TimeSeriesGym.
 
 ### Building Agent Images
 
+First build the agents' base environment and the grader, from the repository root:
+
+```bash
+docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfile .
+docker build --platform=linux/amd64 --target grader -t timeseriesgym-grader \
+  -f environment/Dockerfile .
+```
+
 Set environment variables for the container directories:
 
 ```bash
@@ -76,6 +84,9 @@ python run_agent.py --agent-id aide --competition-set experiments/splits/dev.txt
 | `--container-config` | Custom container configuration | `environment/config/container_configs/default.json` |
 | `--allow-empty-private-dir` | Allow competitions with empty private directories | `False` |
 | `--allow-empty-answers-file` | Allow competitions with empty answers files | `False` |
+| `--grader-image` | Image of the grading step | `timeseriesgym-grader` |
+| `--skip-grading` | Do not grade the runs (grade them with the manual workflow below) | `False` |
+| `--grading-timeout` | Seconds the grading of one run may take | `7200` |
 
 ### Container Configuration
 
@@ -99,10 +110,26 @@ To use GPUs, add `"gpus": "device_ids"` to your container config. For example:
 
 When an agent completes a run, TimeSeriesGym creates a run group directory in `runs/` containing:
 
-- Per-competition subdirectories with logs, code, and submissions
+- Per-competition subdirectories with logs, code, and submissions, the format contract the
+  agent's `validate_submission` checked against (`validation_contract.json`), and the run's
+  grading (`grading/`)
 - `metadata.json` summarizing all runs
 
 ### Grading Workflow
+
+The agent's container has the challenge's public data only (at `/home/data`), and the format
+check `validate_submission`, which compares a submission with the sample submission and gives no
+score. When the agent's container has stopped and its outputs have been extracted,
+`run_agent.py` grades the run in a separate container of the grader image: it is the only
+container with the challenge's private data (read-only), it has no network, runs as the invoking
+user and takes the memory and CPU limits, but not the runtime, GPUs or privileges, of the
+container configuration. It runs `timeseriesgym grade` on the line that
+`experiments/make_submission.py` writes for the run, and saves the report and its log to
+`<run>/grading/`. `metadata.json` records the run's competition report as `grading` (or
+`{"error": ...}` if grading failed).
+
+The report of a whole run group comes from the same two steps as before, which also work with
+`--skip-grading`:
 
 1. **Create submission file**:
    ```bash
@@ -123,13 +150,19 @@ The dummy agent verifies environment correctness by performing diagnostics:
 - Validates runtime permissions
 - Checks Python interpreter configuration
 - Tests sample submission access
-- Verifies private data isolation
+- Checks that its container has no private data
 - Confirms proper directory access permissions
+- Runs the format check on its submission
 
 ### Security Considerations
 
 TimeSeriesGym prioritizes security when running agent code:
 
+- **No private data or graders in the agent's container**: the answers are never mounted in it
+  or copied to it, so neither a root process nor Docker-in-Docker in it can read them. They are
+  used only by the grading step, after the agent's container has stopped. A privileged container
+  can still reach the host's devices, and through them the host's copy of the data: prefer
+  Sysbox, which runs Docker-in-Docker without `--privileged`.
 - **Sysbox Runtime**: Recommended for AIDE, MLAgentBench, and dummy agents to ensure container isolation
 - **OpenHands Execution**: Requires privileged mode due to Docker-in-Docker execution. When running OpenHands, set:
   ```bash
@@ -140,6 +173,27 @@ TimeSeriesGym prioritizes security when running agent code:
 
 - Sysbox has [known issues](https://github.com/nestybox/sysbox/issues/50) with multiple NVIDIA GPU passthroughs in Docker-in-Docker scenarios
 - For GPU-intensive workloads with OpenHands, standard Docker runtime may be required
+
+## Migrating from the Grading Server
+
+Earlier versions mounted the challenge's private data in the agent's container (under `/private`,
+protected by a mode-700 directory) and ran a grading server there, at
+`http://localhost:5000/validate`. Neither exists any more. To migrate:
+
+- Rebuild `timeseriesgym-env`, build `timeseriesgym-grader`, and then rebuild every agent image
+  on the new base. `run_agent.py` refuses an agent image built on an older `timeseriesgym-env`
+  (it has no `/opt/timeseriesgym`), and stops before any run if the grader image is missing.
+- Agents check their submission with `validate_submission [file or folder]`, or
+  `/home/validate_submission.sh` as before. It compares the submission with the sample submission
+  instead of running the grader on the answers, prints "Submission is valid. ..." or
+  "Submission invalid! <reason>" as plain text (the server returned JSON), and exits with code 1
+  for an invalid submission. Replace calls to the HTTP endpoint with the command.
+- Each run is graded when its container has stopped. The manual workflow
+  (`experiments/make_submission.py`, then `timeseriesgym grade`) is unchanged; pass
+  `--skip-grading` to use only that.
+- Challenges whose sample submission's rows or id columns do not describe a valid submission
+  need `submission_format` in their `config.yaml` (see
+  [documentation/adding_new_challenges.md](../documentation/adding_new_challenges.md)).
 
 ## Troubleshooting
 

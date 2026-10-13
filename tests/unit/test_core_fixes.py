@@ -11,7 +11,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -195,41 +194,6 @@ def test_validation_of_feature_enhancement_prediction_files(tmp_path):
     assert not validate_submission(submission, competition)[0]
 
 
-def test_grading_server_saves_each_upload_in_a_private_directory(tmp_path, monkeypatch):
-    # flask is not installed in the test image: stand in for the three names the server uses
-    flask = types.ModuleType("flask")
-    flask.Flask = lambda name: SimpleNamespace(route=lambda *a, **k: (lambda fn: fn))
-    flask.jsonify = lambda payload: payload
-    flask.request = SimpleNamespace(files={})
-    monkeypatch.setitem(sys.modules, "flask", flask)
-    monkeypatch.delitem(sys.modules, "environment.grading_server", raising=False)
-    server = importlib.import_module("environment.grading_server")
-
-    seen = []
-
-    def run_validation(path: Path) -> str:
-        seen.append((path, path.read_bytes(), oct(path.parent.stat().st_mode & 0o777)))
-        return "checked"
-
-    monkeypatch.setattr(server, "run_validation", run_validation)
-
-    def save(path):
-        Path(path).write_bytes(b"x,y\n")
-
-    upload = SimpleNamespace(filename="my_submission.CSV", save=save)
-    flask.request.files = {"file": upload}
-    assert server.validate() == {"result": "checked"}
-    assert server.validate() == {"result": "checked"}
-
-    (first, data, mode), (second, _, _) = seen
-    assert data == b"x,y\n" and first.suffix == ".csv" and mode == "0o700"
-    assert first.parent != second.parent  # was the fixed /tmp/submission_to_validate.csv
-    assert not first.exists() and not second.exists()
-
-    flask.request.files = {"file": SimpleNamespace(filename="run.sh", save=save)}
-    assert server.validate()[1] == 400
-
-
 # ---------------------------------------------------------------- agent image build context
 
 
@@ -267,7 +231,7 @@ def test_agent_image_context_excludes_answers_and_history():
     needed = [
         "pyproject.toml",
         "README.md",  # pyproject's readme
-        "environment/grading_server.py",
+        "environment/validate_submission.py",
         "environment/entrypoint.sh",
         "timeseriesgym/grade.py",
         "timeseriesgym/competitions/spaceship-titanic/grade.py",
@@ -799,13 +763,15 @@ def test_runs_return_the_agents_exit_code(tmp_path, monkeypatch, exit_code):
         name="competition-x",
         client=SimpleNamespace(api=api),
         start=lambda: None,
-        exec_run=lambda cmd: (0, b""),  # the grading server's health check
+        put_archive=lambda path, data: True,  # the format check's contract
+        exec_run=lambda cmd: (0, b""),  # the wait for the entrypoint
         stop=lambda: None,
         remove=lambda: None,
     )
     saved = []
     monkeypatch.setattr(agents_run, "create_competition_container", lambda **kw: container)
     monkeypatch.setattr(agents_run, "save_output", lambda c, run_dir, cfg: saved.append(run_dir))
+    monkeypatch.setattr(agents_run, "submission_contract", lambda competition, **kw: {})
     competition = SimpleNamespace(id="x", public_dir=tmp_path, private_dir=tmp_path)
     agent = SimpleNamespace(kwargs_type=None, kwargs={}, env_vars={}, privileged=False)
     run = functools.partial(
@@ -831,7 +797,8 @@ def test_run_metadata_records_the_agents_exit_code(tmp_path, monkeypatch, exit_c
     import asyncio
 
     run_agent = importlib.import_module("run_agent")
-    monkeypatch.setattr(run_agent, "args", SimpleNamespace(retain=False), raising=False)
+    args = SimpleNamespace(retain=False, skip_grading=True)
+    monkeypatch.setattr(run_agent, "args", args, raising=False)
     monkeypatch.setattr(run_agent, "run_in_container", lambda **kwargs: exit_code)
     task = run_agent.Task(
         run_id="run-1",

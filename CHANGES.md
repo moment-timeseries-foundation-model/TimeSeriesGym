@@ -339,6 +339,42 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **Familiarity experiment**: arXiv archives are extracted with the "data" filter, and Kaggle
   resources are scraped from the given URL (567f16b).
 
+## Agent isolation and grading
+
+- **The agent's container has only the public data** (a01bb31). The private answers were mounted
+  at `/private/data/<id>/prepared/private`, protected only by a mode-700 directory, next to a root
+  Flask grading server, so a privileged or docker-group agent (the OpenHands configuration) could
+  read them. `agents/run.py` now mounts only the public data, and the agent's image
+  (`timeseriesgym-env`) has no TimeSeriesGym code, graders, Flask or `/private`;
+  `environment/grading_server.py` is removed. The agent starts once the entrypoint has made
+  `/home` writable (`/run/timeseriesgym-ready`), instead of after the server's health check.
+- **Validation is a format check against the sample submission** (4855462, a01bb31). Agents run
+  `validate_submission [file or folder]` or `/home/validate_submission.sh`;
+  `http://localhost:5000/validate` is gone. It checks a contract that `run_agent.py` derives from
+  the public sample submission and installs in each container: CSV columns, rows, the values of
+  the id columns (those that vary in the sample) in the sample's order, and value kinds; `.npy`
+  and `.h5` shapes, datasets and finite numbers; pickle structure; Python syntax and the code
+  grader's functions; the files of HPS and feature-enhancement folders. Verdicts change, as the
+  server's came from the grader run on the answers: the check accepts values a metric cannot use
+  (e.g. negative RMSLE predictions, HMS rows that do not sum to 1), which grading rejects, and
+  rejects rows in another order than the sample's, which graders that match ids accept. It prints
+  plain text (was JSON) and exits with code 1 for an invalid submission.
+  `child-mind-institute-detect-sleep-states` sets `submission_format: fixed_rows: false`.
+- **Each run is graded after its agent's container has stopped** (6c7053c), in a container of
+  the new `timeseriesgym-grader` image (`--target grader`). It is the only container with the
+  private data (read-only); it has no network, runs as the invoking user and gets the memory and
+  CPU limits, but not the runtime, GPUs or privileges, of the container configuration. It runs
+  `timeseriesgym grade` on the run's `experiments/make_submission.py` line and records the
+  report as `grading` in `metadata.json` (files in `<run>/grading/`). New `run_agent.py` options:
+  `--grader-image`, `--skip-grading`, `--grading-timeout` (7200 s). Scores are those of
+  `timeseriesgym grade` in that image, which does not install flake8 (pyproject does not list
+  it), so the feature-enhancement linting sub-score is 0.5 there. The manual workflow is
+  unchanged.
+- **Migration** (3958b40): rebuild `timeseriesgym-env` and every agent image, and build
+  `timeseriesgym-grader`. `run_agent.py` refuses an agent image built on an older base and stops
+  before any run if the grader image is missing (agents/README.md, "Migrating from the Grading
+  Server").
+
 ## Descriptions
 
 The descriptions of 30 challenges were corrected to match their graders and prepared data (file

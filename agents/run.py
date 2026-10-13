@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from pathlib import Path
@@ -7,6 +8,7 @@ from docker.models.containers import Container
 from dotenv import dotenv_values
 
 from agents.registry import Agent
+from agents.validation import install_contract, submission_contract
 from environment.utils import (
     create_competition_container,
     extract_from_container,
@@ -16,6 +18,8 @@ from timeseriesgym.registry import Competition
 from timeseriesgym.utils import purple
 
 CONSTANTS = dotenv_values(Path(__file__).parent.resolve() / ".shared_env")
+DATA_DIR = "/home/data"  # the competition's public data, in the agent's container
+READY_FILE = "/run/timeseriesgym-ready"  # environment/entrypoint.sh: /home is ready for the agent
 
 
 def save_output(container: Container, save_dir: Path, container_config: dict) -> Path:
@@ -104,8 +108,10 @@ def run_in_container(
     logger: logging.Logger,
 ) -> int:
     """
-    Runs environment containing the competition and agent for a set maximum amount of time.
-    The outputs are saved to `run_dir` whatever the agent's exit code.
+    Runs the agent in a container with the competition's public data (no private data, no
+    grader: the run is graded after this container has stopped, see agents/grading.py) and
+    the contract of its format check, `validate_submission`. The outputs are saved to
+    `run_dir` whatever the agent's exit code.
 
     Args:
         client: Docker client.
@@ -122,14 +128,17 @@ def run_in_container(
     """
     volumes_config = {
         competition.public_dir.resolve().as_posix(): {
-            "bind": "/home/data",
-            "mode": "ro",
-        },
-        competition.private_dir.resolve().as_posix(): {
-            "bind": f"/private/data/{competition.id}/prepared/private/",
+            "bind": DATA_DIR,
             "mode": "ro",
         },
     }
+    contract = submission_contract(
+        competition,
+        data_dir=DATA_DIR,
+        submission_dir=CONSTANTS["SUBMISSION_DIR"],
+        code_dir=CONSTANTS["CODE_DIR"],
+    )
+    (run_dir / "validation_contract.json").write_text(json.dumps(contract, indent=2))
 
     container = create_competition_container(
         client=client,
@@ -147,14 +156,16 @@ def run_in_container(
     logger.info(purple(f"Run started: {run_dir}"))
     try:
         time_start = time.monotonic()
+        install_contract(container, contract)
         container.start()
         exit_code, _ = container.exec_run(
-            'timeout 60s sh -c "while ! curl -s http://localhost:5000/health > /dev/null; do sleep 1; done"'  # noqa E501
+            ["timeout", "60", "sh", "-c", f"while [ ! -e {READY_FILE} ]; do sleep 1; done"]
         )
         if exit_code != 0:
             raise RuntimeError(
-                "The grading server failed to start within 60 seconds. This is likely due to an "
-                "error in `entrypoint.sh`; check the logs."
+                "The container's entrypoint did not finish within 60 seconds (it makes /home "
+                "writable for the agent). This is likely due to an error in `entrypoint.sh`; "
+                "check the logs."
             )
         exit_code = execute_agent(container, agent, logger)
         # also for failed runs: their logs, and the submission an agent that timed out had saved

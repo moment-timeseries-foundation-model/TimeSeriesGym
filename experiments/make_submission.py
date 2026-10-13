@@ -54,6 +54,18 @@ def solution_files_path_for(run_dir: Path, competition) -> Path:
     return run_dir / "code"
 
 
+def submission_line(run_dir: Path, competition) -> dict:
+    """The JSONL line of one run (run_agent.py's grading step, agents/grading.py, grades it)."""
+    path = submission_path_for(run_dir, competition)
+    line = {"competition_id": competition.id, "submission_path": str(path)}
+    if competition.hyperparameter_search_config is not None:
+        # passed even if missing: the graders then reject the run (no solution code)
+        line["solution_file_path"] = str(run_dir / "code")
+    if competition.feature_enhancement_config is not None:
+        line["solution_files_path"] = str(solution_files_path_for(run_dir, competition))
+    return line
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--metadata", required=True, type=Path)
@@ -72,15 +84,7 @@ def main() -> None:
             exit_code = run.get("agent_exit_code")
             logger.warning(f"{run_id}: run failed (agent exit code {exit_code}), still graded")
         competition = reg.get_competition(run["competition_id"])
-        run_dir = Path(run["run_dir"])
-        path = submission_path_for(run_dir, competition)
-        line = {"competition_id": competition.id, "submission_path": str(path)}
-        if competition.hyperparameter_search_config is not None:
-            # passed even if missing: the graders then reject the run (no solution code)
-            line["solution_file_path"] = str(run_dir / "code")
-        if competition.feature_enhancement_config is not None:
-            line["solution_files_path"] = str(solution_files_path_for(run_dir, competition))
-        lines.append(line)
+        lines.append(submission_line(Path(run["run_dir"]), competition))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(line) + "\n" for line in lines))

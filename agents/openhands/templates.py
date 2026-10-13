@@ -75,7 +75,7 @@ ADDITIONAL NOTES
 - **Total Runtime**: You have a maximum of ${max_time_in_hours} hours to attempt this task. Bear in mind that program runtime also counts towards this limit. TRY TO USE AS MUCH OF THE AVAILABLE TIME AS POSSIBLE to iteratively develop your solution.
 - **Total Steps**: You have a maximum of ${max_steps} steps to submit your solution.
 - **Deliverables**: Carefully read the instructions in `/home/data/description.md`. Save **ALL** the code that you generate to `/home/code`. This could be `.py` files as well as `.ipynb` notebooks.
-- You only have read and write permissions to the files that you create. You therefore cannot use the helper script `/home/validate_submission.sh`. Instead, use the HTTP endpoint (e.g. via `curl -X POST -F "file=@/path/to/your/file" http://localhost:5000/validate`) to validate your submission.
+- Check the format of your submission with the command `validate_submission /home/submission` (or `bash /home/validate_submission.sh /home/submission`). It compares your files with the sample submission in `/home/data` and gives no score.
 - You must write all of the code necessary to produce the outputs described in the instructions in `${workspace}`. You must not write to any other location.
 - You must use all the time available to you, unless you've achieved the maximum possible score for the competition. Do not stop until you've reached the maximum possible score.
 """
