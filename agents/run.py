@@ -6,6 +6,7 @@ import docker
 from docker.models.containers import Container
 from dotenv import dotenv_values
 
+from agents.model_proxy import ModelProxy
 from agents.registry import Agent
 from environment.utils import (
     create_competition_container,
@@ -107,6 +108,9 @@ def run_in_container(
     Runs environment containing the competition and agent for a set maximum amount of time.
     The outputs are saved to `run_dir` whatever the agent's exit code.
 
+    An agent with a `model_proxy` config calls its models through a model proxy for this run
+    (agents/model_proxy.py), which keeps the API keys on the host.
+
     Args:
         client: Docker client.
         competition: The competition to run.
@@ -131,18 +135,25 @@ def run_in_container(
         },
     }
 
-    container = create_competition_container(
-        client=client,
-        competition=competition,
-        container_config=container_config,
-        volumes_config=volumes_config,
-        env_vars={
-            "COMPETITION_ID": competition.id,
-            **agent.env_vars,
-        },
-        container_image=image,
-        privileged=agent.privileged,
-    )
+    proxy = ModelProxy.for_agent(agent, run_dir)  # None for an agent without a model_proxy
+    try:
+        container = create_competition_container(
+            client=client,
+            competition=competition,
+            container_config=container_config,
+            volumes_config={**volumes_config, **(proxy.volumes if proxy else {})},
+            env_vars={
+                "COMPETITION_ID": competition.id,
+                **agent.env_vars,
+                **(proxy.container_env() if proxy else {}),  # after the agent's own: these win
+            },
+            container_image=image,
+            privileged=agent.privileged,
+        )
+    except BaseException:
+        if proxy is not None:
+            proxy.close()
+        raise
 
     logger.info(purple(f"Run started: {run_dir}"))
     try:
@@ -156,6 +167,8 @@ def run_in_container(
                 "The grading server failed to start within 60 seconds. This is likely due to an "
                 "error in `entrypoint.sh`; check the logs."
             )
+        if proxy is not None:
+            proxy.start_relay(container)  # and waits until the proxy answers through it
         exit_code = execute_agent(container, agent, logger)
         # also for failed runs: their logs, and the submission an agent that timed out had saved
         save_output(container, run_dir, container_config)
@@ -166,3 +179,6 @@ def run_in_container(
         return exit_code
     finally:
         clean_up(container, logger, retain_container)
+        if proxy is not None:
+            proxy.close()
+            logger.info(proxy.summary())

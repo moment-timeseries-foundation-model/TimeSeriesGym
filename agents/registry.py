@@ -1,8 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
+from agents.model_proxy import parse_config as parse_model_proxy_config
 from agents.utils import parse_env_var_values
 from timeseriesgym.utils import get_logger
 
@@ -20,6 +21,8 @@ class Agent:
     env_vars: dict
     privileged: bool = False
     kwargs_type: str | None = None
+    # the parsed `model_proxy` config (agents/model_proxy.py); it holds the API keys
+    model_proxy: dict | None = field(default=None, repr=False)
 
     def __post_init__(self):
         assert isinstance(self.start, Path), "Agent start script must be a pathlib.Path object."
@@ -51,6 +54,7 @@ class Agent:
                 kwargs_type=data.get("kwargs_type", None),
                 env_vars=data.get("env_vars", {}),
                 privileged=data.get("privileged", False),
+                model_proxy=data.get("model_proxy"),
             )
         except KeyError as e:
             raise ValueError(f"Missing key {e} in agent config!") from e
@@ -84,6 +88,9 @@ class Registry:
             # env vars can be used both in kwargs and env_vars
             kwargs = parse_env_var_values(kwargs)
             env_vars = parse_env_var_values(env_vars)
+            model_proxy = contents[agent_id].get("model_proxy")
+            if model_proxy is not None:
+                model_proxy = parse_model_proxy_config(model_proxy)
 
             return Agent.from_dict(
                 {
@@ -95,6 +102,7 @@ class Registry:
                     "kwargs_type": kwargs_type,
                     "env_vars": env_vars,
                     "privileged": privileged,
+                    "model_proxy": model_proxy,
                 }
             )
 
