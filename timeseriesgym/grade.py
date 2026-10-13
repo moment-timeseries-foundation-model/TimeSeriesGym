@@ -3,6 +3,7 @@
 import ast
 import json
 import numbers
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -232,6 +233,11 @@ def grade_feature_enhancement(
     _ensure_prepared(competition)
     if competition.feature_enhancement_config is None:
         raise ValueError(f"`{competition.id}` has no feature_enhancement_config")
+    if shutil.which("flake8") is None:  # the rubric's lint check runs it
+        raise ValueError(
+            f"flake8 is not installed, and the score of `{competition.id}` requires its lint "
+            f"check. Please install timeseriesgym's dependencies (`pip install -e .`)."
+        )
 
     grading_input = GradingInput(
         submission_folder_path=path_to_submission_folder,

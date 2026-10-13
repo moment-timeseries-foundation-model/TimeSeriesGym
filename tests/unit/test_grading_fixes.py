@@ -315,6 +315,32 @@ def test_feature_enhancement_grader_is_reachable(tmp_path, monkeypatch):
     assert not score["rubric_passed"] and score["overall_score"] == 0.0  # no TensorBoard logs
 
 
+def test_feature_enhancement_without_flake8_is_a_setup_error(tmp_path, monkeypatch):
+    import shutil
+
+    from timeseriesgym.grade import grade_feature_enhancement
+    from timeseriesgym.registry import Registry
+
+    cid = "ptb-xl-classification-challenge-feature-enhancement"
+    competition = Registry(tmp_path / "data").get_competition(cid)
+    example = Path(importlib.import_module("timeseriesgym").__file__).parent / "competitions"
+    folder = tmp_path / "submission"
+    shutil.copytree(example / cid / "example", folder)
+    competition.answers.parent.mkdir(parents=True)
+    shutil.copyfile(folder / "submission.csv", competition.answers)
+
+    clean = subprocess.CompletedProcess([], 0, "", "")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: clean)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    report = grade_feature_enhancement(folder, competition)
+    assert report.valid_submission and report.score["accuracy"] == pytest.approx(1.0)
+
+    # without flake8 no submission can pass the rubric: grading stops (each run was invalid)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(ValueError, match="flake8 is not installed"):
+        grade_feature_enhancement(folder, competition)
+
+
 # ---------------------------------------------------------------- RMSLE graders
 
 
