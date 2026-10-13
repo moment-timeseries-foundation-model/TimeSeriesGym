@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 import requests
 
-from agents.grading import DATA_DIR, grade_run
+from agents.grading import DATA_DIR, ENTRYPOINT, grade_run
 from agents.validation import OutdatedImageError, install_contract, submission_contract
 from environment import validate_submission as vs
 from timeseriesgym.registry import Registry
@@ -621,7 +621,11 @@ def test_runs_are_graded_in_a_separate_container_with_the_private_data(tmp_path)
     }
     assert {m["Type"] for m in kwargs["mounts"]} == {"bind"} and "volumes" not in kwargs
     assert kwargs["network_mode"] == "none" and kwargs["image"] == "grader-image"
-    assert kwargs["entrypoint"] == ["timeseriesgym"]
+    # `timeseriesgym grade` as root (was the invoking user), then the outputs to that user
+    assert kwargs["entrypoint"] == ["sh", "-c", ENTRYPOINT, "timeseriesgym-grade"]
+    assert kwargs["user"] == "0:0"
+    assert kwargs["environment"]["TIMESERIESGYM_OUTPUT_OWNER"] == f"{os.getuid()}:{os.getgid()}"
+    assert kwargs["environment"]["TIMESERIESGYM_OUTPUT_DIR"] == str(run_dir / "grading")
     jsonl = run_dir / "grading" / "submission.jsonl"
     assert kwargs["command"] == [
         "grade",
@@ -636,12 +640,33 @@ def test_runs_are_graded_in_a_separate_container_with_the_private_data(tmp_path)
     line = {"competition_id": "spaceship-titanic", "submission_path": str(run_dir / "submission")}
     line["submission_path"] += "/submission.csv"
     assert json.loads(jsonl.read_text()) == line
-    assert kwargs["user"] == f"{os.getuid()}:{os.getgid()}"
     # resource limits, but not the agent's runtime, GPUs or privileges
     assert kwargs["mem_limit"] == "16g" and kwargs["nano_cpus"] == 4_000_000_000
     assert not {"runtime", "device_requests", "privileged"} & set(kwargs)
     assert grader.events == ["start", ("wait", 60), "remove"]
     assert (run_dir / "grading" / "grader.log").read_text() == "graded\n"
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_the_grader_gives_its_outputs_to_the_invoking_user(tmp_path, status):
+    """The grader container's entrypoint, with a stand-in for `timeseriesgym grade`."""
+    bin_dir, out = tmp_path / "bin", tmp_path / "grading"
+    bin_dir.mkdir()
+    out.mkdir()
+    fake = bin_dir / "timeseriesgym"
+    fake.write_text(f'#!/bin/sh\necho "$@" > {out}/report.json\nexit {status}\n')
+    fake.chmod(0o755)
+    owner = (12345, 12345) if os.geteuid() == 0 else (os.getuid(), os.getgid())
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "TIMESERIESGYM_OUTPUT_OWNER": "{}:{}".format(*owner),
+        "TIMESERIESGYM_OUTPUT_DIR": str(out),
+    }
+    argv = ["sh", "-c", ENTRYPOINT, "timeseriesgym-grade", "grade", "--output-dir", str(out)]
+    assert subprocess.run(argv, env=env).returncode == status
+    assert (out / "report.json").read_text() == f"grade --output-dir {out}\n"
+    for path in (out, out / "report.json"):
+        assert (path.stat().st_uid, path.stat().st_gid) == owner
 
 
 def test_hyperparameter_search_runs_are_graded_with_the_line_of_make_submission(tmp_path):
@@ -763,13 +788,20 @@ def _stages(dockerfile: str) -> dict[str, str]:
 
 def test_the_agents_image_has_no_graders_or_private_data():
     stages = _stages((REPO / "environment" / "Dockerfile").read_text())
-    agent, grader = stages[""], stages["grader"]
-    assert list(stages)[-1] == ""  # `docker build -f environment/Dockerfile .` builds the agent's
+    agent, grader = stages["env"], stages["grader"]
+    # `docker build -f environment/Dockerfile .` builds the last stage: the agent's image
+    assert list(stages)[-1] == "" and stages[""].strip() == "env"
     for leak in ("COPY . ", "pip install -e", "/private", "grading_server", "flask"):
         assert leak not in agent
     tool = vs.CONTRACT_PATH.parent / "validate_submission.py"
     assert f"COPY environment/validate_submission.py {tool}" in agent
     assert "COPY . /timeseriesgym" in grader and 'ENTRYPOINT ["timeseriesgym"]' in grader
+    # agent code runs as `sandbox` when grading runs as root; the private data are in /data
+    assert "useradd --system --no-create-home --shell /usr/sbin/nologin sandbox" in grader
+    assert "mkdir -m 700 /data" in grader and "useradd --system" not in agent
+    # predictors run with the agent environment
+    assert "COPY --from=predictor-env /opt/conda/envs/agent /opt/conda/envs/agent" in grader
+    assert "ENV TSGYM_PREDICTOR_PYTHON=/opt/conda/envs/agent/bin/python" in grader
     entrypoint = (REPO / "environment" / "entrypoint.sh").read_text()
     assert "grading_server" not in entrypoint and "/private" not in entrypoint
     agents_run = importlib.import_module("agents.run")

@@ -3,10 +3,14 @@
 The agent's container has only the public data (agents/run.py). Its outputs are extracted into
 the run directory, and this step grades them in a separate container of the grader image
 (environment/Dockerfile, target `grader`). That container is the only one with the private data:
-the competition's prepared `private` and `public` directories, read-only. It has no network,
-runs as the invoking user and runs `timeseriesgym grade` on the JSONL line that
-experiments/make_submission.py writes for the run, so the run is graded as in the manual
-workflow. The report and the grader's log are written to `<run_dir>/grading/`.
+the competition's prepared `private` and `public` directories, read-only. It has no network
+and runs `timeseriesgym grade` on the JSONL line that experiments/make_submission.py writes for
+the run, so the run is graded as in the manual workflow. The report and the grader's log are
+written to `<run_dir>/grading/`.
+
+The grader runs as root, so that the grading sandbox (timeseriesgym/sandbox.py) runs agent code
+(code submissions, models, predictors) as the image's user `sandbox`, which cannot read the
+private data. What it writes to `<run_dir>/grading/` is then given to the invoking user.
 """
 
 import json
@@ -30,6 +34,12 @@ GRADING_DIR = "grading"  # in the run directory
 DATA_DIR = "/data"  # the grader's data directory, in its container
 # taken from the agent's container configuration; GPUs, runtime and privileges are not
 RESOURCE_KEYS = ("mem_limit", "memswap_limit", "nano_cpus", "cpuset_cpus", "shm_size")
+# `timeseriesgym grade "$@"` as root, then the outputs to the invoking user, whatever its result
+ENTRYPOINT = (
+    'timeseriesgym "$@"; status=$?; '
+    'chown -R -- "$TIMESERIESGYM_OUTPUT_OWNER" "$TIMESERIESGYM_OUTPUT_DIR" || status=1; '
+    "exit $status"
+)
 
 
 def grader_mounts(competition: Competition, run_dir: Path) -> list[Mount]:
@@ -77,10 +87,10 @@ def _grade_run(client, competition, run_dir, image, container_config, logger, ti
         for key, value in parse_container_config(container_config).items()
         if key in RESOURCE_KEYS and value is not None
     }
-    user = f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else None
+    owner = f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "0:0"
     container = client.containers.create(
         image=image,
-        entrypoint=["timeseriesgym"],
+        entrypoint=["sh", "-c", ENTRYPOINT, "timeseriesgym-grade"],
         command=[
             "grade",
             "--submission",
@@ -93,9 +103,13 @@ def _grade_run(client, competition, run_dir, image, container_config, logger, ti
         name=f"grader-{competition.id}-{get_timestamp()}-{uuid.uuid4().hex}",
         detach=True,
         network_mode="none",
-        user=user,
+        user="0:0",
         working_dir="/tmp",
-        environment={"HOME": "/tmp"},
+        environment={
+            "HOME": "/tmp",
+            "TIMESERIESGYM_OUTPUT_OWNER": owner,
+            "TIMESERIESGYM_OUTPUT_DIR": output_dir.as_posix(),
+        },
         labels={"timeseriesgym.role": "grader"},
         mounts=grader_mounts(competition, run_dir),
         **resources,

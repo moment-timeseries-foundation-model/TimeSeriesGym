@@ -7,21 +7,12 @@
 # Only the grader has TimeSeriesGym and its graders installed, and only the grader's container
 # gets the private data. The agent's container gets the public data and a format check.
 
-FROM python:3.11-slim-bookworm AS grader
+# The agent environment the grader runs predictors with: the `env` stage below, or an agent's
+# image (--build-arg PREDICTOR_ENV=<image>), whose conda env `agent` the grader copies
+ARG PREDICTOR_ENV=env
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_NO_CACHE_DIR=1 \
-    DEEPEVAL_TELEMETRY_OPT_OUT=YES
-
-COPY . /timeseriesgym
-RUN pip install -e /timeseriesgym
-
-# run_agent.py runs `timeseriesgym grade` in it as the invoking user, with no network
-WORKDIR /tmp
-ENTRYPOINT ["timeseriesgym"]
-
-# The agent's base image (the default target)
-FROM ubuntu:20.04
+# The agent's base image (the default target, at the end of this file)
+FROM ubuntu:20.04 AS env
 
 # Avoid interactive dialog from apt-get and other packages requiring configuration
 ENV DEBIAN_FRONTEND=noninteractive
@@ -104,12 +95,38 @@ RUN useradd -m nonroot \
     && chmod 755 /opt/timeseriesgym \
     && chmod +x /entrypoint.sh /home/validate_submission.sh /usr/local/bin/validate_submission
 
-# The user that agent code runs as when submissions are graded in the container as root
-# (timeseriesgym/sandbox.py)
-RUN useradd --system --no-create-home --shell /usr/sbin/nologin sandbox
-
 WORKDIR /home
 
 # IMPORTANT: This needs to run as root! Downstream Dockerfiles must not change the default USER for when the container starts.
 # Entrypoint script is in charge of setting up the user environment (permissions under /home)
 ENTRYPOINT ["/entrypoint.sh"]
+
+FROM ${PREDICTOR_ENV} AS predictor-env
+
+# The grader
+FROM python:3.11-slim-bookworm AS grader
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    DEEPEVAL_TELEMETRY_OPT_OUT=YES
+
+COPY . /timeseriesgym
+RUN pip install -e /timeseriesgym
+
+# Agent code (code submissions, models, predictors) runs in the grading sandbox as the user
+# `sandbox` (timeseriesgym/sandbox.py). The private data are mounted under /data, which that
+# user cannot enter.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sandbox \
+    && mkdir -m 700 /data
+
+# Predictors run with the agent environment's Python and packages, at the agents' path
+COPY --from=predictor-env /opt/conda/envs/agent /opt/conda/envs/agent
+ENV TSGYM_PREDICTOR_PYTHON=/opt/conda/envs/agent/bin/python
+
+# run_agent.py runs `timeseriesgym grade` in it as root, with no network, and gives the outputs
+# to the invoking user
+WORKDIR /tmp
+ENTRYPOINT ["timeseriesgym"]
+
+# The default target: the agent's base image, timeseriesgym-env
+FROM env
