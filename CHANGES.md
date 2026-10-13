@@ -607,13 +607,15 @@ they now take a predictor, and static submissions, which could copy labels, are 
   limits on time (1800 s for code, 600 s for a hyperparameter search), memory (3/4 of the
   machine's, all its processes together) and file size (1 GiB), and no read access to the
   private files or to the raw-data archive of a checkout. The grading process compares the
-  outputs with the answers as before. The resnet test's training-sample count is taken in the
-  sandbox, where the model trains, and stomp's hidden variants run there on inputs made from the
-  public ones; their expected outputs are derived from the answers in the grading process
-  (6f96a3b). Scores are unchanged: on the prepared data, 21 submissions (the shipped samples,
-  reference solutions, broken and altered versions of them, and hyperparameter-search folders)
-  get identical reports, and after the resnet and stomp changes 8 more (references, samples, an
-  answers cheat and four training budgets) get the native graders' reports.
+  outputs with the answers as before. The resnet test's training-sample count and its count of
+  the parameters a fresh model uses are taken in the sandbox, where the model trains, and the
+  grading process compares them with their limits (6f96a3b, 906c4f0). stomp's hidden variants
+  run there on inputs made from the public ones; their expected outputs are derived from the
+  answers in the grading process (6f96a3b). Scores are unchanged: on the prepared data, 21
+  submissions (the shipped samples, reference solutions, broken and altered versions of them,
+  and hyperparameter-search folders) get identical reports, and after the resnet and stomp
+  changes 11 more (references, ports with and without shortcuts, samples, an answers cheat and
+  training budgets) get the native graders' reports.
 - **Submissions that end, hang or exhaust the grader are invalid** (5bc2131, 8b4cc3a): a
   segmentation fault, `os._exit` or `SystemExit` at import or while a model loads ended the
   grading process (`SystemExit` passed the grader's except clause), an endless loop hung it, and
