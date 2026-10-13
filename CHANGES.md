@@ -343,7 +343,7 @@ agents are told, not how they are graded.
 The descriptions of LANL-Earthquake-Prediction, amp-parkinsons-disease-progression-prediction and
 ashrae-energy-prediction, and a new README section, say that their medals compare scores on
 TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011, aab3d79): LANL's
-segments have 15,000 rows (Kaggle's 150,000), amp's test patients come from Kaggle's training
+test segments are cut from Kaggle's training data, amp's test patients come from Kaggle's training
 data, and ashrae's leaderboard was scored on 2017-2018, its test set here on the end of 2016.
 
 ## Tests

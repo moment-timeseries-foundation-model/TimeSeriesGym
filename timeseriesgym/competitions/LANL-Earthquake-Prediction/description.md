@@ -30,7 +30,7 @@ Where:
 - $y_i$ is the actual value
 - $\hat{y}_i$ is the predicted value
 
-Medal thresholds come from the final Kaggle leaderboard, which was scored on Kaggle's test set of 150,000-row segments. The test segments here have 15,000 rows and are cut from the competition's training data, so medals are only a rough guide to where a score would rank on Kaggle.
+Medal thresholds come from the final Kaggle leaderboard, which was scored on Kaggle's own test set of 2,624 segments of 150,000 rows. The test segments here have the same length but are cut from the last 5 earthquake cycles of the competition's training data, so medals are only a rough guide to where a score would rank on Kaggle.
 
 ## Submission File
 For each `seg_id` in the test set folder, you must predict `time_to_failure`, which is the remaining time before the next lab earthquake. The file should contain a header and have the following format:
