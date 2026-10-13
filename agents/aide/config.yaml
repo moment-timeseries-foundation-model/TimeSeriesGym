@@ -1,6 +1,14 @@
 vars:
   step_count: &step_count 50
   time_limit: &time_limit 14400
+  # API keys stay on the host, in the run's model proxy (agents/model_proxy.py)
+  openai_key: &openai_key ${{ secrets.OPENAI_API_KEY }}
+  anthropic_key: &anthropic_key ${{ secrets.ANTHROPIC_API_KEY }}
+  openrouter_key: &openrouter_key ${{ secrets.OPENROUTER_API_KEY }}
+  gemini_key: &gemini_key ${{ secrets.GEMINI_API_KEY }}
+  proxy_limits: &proxy_limits
+    max_requests: 1000 # about 2 model calls per step, with retries
+    max_seconds: 16200 # the time limit and 30 minutes
 
 defaults: &defaults
   start: aide/start.sh
@@ -26,9 +34,10 @@ aide:
     agent.code.model: gpt-4.1-2025-04-14
     agent.feedback.model: gpt-4.1-2025-04-14
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-4.1-2025-04-14]}
 
 aide/dev:
   <<: *defaults
@@ -37,9 +46,10 @@ aide/dev:
     agent.code.model: gpt-4o-2024-08-06
     agent.feedback.model: gpt-4o-2024-08-06
     agent.steps: 8
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-4o-2024-08-06]}
 
 aide/o1-preview:
   <<: *defaults
@@ -50,9 +60,10 @@ aide/o1-preview:
     agent.feedback.model: gpt-4o-2024-08-06
     agent.steps: *step_count
     agent.convert_system_to_user: True
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [o1-preview, gpt-4o-2024-08-06]}
 
 aide/gpt-4-turbo:
   <<: *defaults
@@ -61,9 +72,10 @@ aide/gpt-4-turbo:
     agent.code.model: gpt-4-turbo-2024-04-09
     agent.feedback.model: gpt-4-turbo-2024-04-09
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-4-turbo-2024-04-09]}
 
 aide/gpt-4-turbo-dev:
   <<: *defaults
@@ -72,9 +84,10 @@ aide/gpt-4-turbo-dev:
     agent.code.model: gpt-4-turbo-2024-04-09
     agent.feedback.model: gpt-4-turbo-2024-04-09
     agent.steps: 8
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-4-turbo-2024-04-09]}
 
 aide/gpt-3.5-turbo-0125:
   <<: *defaults
@@ -83,9 +96,10 @@ aide/gpt-3.5-turbo-0125:
     agent.code.model: gpt-3.5-turbo-0125
     agent.feedback.model: gpt-3.5-turbo-0125
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-3.5-turbo-0125]}
 
 aide/gpt-3.5-dev:
   <<: *defaults
@@ -94,9 +108,10 @@ aide/gpt-3.5-dev:
     agent.code.model: gpt-3.5-turbo-0125
     agent.feedback.model: gpt-3.5-turbo-0125
     agent.steps: 8
-  env_vars:
-    <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-3.5-turbo-0125]}
 
 aide/claude-3-5-sonnet:
   <<: *defaults
@@ -105,9 +120,11 @@ aide/claude-3-5-sonnet:
     agent.code.model: claude-3-5-sonnet-20240620
     agent.feedback.model: gpt-4o-2024-08-06
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      anthropic: {key: *anthropic_key, models: [claude-3-5-sonnet-20240620]}
+      openai: {key: *openai_key, models: [gpt-4o-2024-08-06]} # the feedback model
 
 aide/llama-3.1-405b-instruct:
   <<: *defaults
@@ -116,9 +133,13 @@ aide/llama-3.1-405b-instruct:
     agent.code.model: meta-llama/llama-3.1-405b-instruct
     agent.feedback.model: gpt-4o-2024-08-06
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  # aide's OpenRouter client has its URL built in; it must read OPENROUTER_BASE_URL to reach
+  # the model proxy (see agents/README.md)
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openrouter: {key: *openrouter_key, models: [meta-llama/llama-3.1-405b-instruct]}
+      openai: {key: *openai_key, models: [gpt-4o-2024-08-06]} # the feedback model
 
 aide/gemini-1.5-pro:
   <<: *defaults
@@ -127,9 +148,13 @@ aide/gemini-1.5-pro:
     agent.code.model: gemini-1.5-pro-002
     agent.feedback.model: gpt-4o-2024-08-06
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  # aide's Gemini client (Google's SDK) cannot be pointed at the model proxy; it must use
+  # Gemini's OpenAI-compatible API at GEMINI_BASE_URL (see agents/README.md)
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      gemini: {key: *gemini_key, models: [gemini-1.5-pro-002]}
+      openai: {key: *openai_key, models: [gpt-4o-2024-08-06]} # the feedback model
 
 aide/obfuscated:
   <<: *defaults
@@ -141,5 +166,8 @@ aide/obfuscated:
     agent.obfuscate: True
   env_vars:
     <<: *env_vars
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     OBFUSCATE: "true"
+  model_proxy:
+    <<: *proxy_limits
+    providers:
+      openai: {key: *openai_key, models: [gpt-4o-2024-08-06]}

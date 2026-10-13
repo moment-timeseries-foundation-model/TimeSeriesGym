@@ -258,19 +258,35 @@ def test_openhands_setup_script_runs(tmp_path):
     assert "--max_steps" in out.stdout
 
 
-def test_openhands_root_build_script_is_not_agent_writable():
+def test_openhands_calls_its_model_through_the_proxy():
+    # the model proxy's URL is in OPENAI_BASE_URL; OPENAI_API_KEY holds a dummy
+    openhands = REPO / "agents" / "openhands"
+    spec = importlib.util.spec_from_file_location("oh_templates", openhands / "templates.py")
+    templates = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(templates)
+    llm = templates.config_template.template.split("[llm]")[1].split("\n[")[0]
+    assert 'base_url="${base_url}"' in llm
+    assert "base_url=OPENAI_BASE_URL" in (openhands / "setup.py").read_text()
+    assert 'OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")' in (openhands / "setup.py").read_text()
+
+
+def test_openhands_installs_everything_when_its_image_is_built():
+    # agents have no network at run time; the build also needed a sudo rule for nonroot
     openhands = REPO / "agents" / "openhands"
     dockerfile = (openhands / "Dockerfile").read_text()
-    allowed = re.findall(r"NOPASSWD:\s*(\S+?)\"", dockerfile)
-    assert allowed == ["/agent_build.sh"]
-    # environment/entrypoint.sh makes everything under /home writable for nonroot
-    assert "find /home " in (REPO / "environment" / "entrypoint.sh").read_text()
-    assert not allowed[0].startswith(("/home/", "${AGENT_DIR}", "$AGENT_DIR"))
-    assert "COPY build.sh /agent_build.sh" in dockerfile
-    assert "sudo /agent_build.sh" in (openhands / "start.sh").read_text()
-    # it builds from /home/agent, which nonroot can change: only the first call may build
-    build = (openhands / "build.sh").read_text()
-    assert build.index("mkdir /root/.agent_build_started") < build.index("make build")
+    assert "NOPASSWD" not in dockerfile and not (openhands / "build.sh").exists()
+    assert "make build" in dockerfile and "playwright install" in dockerfile
+    assert "nvidia-container-toolkit" in dockerfile
+    for script in ("start.sh", "entrypoint.sh"):
+        text = (openhands / script).read_text()
+        for install in ("make build", "playwright install", "apt-get", "pip install", "curl "):
+            assert install not in text, (script, install)
+        assert "agent_build" not in text
+
+
+def test_mlagentbench_fetches_tiktoken_encodings_when_its_image_is_built():
+    dockerfile = (REPO / "agents" / "mlagentbench" / "Dockerfile").read_text()
+    assert "ENV TIKTOKEN_CACHE_DIR=" in dockerfile and "tiktoken.get_encoding" in dockerfile
 
 
 # ---------------------------------------------------------------- registry and environment

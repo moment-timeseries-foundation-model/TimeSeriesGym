@@ -34,6 +34,7 @@ class Task:
     agent: Agent
     competition: Competition
     container_config: dict[str, Any]
+    agent_network: str = "none"  # Docker network of the agent's container
 
 
 async def worker(
@@ -76,6 +77,7 @@ async def worker(
                 retain_container=args.retain,
                 run_dir=task.path_to_run,
                 logger=run_logger,
+                network=task.agent_network,
             )
             # a non-zero exit (e.g. 124 from `timeout`) fails the run, but its outputs were saved
             task_output["agent_exit_code"] = exit_code
@@ -136,6 +138,13 @@ async def main(args):
                 "experiments/make_submission.py and `timeseriesgym grade`."
             ) from None
 
+    if args.agent_network != "none":
+        logger.warning(
+            f"Agent containers are on the Docker network `{args.agent_network}`: unless that "
+            "network filters traffic, agents can download public answers. The model proxy "
+            "still keeps the API keys on the host."
+        )
+
     run_group = f"{get_timestamp()}_run-group_{agent.name}"
 
     # Load competition ids and check all are prepared
@@ -173,6 +182,7 @@ async def main(args):
                 path_to_run_group=run_dir.parent,
                 path_to_run=run_dir,
                 container_config=container_config,
+                agent_network=args.agent_network,
             )
             tasks.append(task)
 
@@ -202,6 +212,7 @@ async def main(args):
     metadata = {
         "run_group": run_group,
         "created_at": get_timestamp(),
+        "agent_network": args.agent_network,
         "runs": tasks_outputs,
     }
     run_group_dir = get_runs_dir(args.run_dir) / run_group
@@ -246,6 +257,15 @@ if __name__ == "__main__":
         type=str,
         required=False,
         default=DEFAULT_CONTAINER_CONFIG_PATH,
+    )
+    parser.add_argument(
+        "--agent-network",
+        help="Docker network of the agent containers. The default, `none`, gives them no "
+        "network: only the model proxy. `bridge` (Docker's default network) or a network of "
+        "your own lets agents reach whatever it reaches; see agents/README.md.",
+        type=str,
+        required=False,
+        default="none",
     )
     parser.add_argument(
         "--retain",
@@ -316,6 +336,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.n_workers < 1:  # no worker would take the queued tasks: queue.join() never returns
         parser.error("--n-workers must be at least 1")
+    if args.agent_network == "host" or args.agent_network.startswith("container:"):
+        parser.error("--agent-network cannot share the host's or another container's network")
     if not hasattr(tarfile, "data_filter"):  # every extraction of the run's outputs would fail
         parser.error("Python 3.11.4 or later is required to extract the runs' outputs safely")
 

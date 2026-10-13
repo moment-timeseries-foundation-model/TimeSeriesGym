@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-from agents.utils import parse_env_var_values
+from agents.model_proxy import parse_config as parse_model_proxy_config
+from agents.utils import is_env_var
 from timeseriesgym.utils import get_logger
 
 logger = get_logger(__name__)
@@ -20,6 +21,8 @@ class Agent:
     env_vars: dict
     privileged: bool = False
     kwargs_type: str | None = None
+    # the parsed `model_proxy` config (agents/model_proxy.py); it holds the API keys
+    model_proxy: dict | None = field(default=None, repr=False)
 
     def __post_init__(self):
         assert isinstance(self.start, Path), "Agent start script must be a pathlib.Path object."
@@ -51,6 +54,7 @@ class Agent:
                 kwargs_type=data.get("kwargs_type", None),
                 env_vars=data.get("env_vars", {}),
                 privileged=data.get("privileged", False),
+                model_proxy=data.get("model_proxy"),
             )
         except KeyError as e:
             raise ValueError(f"Missing key {e} in agent config!") from e
@@ -81,9 +85,19 @@ class Registry:
             env_vars = contents[agent_id].get("env_vars", {})
             privileged = contents[agent_id].get("privileged", False)
 
-            # env vars can be used both in kwargs and env_vars
-            kwargs = parse_env_var_values(kwargs)
-            env_vars = parse_env_var_values(env_vars)
+            # kwargs and env_vars reach the container, where agent code can read them: secrets
+            # (API keys) go to the model proxy, which keeps them on the host
+            for section, values in (("kwargs", kwargs), ("env_vars", env_vars)):
+                secret = sorted(k for k, v in values.items() if is_env_var(v))
+                if secret:
+                    raise ValueError(
+                        f"Agent `{agent_id}`: {section} {secret} would put a secret in the agent's "
+                        "container; give provider API keys to `model_proxy` instead (see "
+                        "agents/README.md)."
+                    )
+            model_proxy = contents[agent_id].get("model_proxy")
+            if model_proxy is not None:
+                model_proxy = parse_model_proxy_config(model_proxy)
 
             return Agent.from_dict(
                 {
@@ -95,6 +109,7 @@ class Registry:
                     "kwargs_type": kwargs_type,
                     "env_vars": env_vars,
                     "privileged": privileged,
+                    "model_proxy": model_proxy,
                 }
             )
 

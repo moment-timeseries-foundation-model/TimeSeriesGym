@@ -50,6 +50,119 @@ docker build --platform=linux/amd64 -t <agent-id> agents/<agent-id>/ \
 
 Replace `<agent-id>` with one of: `dummy`, `aide`, `mlagentbench`, or `openhands`.
 
+Everything an agent needs at run time must be installed in its image (packages, model weights,
+tokenizer files): agents have no network when they run (see below).
+
+## Network and Model Access
+
+Agent containers have no network (Docker's `none` network): agent code can neither download the
+public data the challenges are built from (Kaggle, UCR, PhysioNet, Hugging Face, this repository),
+nor send anything out. They hold no API keys either. Model calls go through a **model proxy**
+(`agents/model_proxy.py`) that `run_agent.py` starts on the host for each run:
+
+- The agent's config names its providers, the API key of each, read from the host's environment,
+  and the models the agent may call:
+
+  ```yaml
+  model_proxy:
+    providers:
+      openai:
+        key: ${{ secrets.OPENAI_API_KEY }}  # never enters the container
+        models: [gpt-4.1-2025-04-14]       # the "model" values the agent may send
+    max_requests: 1000                     # optional, per run (default 2000)
+    max_seconds: 16200                     # optional, per run (default 24 hours)
+  ```
+
+  `${{ secrets.* }}` values anywhere else (`env_vars`, `kwargs`) are refused: agent code can read
+  its container's environment and command lines.
+- The proxy listens on a unix socket in a new directory, mounted read-only into the container at
+  `/run/tsgym-model-proxy`. After the container starts, `run.py` starts a relay in it (as
+  `nobody`, so that the agent cannot stop it), which listens on `127.0.0.1:18080` and passes each
+  connection to the socket.
+- The container gets base URLs that hold a random token of the run, and dummy keys: for each of
+  its providers the variables below, `<PROVIDER>_API_KEY=tsgym-model-proxy-dummy-key`, and
+  `MODEL_PROXY_URL` (`http://127.0.0.1:18080/t/<token>`, the base of all of them). The SDKs read
+  them; values that the agent's own `env_vars` set for these variables are overridden.
+- The proxy forwards only `POST` requests to the model endpoints below whose JSON `model` is in the
+  agent's list for that provider, adds the host's key, and refuses everything else: other paths,
+  methods, providers and models, a wrong token, bodies over 32 MiB. The agent's own auth headers
+  are dropped, and a provider's reply to a rejected key is replaced, as it can quote part of the
+  key. After `max_requests` forwarded requests or `max_seconds` it answers 429. Connections are
+  bounded (timeouts, a request deadline, at most 64 at once, 256 MiB of request bodies in memory).
+- `<run>/model_proxy.jsonl` logs counts, status codes, sizes, durations and the allowed model of
+  each request; never request or response content, the token or the keys. `run.log` ends with the
+  run's totals.
+
+| Provider | Base URL variables | Upstream | Forwarded paths |
+|----------|--------------------|----------|-----------------|
+| `openai` | `OPENAI_BASE_URL`, `OPENAI_API_BASE` | `https://api.openai.com` | `/v1/chat/completions`, `/v1/completions`, `/v1/responses` |
+| `anthropic` | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | `/v1/messages`, `/v1/messages/count_tokens`, `/v1/complete` |
+| `openrouter` | `OPENROUTER_BASE_URL`, `OPENROUTER_API_BASE` | `https://openrouter.ai` | `/api/v1/chat/completions`, `/api/v1/completions` |
+| `gemini` | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | `/v1beta/openai/chat/completions` (Gemini's OpenAI-compatible API) |
+
+A provider is one entry of `PROVIDERS` in `agents/model_proxy.py`.
+
+### Challenges That Need the Network
+
+Some descriptions ask for an install or a download at run time: `moment-anomaly-detection-score`
+(`pip install momentfm`, and the MOMENT weights), `context-is-key-moirai` and
+`context-is-key-nn5-chronos` (`pip install -r requirements.txt`, and model weights), the two
+`time-series-library-*` challenges (`pip install -r requirements.txt`), and the CSDI challenges
+(a dataset download; they are not in the full split). Install what they need in the agent's image,
+or choose a network for the run group:
+
+```bash
+python run_agent.py --agent-id aide --competition-set <split> --agent-network bridge
+```
+
+`--agent-network` takes `bridge`, Docker's default network, or the name of a network you created,
+for example one that only reaches a package mirror; `host` and `container:<id>` are refused, and
+container configs cannot set the network. Agents then reach whatever that network reaches,
+including the public answers on `bridge`, so these results are not comparable with isolated runs:
+`metadata.json` records the run group's `agent_network`. The model proxy keeps the keys on the host
+on every network.
+
+### Limitations
+
+- The proxy's directory is bind-mounted from the host: this needs a Linux Docker host (Docker
+  Desktop on macOS does not pass host unix sockets into containers). If `run_agent.py` itself runs
+  in a container, `$TMPDIR` must be a host directory mounted there at the same path.
+- The relay runs with the image's `python3` (every image built on `timeseriesgym-env` has it).
+- The socket is world-writable, and its directory traversable, so that the relay also reaches it
+  under Sysbox's user-id mapping; the token guards it. Sysbox was not available to test this.
+- A privileged container (OpenHands) can reach the host's devices and leave its network
+  namespace: the network isolation holds only for unprivileged containers.
+- `tests/integration/test_agent_network.py` checks a real container: no route but loopback, no
+  reachable host address, and the proxy reachable only through the relay.
+
+### Migrating Agent Scaffolds
+
+- **Agent configs**: move each `API_KEY: ${{ secrets.X }}` from `env_vars` to
+  `model_proxy.providers.<provider>.key`, and list the models the agent's kwargs name.
+- **AIDE**: AIDE creates its OpenAI and Anthropic clients with the SDKs' defaults, which read
+  `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL`, so the OpenAI variants and
+  `aide/claude-3-5-sonnet` need no change to the scaffold. The Claude, Llama and Gemini variants
+  now also get the `openai` provider: their feedback model is `gpt-4o-2024-08-06` (the old configs
+  passed only the other provider's key). Two variants need a change in the AIDE fork before they
+  can run: `aide/llama-3.1-405b-instruct`, as AIDE's OpenRouter client has
+  `https://openrouter.ai/api/v1` built in (it must read `OPENROUTER_BASE_URL`), and
+  `aide/gemini-1.5-pro`, as AIDE calls Gemini through Google's SDK (it must use Gemini's
+  OpenAI-compatible API at `GEMINI_BASE_URL`). Until then their model calls cannot leave the
+  container. (This describes AIDE upstream; the fork's source could not be checked here.)
+- **MLAgentBench**: `openai==0.28` reads `OPENAI_API_BASE`. The image now downloads tiktoken's
+  encodings when it is built (`TIKTOKEN_CACHE_DIR=/opt/tiktoken_cache`). Not verified: that the
+  MLAgentBench fork does not set its API base itself.
+- **OpenHands**: the image now runs `make build`, `playwright install` (browsers in
+  `/opt/ms-playwright`) and installs the NVIDIA container toolkit when it is built; these ran at
+  agent start before, through a sudo rule for a build script, which is gone. Its LLM gets the
+  proxy as `base_url`, and litellm uses the model price list it ships with. OpenHands' Docker
+  runtime still builds its sandbox image when the agent starts (it pulls a base image and installs
+  packages), so OpenHands needs `--agent-network bridge` until that image is provided offline, or
+  until it uses OpenHands' local runtime.
+- **Dummy**: no model calls; nothing changes.
+- **New scaffolds**: read the base URLs from the environment (or build them from
+  `MODEL_PROXY_URL`), and install everything in the image.
+
 ## Running Agents
 
 TimeSeriesGym provides the `run_agent.py` script to execute agents on competition sets:

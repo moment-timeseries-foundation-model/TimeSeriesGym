@@ -35,6 +35,9 @@ enable_default_condenser="${enable_default_condenser}"
 # API key to use
 api_key="${api_key}"
 
+# Base URL of the model API (the run's model proxy)
+base_url="${base_url}"
+
 # Cost per input token
 input_cost_per_token="${input_cost_per_token}"
 

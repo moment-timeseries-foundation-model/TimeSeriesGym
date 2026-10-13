@@ -38,7 +38,6 @@ set -x
 
   source /opt/conda/bin/activate agent
 
-  sudo /agent_build.sh \
-    && conda run -n agent --no-capture-output python setup.py "$@" \
+  conda run -n agent --no-capture-output python setup.py "$@" \
     && conda run -n agent --no-capture-output python start.py "$@"
 } 2>&1 | tee $LOGS_DIR/agent.log

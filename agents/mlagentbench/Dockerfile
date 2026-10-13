@@ -27,6 +27,12 @@ RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
 RUN conda run -n ${CONDA_ENV_NAME} pip install -r ${AGENT_DIR}/requirements.txt && \
     conda clean -afy
 
+# tiktoken downloads its encodings on first use, and agents have no network at run time
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken_cache
+RUN conda run -n ${CONDA_ENV_NAME} python -c \
+    "import tiktoken; [tiktoken.get_encoding(e) for e in ('cl100k_base', 'o200k_base')]" && \
+    chmod -R a+rX ${TIKTOKEN_CACHE_DIR}
+
 # clone git directory to the agent directory
 RUN git clone https://github.com/JunShern/MLAgentBench.git ${AGENT_DIR}/MLAgentBench && \
     cd ${AGENT_DIR}/MLAgentBench && \

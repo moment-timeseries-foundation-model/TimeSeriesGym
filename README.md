@@ -331,6 +331,10 @@ TimeSeriesGym supports multiple agent scaffolds:
 
 Detailed information on agent evaluation is available in [agents/README.md](agents/README.md).
 
+Agent containers have no network and no API keys: agents call their models through a model proxy
+that runs on the host for each run and holds the keys (see
+[Network and Model Access](agents/README.md#network-and-model-access)).
+
 ## Extending TimeSeriesGym
 
 Documentation for adding new challenges is available in the [documentation/](documentation) directory.

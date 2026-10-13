@@ -19,6 +19,13 @@ def parse_container_config(raw_config: dict) -> dict:
     Parses raw configuration for container.
     Mostly necessary for handling GPU configuration.
     """
+    networking = sorted({"network", "network_mode", "networking_config"} & set(raw_config))
+    if networking:
+        # the container's network is chosen by run_agent.py, where the default is none
+        raise ValueError(
+            f"The container config sets {networking}; choose the agents' network with "
+            "`run_agent.py --agent-network` instead (see agents/README.md)."
+        )
     new_config = {k: v for k, v in raw_config.items() if k != "gpus"}
 
     # handle GPU configuration
@@ -147,6 +154,7 @@ def create_competition_container(
     env_vars: dict,
     container_image: str = "timeseriesgym-env",
     privileged: bool = False,
+    network_mode: str = "none",
 ) -> Container:
     """
     Creates a container for the given competition, mounting the competition data and agent volumes.
@@ -159,6 +167,7 @@ def create_competition_container(
         env_vars: Environment variables to pass to the container.
         container_image: Docker image to use for the container.
         privileged: Whether to run the container in privileged mode. Default is False.
+        network_mode: Docker network mode of the container. Default is "none": no network.
 
     Returns:
         Created Docker container.
@@ -174,6 +183,7 @@ def create_competition_container(
         volumes=volumes_config,
         environment=env_vars,
         privileged=privileged,
+        network_mode=network_mode,
     )
 
     logger.info(f"Container created: {container.name}")
