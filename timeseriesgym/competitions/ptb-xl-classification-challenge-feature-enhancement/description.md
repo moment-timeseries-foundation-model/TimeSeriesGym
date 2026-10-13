@@ -40,7 +40,7 @@ Close the writer with `writer.close()` at the end of training, so that the logs 
 - **Class Docstrings**: `model.py` defines at least one class, and every class in it has a docstring
 - **Function Docstrings**: in each file, every function with more than 3 statements directly in its body has a docstring, and at least one documented function has 3 or more (counting the docstring)
 - **Args/Returns Sections**: `Args:` and `Returns:` sections in your docstrings (each must appear in at least one docstring of the two files; describe the parameters and return values of every function, as in the example below)
-- **Linting (PEP 8)**: `flake8 --max-line-length=100` reports no problems in either file. flake8's default checks apply: for example, it reports the spaces that some formatters put around a slice's colon (`x[i : i + 1]`, E203).
+- **Linting (PEP 8)**: `flake8 --isolated --disable-noqa --extend-ignore=E203 --max-line-length=100` reports no problems in either file. flake8's default checks apply, except E203 (the whitespace that black and ruff put around a slice's colon, as in `x[i : i + 1]`); `# noqa` comments and flake8 configuration files are ignored.
 
 ### 3. Configuration Management
 

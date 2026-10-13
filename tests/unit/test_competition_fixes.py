@@ -595,6 +595,37 @@ def test_feature_rubric_needs_a_working_flake8(tmp_path, monkeypatch):
         fe.check_linting(*files)
 
 
+def test_feature_rubric_runs_flake8_without_configs_or_noqa_and_allows_black_slices(
+    tmp_path, monkeypatch
+):
+    fe = _fe()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(fe.subprocess, "run", run)
+    fe.check_linting("model.py", "train.py")
+    for argv in calls:  # it ran `flake8 --max-line-length=100 <file>`
+        assert argv[0] == "flake8"
+        assert {"--isolated", "--disable-noqa", "--extend-ignore=E203"} <= set(argv)
+
+
+@pytest.mark.skipif(shutil.which("flake8") is None, reason="flake8 is not installed")
+def test_feature_rubric_lint_with_flake8(tmp_path, monkeypatch):
+    fe = _fe()
+    monkeypatch.chdir(tmp_path)
+    clean = tmp_path / "clean.py"
+    clean.write_text('"""Doc."""\n\nX = [1, 2, 3]\nY = X[1 : len(X) - 1]\n')  # black's slice
+    noqa = tmp_path / "noqa.py"
+    noqa.write_text('"""Doc."""\n\nX = "' + "x" * 100 + '"  # noqa: E501\n')
+    assert fe.check_linting(str(clean), str(clean))[0] == 1.0
+    assert fe.check_linting(str(clean), str(noqa))[0] < 1.0  # `# noqa` does not count
+    (tmp_path / "setup.cfg").write_text("[flake8]\nignore = E501\n")
+    assert fe.check_linting(str(clean), str(noqa))[0] < 1.0  # nor does a config file
+
+
 # ---------------------------------------------------------------- amp prepare
 
 

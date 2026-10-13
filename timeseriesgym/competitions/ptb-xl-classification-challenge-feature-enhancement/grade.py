@@ -134,7 +134,7 @@ def grade_feature_enhancement(
         )
         logger.info("  - Add type hints to all function parameters and return values")
         logger.info("  - Follow PEP 8 guidelines for code formatting")
-        logger.info("  - Run flake8 with '--max-line-length=100' to check for PEP 8 violations")
+        logger.info(f"  - Run `flake8 {' '.join(FLAKE8_OPTIONS)}` to check for PEP 8 violations")
 
     if hydra_score < 1.0:
         logger.info("[SUGGESTION] To improve Hydra usage score:")
@@ -573,6 +573,12 @@ def builds_model_from_config(training_file: str, model_file: str = "") -> bool:
     return False
 
 
+# The lint check's flake8 options. No configuration file (flake8 reads one from its working
+# directory) and no `# noqa` comment can turn a check off. E203 (whitespace before ':') is
+# ignored, as black and ruff recommend: their slices, such as `x[i : i + 1]`, follow PEP 8.
+FLAKE8_OPTIONS = ("--isolated", "--disable-noqa", "--extend-ignore=E203", "--max-line-length=100")
+
+
 def check_linting(model_file_path: str, training_file_path: str) -> tuple[float, list[str]]:
     """
     Check code linting and style compliance with PEP 8.
@@ -605,13 +611,13 @@ def check_linting(model_file_path: str, training_file_path: str) -> tuple[float,
     try:
         # Run flake8 to check for PEP 8 compliance
         flake8_model = subprocess.run(
-            ["flake8", "--max-line-length=100", model_file_path],
+            ["flake8", *FLAKE8_OPTIONS, model_file_path],
             capture_output=True,
             text=True,
             check=False,
         )
         flake8_training = subprocess.run(
-            ["flake8", "--max-line-length=100", training_file_path],
+            ["flake8", *FLAKE8_OPTIONS, training_file_path],
             capture_output=True,
             text=True,
             check=False,
