@@ -122,6 +122,11 @@ including the public answers on `bridge`, so these results are not comparable wi
 `metadata.json` records the run group's `agent_network`. The model proxy keeps the keys on the host
 on every network.
 
+time-series-library-long-horizon-forecast is graded by running the agent's predictor in the
+grader's copy of the agent environment (see [Grading Workflow](#grading-workflow)), so packages
+the predictor imports must be in the agent's image and in the grader built from it: packages
+installed during the run, on any network, are not there when it is graded.
+
 ### Limitations
 
 - The proxy's directory is bind-mounted from the host: this needs a Linux Docker host (Docker
@@ -197,6 +202,8 @@ python run_agent.py --agent-id aide --competition-set experiments/splits/dev.txt
 | `--container-config` | Custom container configuration | `environment/config/container_configs/default.json` |
 | `--allow-empty-private-dir` | Allow competitions with empty private directories | `False` |
 | `--allow-empty-answers-file` | Allow competitions with empty answers files | `False` |
+| `--agent-network` | Docker network of the agent containers (see [Network and Model Access](#network-and-model-access)) | `none` |
+| `--allow-privileged-without-sysbox` | Run a privileged agent (OpenHands) without Sysbox (see [Security Considerations](#security-considerations)) | `False` |
 | `--grader-image` | Image of the grading step | `timeseriesgym-grader` |
 | `--skip-grading` | Do not grade the runs (grade them with the manual workflow below) | `False` |
 | `--grading-timeout` | Seconds the grading of one run may take | `7200` |
@@ -234,12 +241,19 @@ The agent's container has the challenge's public data only (at `/home/data`), an
 check `validate_submission`, which compares a submission with the sample submission and gives no
 score. When the agent's container has stopped and its outputs have been extracted,
 `run_agent.py` grades the run in a separate container of the grader image: it is the only
-container with the challenge's private data (read-only), it has no network, runs as the invoking
-user and takes the memory and CPU limits, but not the runtime, GPUs or privileges, of the
-container configuration. It runs `timeseriesgym grade` on the line that
-`experiments/make_submission.py` writes for the run, and saves the report and its log to
-`<run>/grading/`. `metadata.json` records the run's competition report as `grading` (or
-`{"error": ...}` if grading failed).
+container with the challenge's private data (read-only), it has no network, and it takes the
+memory and CPU limits, but not the runtime, GPUs or privileges, of the container configuration.
+It runs `timeseriesgym grade` as root on the line that `experiments/make_submission.py` writes
+for the run, so that the grading sandbox runs agent code (code submissions, models, predictors)
+as the image's user `sandbox`, which cannot read the private data. The report and its log are
+saved to `<run>/grading/` and given to the invoking user. `metadata.json` records the run's
+competition report as `grading` (or `{"error": ...}` if grading failed).
+
+Predictors (gift-eval-short-horizon, time-series-library-long-horizon-forecast) run with the
+grader image's copy of the agents' conda environment `agent`. It is built from
+`environment/requirements.txt`; packages an agent's own Dockerfile adds are in it only if the
+grader is built from that agent's image (`--build-arg PREDICTOR_ENV=<agent image>`, see the
+[README](../README.md#docker-environment)).
 
 The report of a whole run group comes from the same two steps as before, which also work with
 `--skip-grading`:
@@ -281,6 +295,10 @@ TimeSeriesGym prioritizes security when running agent code:
   ```bash
   export I_ACCEPT_RUNNING_PRIVILEGED_CONTAINERS=True
   ```
+  `run_agent.py` refuses a privileged agent unless the container configuration uses Sysbox
+  (`"runtime": "sysbox-runc"`, as `default.json` does). Without Sysbox, a privileged container
+  can reach the host's devices and the private data on the host. Pass
+  `--allow-privileged-without-sysbox` to accept that, e.g. with `gpu_enabled.json`.
 
 #### Known Limitations
 
@@ -294,7 +312,8 @@ protected by a mode-700 directory) and ran a grading server there, at
 `http://localhost:5000/validate`. Neither exists any more. To migrate:
 
 - Rebuild `timeseriesgym-env`, build `timeseriesgym-grader`, and then rebuild every agent image
-  on the new base. `run_agent.py` refuses an agent image built on an older `timeseriesgym-env`
+  on the new base. The grader image has the user `sandbox` that runs agent code while grading,
+  and the agents' conda environment, with which it runs predictors. `run_agent.py` refuses an agent image built on an older `timeseriesgym-env`
   (it has no `/opt/timeseriesgym`), and stops before any run if the grader image is missing.
 - Agents check their submission with `validate_submission [file or folder]`, or
   `/home/validate_submission.sh` as before. It compares the submission with the sample submission

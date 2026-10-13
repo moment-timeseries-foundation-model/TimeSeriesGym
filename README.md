@@ -96,6 +96,7 @@ TimeSeriesGym provides a comprehensive command-line interface:
 | `grade-hyperparameter-search` | Evaluate hyperparameter optimization results |
 | `grade-code` | Grade a Python code submission |
 | `grade-feature-enhancement` | Grade a feature-enhancement submission folder |
+| `grade-predictor` | Grade a predictor folder by running it on the hidden test windows |
 | `judge` | Run LLM-as-a-judge evaluation on artifacts |
 | `evaluate-reasonableness` | Check if code makes a genuine modeling attempt |
 | `dev` | Tools for developers extending the benchmark |
@@ -223,11 +224,30 @@ read from the submission folder.
 timeseriesgym grade-code solution.py mit-bih-arrhythmia
 ```
 
+#### Evaluating Predictor Submissions
+
+In gift-eval-short-horizon and time-series-library-long-horizon-forecast the test labels are not
+in the public data: the agent submits a predictor, the folder `submission/predictor/` with
+`predict.py`, and the grader runs it on the hidden test windows (see `timeseriesgym/predictor`).
+
+```bash
+timeseriesgym grade-predictor run/submission/predictor gift-eval-short-horizon
+```
+
+The predictor runs in the grading sandbox (below), with the Python interpreter named by
+`--python` or `$TSGYM_PREDICTOR_PYTHON`, else the grader's own. Use the agent environment's
+interpreter, so that the predictor meets the packages it was written with: the grader image
+sets `$TSGYM_PREDICTOR_PYTHON` to its copy of the agents' conda environment
+(see [Docker Environment](#docker-environment)). `--trusted` runs the predictor as a plain
+subprocess instead, which can read whatever the grading user can, the answers included: for
+trusted predictors only.
+
 #### Agent Code Runs in a Sandbox
 
-Code challenges import and run the submitted `submission.py`, and hyperparameter-search
-challenges load the submitted models (unpickling and `torch.jit.load` can run code). The graders
-do this in a separate, confined process, never in the grading process, which holds the answers.
+Code challenges import and run the submitted `submission.py`, hyperparameter-search challenges
+load the submitted models (unpickling and `torch.jit.load` can run code), and predictor
+challenges run the submitted predictor. The graders do this in a separate, confined process,
+never in the grading process, which holds the answers.
 That process gets a copy of the submission and of the public input data, no credentials, no
 sockets, and limits on time, memory and file size, and it cannot read the challenge's private
 files. The grading process then compares what it computed with the answers. A submission whose
@@ -235,7 +255,8 @@ code crashes, hangs or exceeds a limit is invalid.
 
 - Graded as root (e.g. in a container), agent code runs as the user `sandbox`. Create it with
   `useradd --system --no-create-home sandbox`, or name another user in
-  `TIMESERIESGYM_SANDBOX_USER`. Grading as root without such a user stops with an error.
+  `TIMESERIESGYM_SANDBOX_USER`. Grading as root without such a user stops with an error. The
+  grader image has this user, and `run_agent.py` grades in it as root.
 - Graded as a normal user, agent code runs as that user, and Landlock (Linux 5.13 or later)
   keeps it from the answers and the user's files. This is a narrower boundary than a container
   (the sandbox shares `/dev/shm` and the process quota with the user's programs), so grade
@@ -243,8 +264,9 @@ code crashes, hangs or exceeds a limit is invalid.
   with an error, as agent code could read the answers; `TIMESERIESGYM_SANDBOX_UNCONFINED=1`
   grades trusted submissions anyway.
 - `TIMESERIESGYM_SANDBOX_TIMEOUT_SEC` sets the time limit (default: 1800 s for code challenges,
-  600 s for hyperparameter searches), and `TIMESERIESGYM_SANDBOX_MEMORY_MB` the memory limit for
-  all of the sandbox's processes together (default: 3/4 of the machine's or container's memory).
+  600 s for hyperparameter searches; a predictor's comes from its challenge's
+  `predictor_config`), and `TIMESERIESGYM_SANDBOX_MEMORY_MB` the memory limit for all of the
+  sandbox's processes together (default: 3/4 of the machine's or container's memory).
 
 `timeseriesgym/sandbox.py` describes what each mode does and does not protect against.
 
@@ -326,6 +348,21 @@ has stopped, `run_agent.py` grades the run in a separate container of `timeserie
 only one that gets the challenge's private data (read-only, without network). See
 [agents/README.md](agents/README.md#grading-workflow), and its migration notes if you built agent
 images before this change.
+
+The grader image has the user `sandbox`, which runs agent code while grading (see
+[Agent Code Runs in a Sandbox](#agent-code-runs-in-a-sandbox)), and a copy of the agents' conda
+environment `agent` at `/opt/conda/envs/agent`, with which it runs predictors
+(`$TSGYM_PREDICTOR_PYTHON`). The copy comes from the `env` stage of the same Dockerfile, so it
+has the packages of `environment/requirements.txt`; to grade with an agent image's environment
+instead (packages its own Dockerfile adds), build the grader from that image:
+
+```bash
+docker build --platform=linux/amd64 --target grader --build-arg PREDICTOR_ENV=aide \
+  -t timeseriesgym-grader-aide -f environment/Dockerfile .
+```
+
+and pass `--grader-image timeseriesgym-grader-aide` to `run_agent.py`. Packages an agent installs
+while it runs are in neither: give them to its image.
 
 The agent's image copies only files of `environment/`. The grader copies the build context, which
 `.dockerignore` limits to the `timeseriesgym` package, `environment/`, `pyproject.toml`,
