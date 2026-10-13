@@ -3,7 +3,8 @@
 Usage: python -I -B sandbox_child.py <job.json> <status fd>
 
 It imports only the standard library until the process is confined: resource limits, no new
-privileges, and, where the kernel has Landlock, file-system access limited to the paths the job
+privileges, no sockets (a seccomp filter on x86-64 and arm64: socket(2) fails, socketpair(2)
+works), and, where the kernel has Landlock, file-system access limited to the paths the job
 lists, no TCP (Landlock ABI 4), and no signals or abstract UNIX sockets out of the sandbox (ABI
 6). It then checks that none of the job's protected paths (the answers) can be opened, imports
 the job's entry point, and reports on the status pipe, before any agent code is loaded:
@@ -19,6 +20,7 @@ neither keep it alive nor run after the results are written.
 """
 
 import ctypes
+import errno
 import importlib
 import json
 import os
@@ -47,6 +49,7 @@ _SCOPES = 0b11  # abstract UNIX sockets and signals (ABI 6)
 READ = EXECUTE | READ_FILE | READ_DIR
 ACCESS = {
     "read": READ,
+    "list": READ_DIR,
     "proc": READ_FILE | READ_DIR,
     "dev": READ | WRITE_FILE | TRUNCATE | IOCTL_DEV,
     "shm": READ | WRITE_FILE | TRUNCATE | MAKE_REG | REMOVE_FILE | MAKE_DIR | REMOVE_DIR | REFER,
@@ -125,6 +128,54 @@ def confine(rules: list[list[str]]) -> int:
     return abi
 
 
+# seccomp: the audit architecture, socket(2) and the io_uring calls (io_uring can open sockets
+# without a system call that the filter would see), by machine
+_SECCOMP_ARCH = {
+    "x86_64": (0xC000003E, (41, 425, 426, 427)),
+    "aarch64": (0xC00000B7, (198, 425, 426, 427)),
+}
+_PR_SET_SECCOMP, _SECCOMP_MODE_FILTER = 22, 2
+_RET_KILL, _RET_ERRNO, _RET_ALLOW = 0, 0x00050000, 0x7FFF0000
+_LD_ABS, _JEQ, _JGE, _RET = 0x20, 0x15, 0x35, 0x06
+
+
+class _SockFilter(ctypes.Structure):
+    _fields_ = (
+        ("code", ctypes.c_uint16),
+        ("jt", ctypes.c_uint8),
+        ("jf", ctypes.c_uint8),
+        ("k", ctypes.c_uint32),
+    )
+
+
+class _SockFprog(ctypes.Structure):
+    _fields_ = (("len", ctypes.c_ushort), ("filter", ctypes.POINTER(_SockFilter)))
+
+
+def deny_sockets() -> bool:
+    """Makes socket(2) fail with EACCES, so that agent code can reach no service of the host
+    (TCP, UDP, or UNIX sockets such as a session bus or Docker's, which Landlock leaves open);
+    socketpair(2) and pipes still work. Returns whether the filter is in place."""
+    machine = os.uname().machine
+    if machine not in _SECCOMP_ARCH:
+        return False
+    arch, denied = _SECCOMP_ARCH[machine]
+    program = [(_LD_ABS, 0, 0, 4), (_JEQ, 1, 0, arch), (_RET, 0, 0, _RET_KILL), (_LD_ABS, 0, 0, 0)]
+    if machine == "x86_64":  # the x32 ABI's calls: other numbers for the same calls
+        program += [(_JGE, 0, 1, 0x40000000), (_RET, 0, 0, _RET_KILL)]
+    for number in denied:
+        program += [(_JEQ, 0, 1, number), (_RET, 0, 0, _RET_ERRNO | errno.EACCES)]
+    program.append((_RET, 0, 0, _RET_ALLOW))
+    filters = (_SockFilter * len(program))(*(_SockFilter(*i) for i in program))
+    fprog = _SockFprog(len(program), filters)
+    try:
+        prctl = _libc().prctl
+    except AttributeError:
+        return False
+    args = (ctypes.c_ulong(_SECCOMP_MODE_FILTER), ctypes.byref(fprog), ctypes.c_ulong(0))
+    return prctl(_PR_SET_SECCOMP, *args, ctypes.c_ulong(0)) == 0
+
+
 def limit(limits: dict[str, int]) -> None:
     """Resource limits (RLIMIT_* name: bytes or seconds; never above the current hard limit), no
     new privileges, and first place in line for the kernel's OOM killer."""
@@ -166,6 +217,7 @@ def main(argv: list[str]) -> int:
         status.close()
 
     limit(job["limits"])
+    sockets_denied = deny_sockets()
     abi = confine(job["rules"]) if job["landlock"] else 0
     exposed = [path for path in job["protected"] if readable(path)]
     if exposed and not job["unconfined_ok"]:
@@ -182,7 +234,8 @@ def main(argv: list[str]) -> int:
     except BaseException:
         report("SETUP", traceback.format_exc()[-4000:])
         return 4
-    report("READY", json.dumps({"landlock": abi, "package": package, "readable": exposed[:5]}))
+    ready = {"landlock": abi, "sockets_denied": sockets_denied}
+    report("READY", json.dumps({**ready, "package": package, "readable": exposed[:5]}))
     # Agent code runs from here on.
     try:
         entrypoint(Path.cwd(), job["job"])

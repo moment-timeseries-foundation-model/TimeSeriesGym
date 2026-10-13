@@ -250,6 +250,18 @@ def stomp(ref_data, query_data, window_size, exclusion_zone=0.5, verbose=2):
     assert _grade_stomp(tmp_path, cheat).test_metric == "0/2"  # was 2/2, read from the answers
 
 
+def _unless_it_could(action: str) -> str:
+    """STOMP_SUBMISSION, but with no stomp function if `action` succeeds."""
+    return STOMP_SUBMISSION + f"\ntry:\n    {action}\n    stomp = None\nexcept OSError:\n    pass\n"
+
+
+@pytest.mark.parametrize("family", ["AF_UNIX", "AF_INET", "AF_INET6"])
+def test_agent_code_cannot_open_sockets(tmp_path, family):
+    # A UNIX socket could reach a service of the host (a session bus, Docker) outside the sandbox.
+    action = f"import socket; socket.socket(socket.{family}).close()"
+    assert _grade_stomp(tmp_path, _unless_it_could(action)).test_metric == "2/2"  # was 0/2
+
+
 def test_agent_code_does_not_see_the_graders_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("KAGGLE_KEY", "a credential")
     code = STOMP_SUBMISSION + "\nimport os\nif 'KAGGLE_KEY' in os.environ:\n    stomp = None\n"
