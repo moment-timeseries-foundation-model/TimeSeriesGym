@@ -26,6 +26,8 @@ import time
 import types
 from pathlib import Path
 
+import numpy as np
+
 from . import contract, protocol
 from . import windows as pw
 from .launch import PredictorJob, SubprocessLauncher, run_job, thread_env
@@ -54,9 +56,30 @@ def load_grade():
 
 def native_answers(ws: pw.WindowSet):
     """The windows' labels in the format of the challenge's answers file, for its grade
-    function. A metric whose answers hold more than the labels (e.g. per-window scales computed
-    from each window's history) needs them added here, from `ws`."""
-    return ws.to_native(ws.labels())
+    function. A metric whose module `mase` has `window_baselines` (GIFT-Eval's normalized MASE)
+    also needs each window's scale and seasonal naive forecast: they are computed here from the
+    windows' histories, as its prepare computes them for the test windows."""
+    labels = ws.to_native(ws.labels())
+    try:
+        baselines = importlib.import_module(f"{__package__}.metric.mase").window_baselines
+    except (ImportError, AttributeError):
+        return labels
+    scale_dt, scales, naive = [], {}, {}
+    for d in ws.datasets:
+        windows = sorted((w for w in ws.windows if w.dataset == d.name), key=lambda w: w.slot)
+        inputs = [{"target": w.target} for w in windows]
+        view = types.SimpleNamespace(
+            freq=d.freq,
+            prediction_length=d.out_shape[0],
+            test_data=types.SimpleNamespace(input=inputs),
+        )
+        scales[d.name], naive[d.name] = baselines(view)
+        scale_dt.append((d.name, "<f8", scales[d.name].shape))
+    out = {"target": labels, "seasonal_error": np.zeros(1, np.dtype(scale_dt))}
+    out["seasonal_naive"] = ws.to_native(naive)
+    for name, a in scales.items():
+        out["seasonal_error"][name][0] = a
+    return out
 
 
 def dataset_names(meta: dict, arg: str | None, error) -> list[str] | None:

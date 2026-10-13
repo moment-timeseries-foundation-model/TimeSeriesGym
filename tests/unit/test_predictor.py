@@ -619,7 +619,7 @@ def test_gift_local_check_runs_on_validation_windows(gift, tmp_path):
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert f"validation windows: {GIFT_WINDOWS}" in proc.stdout and "toy/H" in proc.stdout
-    assert "all datasets" in proc.stdout and "mean-absolute-percentage-error" in proc.stdout
+    assert "all datasets" in proc.stdout and competition.grader.name in proc.stdout
     assert "floor" not in proc.stdout and "reward" not in proc.stdout
     assert not list(public.rglob("__pycache__"))  # the public data stay as prepared
     bad = _predictor(tmp_path, "def predict(windows):\n    raise ValueError('nope')\n")
@@ -630,6 +630,57 @@ def test_gift_local_check_runs_on_validation_windows(gift, tmp_path):
         timeout=300,
     )
     assert proc.returncode == 1 and "nope" in proc.stdout
+
+
+FAKE_MASE = """
+import numpy as np
+
+def window_baselines(dataset):
+    # the check's view of the validation windows: their histories, in the answers' order
+    scales = [float(len(e["target"])) for e in dataset.test_data.input]
+    naive = [np.full(dataset.prediction_length, e["target"][-1]) for e in dataset.test_data.input]
+    return np.array(scales), np.stack(naive)
+"""
+FAKE_GRADE = """
+import numpy as np
+from .mase import window_baselines  # noqa: F401
+
+def grade(submission, answers):
+    total = 0.0
+    for name in answers["target"].dtype.names:
+        t, s = answers["target"][name][0], answers["seasonal_error"][name][0]
+        total += float(np.nanmean(np.abs(submission[name][0] - t) / s[:, None]))
+        naive = answers["seasonal_naive"][name][0]
+        assert np.array_equal(naive[:, 0], naive[:, -1], equal_nan=True)
+    return total
+"""
+
+
+def test_gift_local_check_builds_the_answers_of_a_scaled_metric(gift, tmp_path):
+    """A metric whose answers also hold each window's scale and seasonal naive forecast (as
+    GIFT-Eval's normalized MASE, with its `mase.window_baselines`) gets them from the
+    validation windows' histories."""
+    competition, _ = gift
+    public = tmp_path / "public"
+    shutil.copytree(competition.public_dir, public)
+    (public / "predictor_tools" / "metric" / "grade.py").write_text(FAKE_GRADE)
+    (public / "predictor_tools" / "metric" / "mase.py").write_text(FAKE_MASE)
+    proc = subprocess.run(
+        [sys.executable, str(public / "check_predictor.py"), str(public / "sample_predictor")],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(REPO)},
+        timeout=300,
+    )
+    assert proc.returncode == 0 and "could not be computed" not in proc.stdout, proc.stdout
+    meta = json.loads((public / "predictor_datasets.json").read_text())
+    ws = pw.build("gift", public, "val", meta=meta, with_labels=True)
+    expected = 0.0
+    for d in ws.datasets:  # zero forecasts, each window scaled by its history's length
+        lengths = {w.slot: len(w.target) for w in ws.windows if w.dataset == d.name}
+        scale = np.array([lengths[i] for i in range(d.n_windows)], float)
+        expected += float(np.nanmean(np.abs(d.labels) / scale[:, None]))
+    assert f"{'all datasets':<32} {GIFT_WINDOWS:>8} {expected:>12.6g}" in proc.stdout
 
 
 def test_gift_prepare_is_deterministic(gift, tmp_path):
