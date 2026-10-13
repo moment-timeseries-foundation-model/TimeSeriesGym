@@ -265,7 +265,8 @@ def test_h5_submissions_must_have_the_datasets_of_the_sample(tmp_path):
 
 
 def test_h5_compound_datasets_are_checked_by_field(tmp_path):
-    competition = _competition(tmp_path, "gift-eval-short-horizon")
+    # a compound sample, as GIFT-Eval's was before it took a predictor
+    competition = _competition(tmp_path, "ucr-anomaly-detection")
     competition.sample_submission.parent.mkdir(parents=True)
     dtype = np.dtype([("m4_daily", "<f4", (2, 3)), ("solar/W", "<f4", (1, 3))])
     with h5py.File(competition.sample_submission, "w") as f:

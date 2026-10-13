@@ -278,9 +278,9 @@ def grade_predictor(
     competition_leaderboard = get_leaderboard(competition)
     if competition_leaderboard is not None and not isinstance(score, dict):
         rank_info = competition.grader.rank_score(score, competition_leaderboard)
-        is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
     else:
-        rank_info, is_lower_better = get_null_rank_info(), None
+        rank_info = get_null_rank_info()
+    is_lower_better = competition.grader.is_lower_better(competition_leaderboard)
     return _competition_report(
         competition,
         score,
