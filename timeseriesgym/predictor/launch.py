@@ -1,5 +1,6 @@
 """How the grader starts a predictor process: the interface a sandbox implements, and a plain
-subprocess launcher to use until one does.
+subprocess launcher for trusted predictors. The grader's default runs the predictor in the
+grading sandbox (sandbox_launch.py).
 
 The grader (grading.py) needs one thing from a launcher: a running `python -I runner.py
 <predictor dir>` whose stdin and stdout are pipes to the grader (the protocol, protocol.py),
@@ -24,8 +25,8 @@ instead of runner.py, provided that the entry point gets the grader's pipes as f
 
 SubprocessLauncher is NOT a sandbox. It runs the predictor as the grading user, so the
 predictor can read and write whatever that user can, including the answers. Use it for trusted
-predictors (tests, the agent's own check, baselines) or inside a disposable container that
-holds no more than the grading needs.
+predictors only (tests, the agent's own check, baselines: `timeseriesgym grade-predictor
+--trusted`).
 """
 
 from __future__ import annotations
@@ -179,10 +180,3 @@ def run_job(launcher: Launcher, job: PredictorJob, windows: list, sink, **kw) ->
             time.sleep(0.2)  # let the predictor finish writing its traceback
             limit = f"limit {job.timeout_sec:g} s"
             raise protocol.PredictorError(f"{e} ({limit}); stderr: {proc.stderr_tail()}") from None
-
-
-def default_launcher() -> Launcher:
-    """The launcher of `timeseriesgym grade`: a SubprocessLauncher with the interpreter named
-    by $TSGYM_PREDICTOR_PYTHON (the agent environment's Python, so that the predictor meets the
-    packages it was developed with), else this one."""
-    return SubprocessLauncher(os.environ.get("TSGYM_PREDICTOR_PYTHON") or sys.executable)

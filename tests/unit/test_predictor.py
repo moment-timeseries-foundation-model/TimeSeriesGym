@@ -4,12 +4,14 @@ directory format, and both challenges end to end on small synthetic data, with t
 prepare.py (TSL with a minimal stand-in for Time-Series-Library's data loader).
 """
 
+import contextlib
 import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -19,12 +21,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from timeseriesgym import sandbox
 from timeseriesgym.data import generate_checksums
 from timeseriesgym.grade import grade_jsonl, grade_predictor, validate_submission
 from timeseriesgym.predictor import contract, leakscan, protocol
 from timeseriesgym.predictor import grading as pg
 from timeseriesgym.predictor import windows as pw
 from timeseriesgym.predictor.launch import PredictorJob, SubprocessLauncher, run_job
+from timeseriesgym.predictor.sandbox_launch import SandboxLauncher
 from timeseriesgym.registry import Registry
 from timeseriesgym.utils import load_answers
 
@@ -1004,3 +1008,205 @@ def test_the_public_tools_are_standalone():
     for name in prepare.TOOLS:
         imported = _imports_outside_try_import_error(ast.parse((package / name).read_text()))
         assert not [m for m in imported if m.split(".")[0] == "timeseriesgym"], name
+
+
+# ---------------------------------------------------------------- the grading sandbox
+
+
+def _run_sandboxed(predictor: Path, windows, timeout=60.0, **job):
+    got = {}
+    stats = run_job(
+        SandboxLauncher(),
+        PredictorJob(predictor, timeout_sec=timeout, **job),
+        windows,
+        lambda w, a: got.__setitem__(w.slot, a),
+        max_windows=3,
+    )
+    return got, stats
+
+
+def test_predictors_are_graded_in_the_sandbox_by_default():
+    # was a SubprocessLauncher: the predictor ran with the grading user's access
+    assert isinstance(pg.default_launcher(), SandboxLauncher)
+
+
+def test_the_sandbox_serves_batches_in_rounds(tmp_path):
+    ws = [
+        _window("d", s, 10 + k * 2, ctx=10 + k * 2, slot=s * 3 + k)
+        for s in range(2)
+        for k in range(3)
+    ]
+    got, stats = _run_sandboxed(_predictor(tmp_path, LAST_VALUE), ws)
+    assert stats["windows"] == 6 and stats["calls"] == 3  # 3 rounds of 2
+    for w in ws:
+        assert np.array_equal(got[w.slot], np.full(2, w.target[-1]))
+
+
+@pytest.mark.parametrize(
+    "source, match",
+    [
+        ("raise RuntimeError('at import')\n", "at import"),
+        ("import os\ndef predict(windows):\n    os._exit(3)\n", "exited"),
+        ("import time\ndef predict(windows):\n    time.sleep(30)\n", "timed out"),
+    ],
+)
+def test_predictor_failures_in_the_sandbox_are_predictor_errors(tmp_path, source, match):
+    with pytest.raises(protocol.PredictorError, match=match):
+        _run_sandboxed(_predictor(tmp_path, source), [_window()], timeout=5)
+
+
+# What a predictor can reach: a bit for each of a socket, the grader's environment, the
+# answers, and a file outside its directory.
+PROBE = """
+import os, socket
+import numpy as np
+flags = 0
+try:
+    socket.socket(socket.AF_INET, socket.SOCK_STREAM).close()
+    flags |= 1
+except OSError:
+    pass
+flags |= 2 * ("TSGYM_SECRET_FOR_TEST" in os.environ)
+try:
+    open({answers!r}, "rb").close()
+    flags |= 4
+except OSError:
+    pass
+try:
+    open({outside!r}, "w").close()
+    flags |= 8
+except OSError:
+    pass
+def predict(windows):
+    return [np.full(w["prediction_length"], float(flags)) for w in windows]
+"""
+
+
+def test_the_sandbox_keeps_the_predictor_from_the_answers_sockets_and_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("TSGYM_SECRET_FOR_TEST", "x")
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "test.h5").write_bytes(b"answers")
+    outside = tmp_path / "outside.txt"
+    src = PROBE.format(answers=str(private / "test.h5"), outside=str(outside))
+    job = {"protected": [private]}
+    got, _ = _run_local(_predictor(tmp_path / "a", src), [_window()])
+    assert got[0][0] == 1 + 4 + 8  # as a plain subprocess: a socket, the answers, any file
+    outside.unlink()
+    got, _ = _run_sandboxed(_predictor(tmp_path / "b", src), [_window()], **job)
+    assert got[0][0] == 0 and not outside.exists()
+
+
+def _alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+def test_the_sandbox_stops_the_predictors_processes(tmp_path):
+    src = (
+        "import subprocess, sys\n"
+        "import numpy as np\n"
+        "code = 'import os, time; os.setsid(); time.sleep(300)'\n"
+        "child = subprocess.Popen([sys.executable, '-c', code, 'tsgym-left-behind'])\n"
+        "def predict(windows):\n"
+        "    return [np.full(w['prediction_length'], float(child.pid)) for w in windows]\n"
+    )
+    got, _ = _run_sandboxed(_predictor(tmp_path, src), [_window()])
+    pid = int(got[0][0])  # the child was running while the predictor answered
+    deadline = time.monotonic() + 10
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not _alive(pid)
+
+
+def test_the_sandbox_stops_a_predictor_above_its_memory_limit(tmp_path):
+    src = (
+        "import time\nimport numpy as np\n"
+        "def predict(windows):\n    x = np.ones(2**28)\n    time.sleep(30)\n"
+    )
+    with pytest.raises(protocol.PredictorError, match="used more than 256 MiB"):
+        _run_sandboxed(_predictor(tmp_path, src), [_window()], timeout=20, memory_bytes=2**28)
+
+
+def test_a_hostile_predictor_cannot_read_the_answers_when_graded(gift, tmp_path):
+    """A predictor that reads the full series from the private data scores perfectly as a plain
+    subprocess, and as the zero predictor does in the sandbox."""
+    competition, _ = gift
+    src = f"""
+import numpy as np
+cache = {{}}
+def label(w):
+    if w["dataset"] not in cache:
+        import datasets
+        rows = datasets.load_from_disk({str(competition.private_dir)!r} + "/" + w["dataset"])
+        cache[w["dataset"]] = {{r["item_id"]: np.asarray(r["target"], float) for r in rows}}
+    t0 = len(w["target"])
+    return np.nan_to_num(cache[w["dataset"]][w["item_id"]][t0 : t0 + w["prediction_length"]])
+def predict(windows):
+    out = []
+    for w in windows:
+        try:
+            out.append(label(w))
+        except Exception:
+            out.append(np.zeros(w["prediction_length"]))
+    return out
+"""
+    hostile = _predictor(tmp_path, src)
+    assert grade_predictor(hostile, competition, SubprocessLauncher()).score == 0.0
+    sample = grade_predictor(competition.public_dir / "sample_predictor", competition)
+    report = grade_predictor(hostile, competition)  # the default: the grading sandbox
+    assert report.valid_submission and report.score == sample.score > 0.5
+
+
+def test_grading_stops_if_the_sandbox_could_read_the_full_data(tmp_path, monkeypatch):
+    shared = Path(tempfile.mkdtemp())  # readable for every user
+    try:
+        os.chmod(shared, 0o755)
+        (shared / "test.h5").write_bytes(b"answers")
+        monkeypatch.setattr(sandbox, "LANDLOCK", False)  # as on a kernel without Landlock
+        sample = _predictor(tmp_path, LAST_VALUE)
+        with pytest.raises(sandbox.SandboxError, match="private files"):
+            _run_sandboxed(sample, [_window()], protected=[shared])
+    finally:
+        shutil.rmtree(shared)
+
+
+def test_the_sandbox_runs_the_predictor_with_another_python(tmp_path, monkeypatch):
+    """$TSGYM_PREDICTOR_PYTHON: e.g. the agent environment's interpreter, here a virtual
+    environment (readable for the sandbox user)."""
+    env = Path(tempfile.mkdtemp())
+    try:
+        os.chmod(env, 0o755)
+        subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", "--system-site-packages", str(env)],
+            check=True,
+        )
+        monkeypatch.setenv("TSGYM_PREDICTOR_PYTHON", str(env / "bin" / "python"))
+        src = (
+            "import sys\nimport numpy as np\n"
+            f"IN_ENV = float(sys.prefix == {str(env.resolve())!r})\n"
+            "def predict(windows):\n"
+            "    return [np.full(w['prediction_length'], IN_ENV) for w in windows]\n"
+        )
+        got, _ = _run_sandboxed(_predictor(tmp_path, src), [_window()])
+        assert got[0][0] == 1.0
+    finally:
+        shutil.rmtree(env)
+
+
+def test_grade_predictor_runs_trusted_predictors_as_a_subprocess_only_when_asked(
+    tmp_path, monkeypatch
+):
+    from timeseriesgym import cli
+
+    launchers = []
+    monkeypatch.setattr(cli, "grade_predictor", lambda p, c, launcher: launchers.append(launcher))
+    for extra in ([], ["--trusted"]):
+        argv = ["timeseriesgym", "grade-predictor", str(tmp_path), GIFT, *extra]
+        monkeypatch.setattr(sys, "argv", argv)
+        with contextlib.suppress(AttributeError):  # the stand-in returns no report
+            cli.main()
+    assert [type(x) for x in launchers] == [SandboxLauncher, SubprocessLauncher]

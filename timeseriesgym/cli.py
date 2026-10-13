@@ -260,9 +260,16 @@ def main():
     parser_grade_predictor.add_argument(
         "--python",
         help="The Python interpreter to run the predictor with, e.g. the agent environment's "
-        "(default: $TSGYM_PREDICTOR_PYTHON, else this one). The predictor runs as a plain "
-        "subprocess, not in a sandbox.",
+        "(default: $TSGYM_PREDICTOR_PYTHON, else this one).",
         default=None,
+    )
+    parser_grade_predictor.add_argument(
+        "--trusted",
+        help="Run the predictor as a plain subprocess of the grader, which can read whatever "
+        "the grading user can, the answers included, instead of in the grading sandbox. For "
+        "trusted predictors only.",
+        action="store_true",
+        default=False,
     )
     parser_grade_predictor.add_argument(
         "--data-dir",
@@ -466,10 +473,12 @@ def main():
         logger.info(json.dumps(report.to_dict(), indent=4))
     if args.command == "grade-predictor":
         from timeseriesgym.predictor.launch import SubprocessLauncher
+        from timeseriesgym.predictor.sandbox_launch import SandboxLauncher, predictor_python
 
         new_registry = registry.set_data_dir(Path(args.data_dir))
         competition = new_registry.get_competition(args.competition_id)
-        launcher = SubprocessLauncher(args.python) if args.python else None
+        python = args.python or predictor_python()
+        launcher = SubprocessLauncher(python) if args.trusted else SandboxLauncher(python)
         report = grade_predictor(Path(args.folder_path), competition, launcher)
         logger.info("Competition report:")
         logger.info(json.dumps(report.to_dict(), indent=4))

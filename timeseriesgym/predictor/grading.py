@@ -3,10 +3,11 @@ time-series-library-long-horizon-forecast).
 
 The submission is a directory with predict.py (contract.py). The grader builds the test windows
 from the full private data exactly as the prepare built the answers (windows.py: same windows,
-same order), runs the predictor on them through a launcher (launch.py), in rounds that never
-show a test value before its forecast is committed (protocol.py), assembles the forecasts in
-the challenge's submission format and scores them with the challenge's unchanged grade function
-(score_forecasts, the only place the metric is called).
+same order), runs the predictor on them through a launcher (launch.py; by default in the
+grading sandbox, sandbox_launch.py), in rounds that never show a test value before its
+forecast is committed (protocol.py), assembles the forecasts in the challenge's submission
+format and scores them with the challenge's unchanged grade function (score_forecasts, the
+only place the metric is called).
 """
 
 from __future__ import annotations
@@ -22,7 +23,8 @@ from timeseriesgym.utils import InvalidSubmissionError, get_logger, load_answers
 
 from . import contract, protocol
 from . import windows as pw
-from .launch import Launcher, PredictorJob, default_launcher, run_job, thread_env
+from .launch import Launcher, PredictorJob, run_job, thread_env
+from .sandbox_launch import default_launcher
 
 logger = get_logger(__name__)
 

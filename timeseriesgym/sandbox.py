@@ -49,6 +49,13 @@ first; files in tmpfs such as /dev/shm count as no process's memory; and disk us
 per-file cap is bounded only by the time limit. The grading process must not start other
 subprocesses while a sandbox runs (as a user, those would count as the sandbox's); sandbox runs
 in one grading process are serialized.
+
+run() waits for the sandbox to finish and reads what it saved. interactive() runs a sandbox
+whose stdin and stdout are pipes to the grading process, for a request/reply protocol (the
+predictor challenges, timeseriesgym/predictor/sandbox_launch.py): the same confinement and
+checks, possibly with another Python interpreter (the agent environment's), a watchdog for its
+time and memory limits while the grading process talks to it, and the same cleanup when the
+grading process is done with it.
 """
 
 import contextlib
@@ -59,6 +66,7 @@ import math
 import os
 import pwd
 import re
+import select
 import shutil
 import signal
 import stat
@@ -132,11 +140,19 @@ class Limits:
         """The limits from the environment (MEMORY_ENV 0: no memory limit), else the defaults."""
         try:
             timeout = int(os.environ.get(TIMEOUT_ENV) or default_timeout_sec)
-            memory_mb = os.environ.get(MEMORY_ENV)
-            memory = int(memory_mb) * 2**20 if memory_mb else _default_memory_bytes()
         except ValueError:
             raise SandboxError(f"{TIMEOUT_ENV} and {MEMORY_ENV} must be integers.") from None
-        return cls(timeout_sec=timeout, memory_bytes=memory)
+        return cls(timeout_sec=timeout, memory_bytes=memory_limit())
+
+
+def memory_limit() -> int | None:
+    """The memory limit of a sandbox's processes together, in bytes: MEMORY_ENV (0: none), else
+    3/4 of the machine's or the container's memory."""
+    try:
+        memory_mb = os.environ.get(MEMORY_ENV)
+        return int(memory_mb) * 2**20 if memory_mb else _default_memory_bytes()
+    except ValueError:
+        raise SandboxError(f"{TIMEOUT_ENV} and {MEMORY_ENV} must be integers.") from None
 
 
 def _default_memory_bytes() -> int | None:
@@ -180,10 +196,8 @@ class Run:
     log: str  # the end of the sandbox's stdout, then of its stderr
 
     def failure(self) -> str | None:
-        if self.exceeded == "time":
-            return f"it ran longer than {self.limits.timeout_sec} s"
-        if self.exceeded == "memory":
-            return f"it used more than {self.limits.memory_bytes // 2**20} MiB of memory"
+        if self.exceeded:
+            return _exceeded_message(self.exceeded, self.limits)
         if self.returncode != 0:
             how = (
                 f"killed by {signal.Signals(-self.returncode).name}"
@@ -240,37 +254,64 @@ def run(
     Yields the finished Run, whose outputs can be read until the block ends.
     """
     ids = sandbox_user()
-    protected = list(protected)
-    if (PACKAGE_DIR / "data").exists():  # in a checkout: the Git LFS archive, with the answers
-        protected.append(PACKAGE_DIR / "data")
+    protected = _protected(protected)
     with _LOCK:
         root = Path(tempfile.mkdtemp(prefix="timeseriesgym-sandbox-"))
         try:
             work = _work_dir(root, ids, agent_files or {}, data or {})
-            job_file = root / "job.json"
-            job_file.write_text(
-                json.dumps(
-                    {
-                        "entrypoint": entrypoint,
-                        "job": job,
-                        "limits": _rlimits(limits, ids),
-                        "landlock": LANDLOCK,
-                        "rules": _landlock_rules(root, work, protected),
-                        "protected": _probe_paths(protected),
-                        "unconfined_ok": os.environ.get(UNCONFINED_ENV) == "1",
-                        "package_root": str(root / "package"),
-                        "sys_path": _extra_sys_path(protected),
-                    }
-                )
-            )
-            os.chmod(job_file, 0o644)
+            job_file = _job_file(root, work, entrypoint, job, limits, ids, protected)
             yield _start(root, work, job_file, ids, limits)
         finally:
             _remove(root)
 
 
+def _protected(protected: Iterable[Path]) -> list[Path]:
+    protected = list(protected)
+    if (PACKAGE_DIR / "data").exists():  # in a checkout: the Git LFS archive, with the answers
+        protected.append(PACKAGE_DIR / "data")
+    return protected
+
+
+def _job_file(
+    root: Path,
+    work: Path,
+    entrypoint: str,
+    job: dict,
+    limits: Limits,
+    ids,
+    protected: list[Path],
+    python_paths: list[Path] | None = None,
+    sys_path: list[str] | None = None,
+) -> Path:
+    """What sandbox_child.py does: the entry point and its job, the limits, the Landlock rules
+    (for the Python directories `python_paths`, default the grading process's), the files it
+    must be unable to read, and the import path it adds (default the grading process's)."""
+    job_file = root / "job.json"
+    job_file.write_text(
+        json.dumps(
+            {
+                "entrypoint": entrypoint,
+                "job": job,
+                "limits": _rlimits(limits, ids),
+                "landlock": LANDLOCK,
+                "rules": _landlock_rules(root, work, protected, python_paths),
+                "protected": _probe_paths(protected),
+                "unconfined_ok": os.environ.get(UNCONFINED_ENV) == "1",
+                "package_root": str(root / "package"),
+                "sys_path": _extra_sys_path(protected) if sys_path is None else sys_path,
+            }
+        )
+    )
+    os.chmod(job_file, 0o644)
+    return job_file
+
+
 def _work_dir(
-    root: Path, ids: tuple[int, int] | None, agent_files: dict[str, Path], data: dict[str, Path]
+    root: Path,
+    ids: tuple[int, int] | None,
+    agent_files: dict[str, Path],
+    data: dict[str, Path],
+    agent_dirs: dict[str, Path] | None = None,
 ) -> Path:
     os.chmod(root, 0o755 if ids else 0o700)
     (root / "package").mkdir(mode=0o755)
@@ -283,6 +324,8 @@ def _work_dir(
     (work / "tmp").mkdir(parents=True)
     for name, src in agent_files.items():
         _copy_agent_file(Path(src), work / name)
+    for name, src in (agent_dirs or {}).items():  # checked copies: directories and files only
+        shutil.copytree(src, work / name, symlinks=True)
     for name, src in data.items():
         if Path(src).is_dir():
             shutil.copytree(src, work / name, symlinks=False)
@@ -370,12 +413,44 @@ def _extra_sys_path(protected: Iterable[Path]) -> list[str]:
     return extra
 
 
-def _landlock_rules(root: Path, work: Path, protected: Iterable[Path]) -> list[tuple[str, str]]:
+def interpreter_paths(python: str) -> list[Path]:
+    """The directories of another Python installation and its packages (the predictor's), as
+    that interpreter reports them; it is the grading setup's, not agent code."""
+    try:
+        out = subprocess.run(
+            [python, "-I", "-c", _PATHS_CODE],
+            cwd="/",
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=120,
+            check=True,
+        )
+        paths = json.loads(out.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        raise SandboxError(f"Cannot run the Python interpreter {python}: {e}") from None
+    return [p for p in _resolved(paths) if p.exists() and p != Path("/")]
+
+
+_PATHS_CODE = (
+    "import json, site, sys, sysconfig\n"
+    "paths = [sys.prefix, sys.exec_prefix, sys.base_prefix, sys.base_exec_prefix]\n"
+    "paths += sysconfig.get_paths().values()\n"
+    "paths += site.getsitepackages()\n"
+    "print(json.dumps([p for p in paths + sys.path if p]))\n"
+)
+
+
+def _landlock_rules(
+    root: Path, work: Path, protected: Iterable[Path], python_paths: list[Path] | None = None
+) -> list[tuple[str, str]]:
     """What the sandbox may access. A directory that holds a protected path, or lies inside
     one, is left out (the probe then decides whether grading can go on), except the package's
     own directory, of which only the protected parts are."""
     keep = _resolved(protected)
-    read = [Path(p) for p in _SYSTEM_DIRS] + _python_paths()
+    read = [Path(p) for p in _SYSTEM_DIRS] + (
+        _python_paths() if python_paths is None else python_paths
+    )
     rules = [(str(p), "read") for p in dict.fromkeys(read) if not _related(p, keep)]
     rules.append((str(PACKAGE_DIR), "list"))
     rules += [(str(p), "read") for p in sorted(PACKAGE_DIR.iterdir()) if not _related(p, keep)]
@@ -406,12 +481,10 @@ def _probe_paths(protected: Iterable[Path]) -> list[str]:
     return list(dict.fromkeys(probe))
 
 
-def _child_env(work: Path) -> dict[str, str]:
+def _child_env(work: Path, python: str = sys.executable) -> dict[str, str]:
     env = {k: os.environ[k] for k in _PASSED_ENV if k in os.environ}
     env.update(
-        PATH=os.pathsep.join(
-            [str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"]
-        ),
+        PATH=os.pathsep.join([str(Path(python).parent), "/usr/local/bin", "/usr/bin", "/bin"]),
         HOME=str(work),
         TMPDIR=str(work / "tmp"),
         MPLCONFIGDIR=str(work / "tmp"),
@@ -444,18 +517,29 @@ def _start(root: Path, work: Path, job_file: Path, ids, limits: Limits) -> Run:
     return Run(work, proc.returncode, exceeded, limits, log)
 
 
-def _popen(work: Path, job_file: Path, ids, out, err, write_fd: int):
+def _popen(
+    work: Path,
+    job_file: Path,
+    ids,
+    out,
+    err,
+    write_fd: int,
+    python: str = sys.executable,
+    stdin=subprocess.DEVNULL,
+    env: dict[str, str] | None = None,
+):
     """Starts the sandbox; returns (process, children of this process from before)."""
     user = {"user": ids[0], "group": ids[1], "extra_groups": []} if ids else {}
     before = {pid for pid, parent in _children().items() if parent == os.getpid()}
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-I", "-B", str(CHILD), str(job_file), str(write_fd)],
+            [python, "-I", "-B", str(CHILD), str(job_file), str(write_fd)],
             cwd=work,
-            env=_child_env(work),
-            stdin=subprocess.DEVNULL,
+            env={**_child_env(work, python), **(env or {})},  # env: set by the grader
+            stdin=stdin,
             stdout=out,
             stderr=err,
+            bufsize=0,
             pass_fds=(write_fd,),
             start_new_session=True,
             **user,
@@ -732,6 +816,158 @@ def _remove(root: Path) -> None:
         subprocess.run(["rm", "-rf", "--", str(root)], check=False)
     if os.path.lexists(root):
         logger.warning(f"Could not remove the grading sandbox's directory {root}.")
+
+
+# ---------------------------------------------------------------- the interactive sandbox
+
+
+def _exceeded_message(exceeded: str, limits: Limits) -> str:
+    if exceeded == "time":
+        return f"it ran longer than {limits.timeout_sec} s"
+    return f"it used more than {limits.memory_bytes // 2**20} MiB of memory"
+
+
+@dataclass
+class Session:
+    """A running interactive sandbox. The grading process writes to `stdin` and reads from
+    `stdout`, pipes to the sandbox's fds 0 and 1; the sandbox's stderr goes to a file."""
+
+    stdin: Any
+    stdout: Any
+    limits: Limits
+    _stderr: Any
+    _exceeded: list[str]  # the limit the watchdog stopped the sandbox at, if any
+
+    @property
+    def exceeded(self) -> str | None:
+        return self._exceeded[0] if self._exceeded else None
+
+    def stderr_tail(self, limit: int = 3000) -> str:
+        """The end of what the sandbox wrote to stderr (without control characters), and the
+        limit it was stopped at, if any."""
+        text = _clean(_tail(self._stderr, limit))
+        if self.exceeded:
+            message = _exceeded_message(self.exceeded, self.limits)
+            text += f"\n(The grading sandbox stopped it: {message}.)"
+        return text
+
+
+@contextlib.contextmanager
+def interactive(
+    entrypoint: str,
+    job: dict,
+    limits: Limits,
+    agent_dirs: dict[str, Path] | None = None,
+    data: dict[str, Path] | None = None,
+    protected: Iterable[Path] = (),
+    python: str | None = None,
+    env: dict[str, str] | None = None,
+) -> Iterator[Session]:
+    """Runs `entrypoint` ("module:function", called as function(work_dir, job)) in a sandbox,
+    as run() does, but yields while it runs: its stdin and stdout are pipes to the caller.
+
+    `agent_dirs` (name in the work directory: path) are checked copies of submitted directories
+    (directories and regular files only), copied in without following links; `data` and
+    `protected` are as for run(). `python` is the interpreter of the sandbox (default this one),
+    e.g. the agent environment's, so that agent code meets the packages it was written with; the
+    sandbox imports from that interpreter's own path only (and timeseriesgym), not from the
+    grading process's. `env` adds variables (e.g. thread counts).
+
+    Yields a Session once the sandbox has reported that it is confined; raises SandboxError if
+    it is not (as run() does). The caller enforces its own deadlines on the pipes; a watchdog
+    also kills the sandbox's processes after `limits.timeout_sec` or above `limits.memory_bytes`.
+    On leaving the block, the pipes are closed and every process the sandbox started is killed.
+    """
+    ids = sandbox_user()
+    protected = _protected(protected)
+    python = python or sys.executable
+    python_paths = None if python == sys.executable else interpreter_paths(python)
+    with _LOCK:
+        root = Path(tempfile.mkdtemp(prefix="timeseriesgym-sandbox-"))
+        try:
+            work = _work_dir(root, ids, {}, data or {}, agent_dirs)
+            job_file = _job_file(
+                root, work, entrypoint, job, limits, ids, protected, python_paths, sys_path=[]
+            )
+            with _session(root, work, job_file, ids, limits, python, env) as session:
+                yield session
+        finally:
+            _remove(root)
+
+
+@contextlib.contextmanager
+def _session(root: Path, work: Path, job_file: Path, ids, limits, python, env) -> Iterator[Session]:
+    uid = ids[0] if ids else None
+    # O_APPEND: the sandbox writes to the end of its log while the grading process reads its
+    # end through a file of its own
+    with open(root / "logs" / "stderr", "ab") as err, open(root / "logs" / "stderr", "rb") as log:
+        read_fd, write_fd = os.pipe()
+        was_subreaper = _set_subreaper(True)
+        proc, before, watchdog = None, set(), None
+        stop, exceeded = threading.Event(), []
+        try:
+            pipe = subprocess.PIPE
+            proc, before = _popen(
+                work, job_file, ids, pipe, err, write_fd, python=python, stdin=pipe, env=env
+            )
+            watchdog = threading.Thread(
+                target=_watchdog, args=(before, limits, uid, stop, exceeded), daemon=True
+            )
+            watchdog.start()
+            status = _await_status(read_fd, time.monotonic() + limits.timeout_sec)
+            session = Session(proc.stdin, proc.stdout, limits, log, exceeded)
+            _check_status(status, ids, session.stderr_tail(LOG_CHARS))
+            yield session
+        finally:
+            stop.set()
+            if watchdog is not None:
+                watchdog.join()
+            if proc is not None:
+                for f in (proc.stdin, proc.stdout):
+                    with contextlib.suppress(OSError):
+                        f.close()
+                _kill_tree(before, proc.pid, uid)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=DRAIN_SEC)
+            os.close(read_fd)
+            if not was_subreaper:
+                _set_subreaper(False)
+        tail = _clean(_tail(log, LOG_CHARS))
+        if tail:
+            logger.info(f"Grading sandbox log (end):\n{tail}")
+
+
+def _await_status(fd: int, deadline: float) -> str:
+    """What a running sandbox reported before agent code ran: read until it closes its end of
+    the pipe, or until the deadline."""
+    data = b""
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+    while len(data) < 2**16 and time.monotonic() < deadline:
+        if not poller.poll(1000):
+            continue
+        chunk = os.read(fd, 2**16)
+        if not chunk:
+            break
+        data += chunk
+    return data.decode(errors="replace")
+
+
+def _watchdog(before: set[int], limits: Limits, uid, stop: threading.Event, exceeded: list):
+    """Kills the processes of an interactive sandbox when it exceeds its time or memory limit,
+    until `stop` is set; records the limit in `exceeded`."""
+    deadline = time.monotonic() + limits.timeout_sec
+    while not stop.wait(POLL_SEC):
+        if time.monotonic() > deadline:
+            exceeded.append("time")
+        elif limits.memory_bytes and _memory(_of_user(_tree(before), uid)) > limits.memory_bytes:
+            exceeded.append("memory")
+        else:
+            continue
+        for pid in _of_user(_tree(before), uid):
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGKILL)
+        return
 
 
 # ---------------------------------------------------------------- reading sandbox outputs

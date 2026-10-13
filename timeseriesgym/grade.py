@@ -266,7 +266,7 @@ def grade_predictor(
     test windows and scores its forecasts with the challenge's grade function (see
     timeseriesgym/predictor). A predictor with the wrong format, or one that fails, breaks the
     protocol or runs out of time, is graded as invalid. `launcher` starts the predictor
-    process (default: timeseriesgym.predictor.launch.default_launcher(), not a sandbox)."""
+    process (default: in the grading sandbox, timeseriesgym/predictor/sandbox_launch.py)."""
     from timeseriesgym.predictor.grading import grade_predictor_dir
 
     _ensure_prepared(competition)
