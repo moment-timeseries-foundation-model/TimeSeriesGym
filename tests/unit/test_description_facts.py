@@ -47,6 +47,17 @@ def _normal_beat_keep_probability(tree: ast.AST) -> float:
     return found[0]
 
 
+def test_mit_bih_description_names_the_held_out_test_recordings():
+    tree = _mit_bih_prepare()
+    records, test = _assigned(tree, "record_numbers"), _assigned(tree, "test_records")
+    text = " ".join((_directory("MIT-BIH-Arrhythmia") / "description.md").read_text().split())
+    listed = ", ".join(test[:-1]) + f" and {test[-1]}"
+    # the description did not say that the split is by recording
+    assert f"They come from {len(test)} of the {len(records)} recordings (records {listed})" in text
+    assert f"the training beats from the other {len(records) - len(test)}" in text
+    assert "no recording is in both" in text
+
+
 @pytest.mark.parametrize("name", ["description_only_label.md", "description_label_and_model.md"])
 def test_weak_supervision_descriptions_state_how_the_beats_were_made(name):
     tree = _mit_bih_prepare()
