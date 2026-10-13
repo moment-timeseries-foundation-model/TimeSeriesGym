@@ -183,9 +183,22 @@ Rebuilding these challenges gives different files; results on the old data are n
 
 ## Benchmark composition
 
-- **Full split** (`experiments/splits/all.txt`): 31 challenges; the two CSDI challenges are
-  dropped (be8bf8d). Their graders only raise `NotImplementedError` and their prepare writes no
-  answers. They stay registered.
+- **Full split** (`experiments/splits/all.txt`): 33 challenges. The two CSDI challenges were
+  dropped (be8bf8d) while their graders only raised `NotImplementedError`, and they are back now
+  that they are graded (see "CSDI PM2.5" below).
+- **CSDI PM2.5** (csdi-reproduce-pm25, csdi-implement-model-pm25): prepared and graded for the
+  first time (9e9a345, b15b253, bb79c4e, 49aec65). Upstream had no data, no answers and a grader
+  that raised `NotImplementedError`; the descriptions scored a self-reported MAE in a pickle.
+  - **Data:** prepare downloads STMVL-Release (SHA-256 pinned) and lays it out as CSDI's loaders
+    expect, with the evaluation targets of the test months (3, 6, 9, 12; 20,434 values) withheld
+    from `pm25_ground.txt` and the normalisation statistics taken from the training months only.
+  - **Score:** CSDI's own metric, the MAE in PM2.5 units over those targets (lower is better).
+    The submission is `submission.csv` (`id,value`, the sample's ids in its order, finite
+    values). Model weights and `result_nsample{N}.pk` are optional and not scored.
+  - **Leak removed:** the `easy` branch's saved run, `generated_outputs_nsample10.pk`, held every
+    test truth; prepare deletes it and clears the notebook figure that plotted a test window.
+  - **Reference points** on the prepared data: per-station training mean 55.08, per-station linear
+    interpolation in time 14.60, all zeros 69.66, perfect 0.
 - **Registry**: lists only direct child directories (93bccb8). The feature-enhancement example's
   Hydra config was listed as a competition `conf`, and `prepare --all` failed on it.
 
