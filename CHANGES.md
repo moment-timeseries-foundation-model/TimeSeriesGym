@@ -6,7 +6,8 @@ behave. Each entry gives the old and new behaviour, the reason, and the commit. 
 and speed-ups that change no output are listed at the end.
 
 Results produced before these changes are not directly comparable for the challenges named
-under "Scores and validity", "Hyperparameter search", "Feature enhancement" and "Prepared data".
+under "Scores and validity", "Hyperparameter search", "Feature enhancement" and "Prepared data";
+the medals are not comparable for those named under "Medals and leaderboards".
 
 ## Scores and validity
 
@@ -139,6 +140,24 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
   final leaderboard (7b15e32); it listed the top 20, so Kaggle's rule ranked on 20 teams: gold at
   rank 2 (-6.8311), silver 4 (-6.8347), bronze 8 (-6.8374), median -6.8395. Now gold is rank 14
   (-6.8412), silver 104 (-6.8533), bronze 209 (-6.8683), median -6.8993. Scores do not change.
+- **recruit-restaurant-visitor-forecasting**: `leaderboard.csv` is Recruit's final standings,
+  2,150 rows (cbd8e31). It was another competition's leaderboard: 1,964 rows dated 2016-05-24 to
+  2016-08-30, before Recruit's data ends (2017-05-31), with none of Recruit's teams. Gold 0.43593
+  (rank 13) -> 0.51023 (rank 14), silver 0.44570 (98) -> 0.51810 (107), bronze 0.45034 (196) ->
+  0.51817 (215), median 0.48947 -> 0.53223.
+- **online-sales, sberbank-russian-housing-market, ashrae-energy-prediction**: `leaderboard.csv`
+  is the final standings, not Kaggle's public leaderboard (aab3d79); the teams, row counts and
+  medal ranks are the same. online-sales: gold 0.58432 -> 0.56957, silver 0.61887 -> 0.60111,
+  bronze 0.66117 -> 0.64400, median 0.73573 -> 0.71913. sberbank: gold 0.30843 -> 0.31227,
+  silver 0.31026 -> 0.31612, bronze 0.31035 -> 0.31649, median 0.32089 -> 0.32323. ashrae:
+  gold 0.939 -> 1.244, silver 0.955 -> 1.268, bronze 0.978 -> 1.280, median 1.108 -> 1.352.
+- **Leaderboard download** (`dev download-leaderboard --force`, `prepare --overwrite-leaderboard`):
+  refuses to write a leaderboard with fewer rows than 95% of Kaggle's team count (c85f491). The
+  view is paged and kaggle 1.6.17 cannot ask for more than its first page (20 rows), which is how
+  OSIC's file was truncated; with that client, every competition of more than 21 teams is refused.
+- **Shipped leaderboards** are tested to be in the leaderboard view's format (the final
+  standings, not the download's public leaderboard), ranked, with unique teams, and, where the
+  data have dates, dated after the data (556b87b).
 
 ## Prepared data and checksums
 
@@ -271,9 +290,9 @@ graded.
 
 The descriptions of LANL-Earthquake-Prediction, amp-parkinsons-disease-progression-prediction and
 ashrae-energy-prediction, and a new README section, say that their medals compare scores on
-TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011): LANL's segments
-have 15,000 rows (Kaggle's 150,000), amp's test patients come from Kaggle's training data, and
-ashrae's leaderboard is Kaggle's public one, of another period and driven by a label leak.
+TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011, aab3d79): LANL's
+segments have 15,000 rows (Kaggle's 150,000), amp's test patients come from Kaggle's training
+data, and ashrae's leaderboard was scored on 2017-2018, its test set here on the end of 2016.
 
 ## Tests
 
