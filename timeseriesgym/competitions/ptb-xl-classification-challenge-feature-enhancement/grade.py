@@ -491,6 +491,9 @@ def check_linting(model_file_path: str, training_file_path: str) -> tuple[float,
             text=True,
             check=False,
         )
+        for run in (flake8_model, flake8_training):
+            if run.returncode != 0 and not run.stdout.strip():  # it failed, without a report
+                raise subprocess.SubprocessError(run.stderr.strip()[-500:])
 
         # Count number of linting errors
         model_flake8_errors = flake8_model.stdout.strip().split("\n")
@@ -543,9 +546,11 @@ def check_linting(model_file_path: str, training_file_path: str) -> tuple[float,
             )
 
     except (subprocess.SubprocessError, FileNotFoundError) as e:
-        linting_details.append(f"✗ Failed to run linting tools: {e}")
-        # If linting tools fail, give partial credit
-        linting_score = 0.5
+        # The score is 0 unless the lint check passes, so a missing tool must not look like a
+        # failed check (it used to give partial credit, 0.5).
+        raise RuntimeError(
+            f"flake8 is needed to grade this challenge and failed to run: {e}"
+        ) from e
 
     return linting_score, linting_details
 

@@ -467,6 +467,22 @@ def test_feature_rubric_scores_the_shipped_example_as_before():
     assert fe.evaluate_tensorboard_usage(train, example) == pytest.approx(0.8)  # no runs/ shipped
 
 
+def test_feature_rubric_needs_a_working_flake8(tmp_path, monkeypatch):
+    fe = _fe()
+    files = [str(tmp_path / "model.py"), str(tmp_path / "train.py")]
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("flake8")
+
+    monkeypatch.setattr(fe.subprocess, "run", missing)
+    with pytest.raises(RuntimeError, match="flake8"):  # it gave half the lint credit
+        fe.check_linting(*files)
+    crashed = subprocess.CompletedProcess([], 1, "", "Traceback (most recent call last): ...")
+    monkeypatch.setattr(fe.subprocess, "run", lambda *args, **kwargs: crashed)
+    with pytest.raises(RuntimeError, match="flake8"):  # it counted as no problems
+        fe.check_linting(*files)
+
+
 # ---------------------------------------------------------------- amp prepare
 
 

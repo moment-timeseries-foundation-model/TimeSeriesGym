@@ -247,12 +247,14 @@ def test_aggregate_reports_accepts_code_reports():
 # ---------------------------------------------------------------- feature enhancement
 
 
-def test_feature_enhancement_grader_is_reachable(tmp_path):
+def test_feature_enhancement_grader_is_reachable(tmp_path, monkeypatch):
     from timeseriesgym.grade_helpers import GradingInput
     from timeseriesgym.registry import Registry
 
     cid = "ptb-xl-classification-challenge-feature-enhancement"
     competition = Registry(tmp_path).get_competition(cid)
+    clean = subprocess.CompletedProcess([], 0, "", "")  # flake8, which is not installed everywhere
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: clean)
     assert competition.feature_enhancement_config["model_code_file"] == "model.py"
     example = (
         Path(importlib.import_module("timeseriesgym").__file__).parent

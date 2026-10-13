@@ -38,6 +38,7 @@ dependencies = [
   "datasets==3.4.1",
   "gluonts==0.16.1",
   "pytest==8.3.5",
+  "flake8==7.1.1",  # the PTB-XL feature-enhancement rubric runs it
   "wfdb==4.2.0",
   "pyarrow==20.0.0",
   "gdown==5.2.0",
