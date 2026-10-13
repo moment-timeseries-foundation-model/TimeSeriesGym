@@ -190,6 +190,16 @@ Rebuilding these challenges gives different files; results on the old data are n
   rows for 3,183 ids), so a perfect forecast scored SMAPE+1 72.97; it now scores 0. The sample
   submission scores 124.93847 (was 129.7763). Only `ground_truth.csv` and
   `sample_submission.csv` change.
+- **new-york-city-taxi-fare-prediction**: the test split is cleaned as Kaggle's test set was
+  (2bb750e). Rides with a pickup or dropoff outside the ranges of Kaggle's own `test.csv`
+  (longitude -74.263242 to -72.986532, latitude 40.568973 to 41.709555) or with 0 or more than
+  6 passengers are dropped from the same random sample. The test now has 9,638 rows (was
+  9,914): 233 lay outside the area (219 with a zero coordinate) and 45 had 0 passengers, 2 of
+  them both. The old test was a random sample of the raw training file, but the leaderboard
+  (gold 2.83377) was measured on Kaggle's clean test, and these rows dominated the error: two
+  agent submissions score RMSE 5.45 and 5.25 on the old test and 3.49 and 3.48 on the new one.
+  The sample submission scores 9.93913 (was 10.02927). `labels.csv` is unchanged; `test.csv`,
+  `sample_submission.csv` and the answers change, and the descriptions state the cleaning.
 - **ptb-xl-classification-challenge (and its HPS and FE variants)**: training uses PTB-XL folds
   1-8 (12,957 records; was folds 1-7, 11,320 records) (e5d3422). `train_fold` was
   `np.arange(0, 8)`, but the folds are numbered 1-10, so fold 8 was in no split.

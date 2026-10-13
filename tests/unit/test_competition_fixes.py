@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.metrics import accuracy_score, root_mean_squared_error
+from sklearn.model_selection import train_test_split
 
 from timeseriesgym.competitions.utils import download_file
 from timeseriesgym.grade_helpers import Grader, GradingInput
@@ -560,6 +561,86 @@ def test_m5_prepare_keeps_prices_of_every_training_day(tmp_path):
     train = pd.read_csv(public / "train.csv")
     assert train.columns[-1] == "d_1913" and len(train) == 4
     assert pd.read_csv(public / "sample_submission.csv").id.tolist() == sample.id.tolist()
+
+
+# ---------------------------------------------------------------- NYC taxi prepare
+
+
+def _nyc_raw(raw: Path) -> None:
+    rng = np.random.default_rng(0)
+    n = 12_000
+    times = pd.Timestamp("2012-01-01") + pd.to_timedelta(rng.integers(0, 10**8, n), unit="s")
+    train = pd.DataFrame(
+        {
+            "key": [f"{t}.{i:07d}" for i, t in enumerate(times)],
+            "fare_amount": rng.uniform(2.5, 60.0, n).round(2),
+            "pickup_datetime": times.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "pickup_longitude": rng.uniform(-74.02, -73.93, n),
+            "pickup_latitude": rng.uniform(40.70, 40.80, n),
+            "dropoff_longitude": rng.uniform(-74.02, -73.93, n),
+            "dropoff_latitude": rng.uniform(40.70, 40.80, n),
+            "passenger_count": rng.integers(1, 7, n),
+        }
+    )
+    # rows unlike Kaggle's test set: missing (0) or far-away coordinates, 0 or more than 6
+    # passengers, a missing dropoff
+    dirty = rng.choice(n, 1_200, replace=False)
+    changes = [
+        ("pickup_longitude", 0.0),
+        ("dropoff_latitude", 0.0),
+        ("pickup_latitude", 45.0),
+        ("dropoff_longitude", -75.5),
+        ("passenger_count", 0),
+        ("passenger_count", 9),
+        ("dropoff_latitude", np.nan),
+    ]
+    for j, i in enumerate(dirty):
+        column, value = changes[j % len(changes)]
+        train.loc[i, column] = value
+    # the edges of Kaggle's test ranges are inside
+    edge = rng.choice(np.setdiff1d(np.arange(n), dirty), 4, replace=False)
+    train.loc[edge, "pickup_longitude"] = -74.263242
+    train.loc[edge, "dropoff_longitude"] = -72.986532
+    train.loc[edge, "pickup_latitude"] = 40.568973
+    train.loc[edge, "dropoff_latitude"] = 41.709555
+    train.loc[edge, "passenger_count"] = [1, 6, 1, 6]
+    raw.mkdir(parents=True)
+    train.to_csv(raw / "train.csv", index=False)
+    (raw / "GCP-Coupons-Instructions.rtf").write_text("{\\rtf1}")
+
+
+def test_nyc_prepare_cleans_the_test_like_kaggle(tmp_path):
+    prepare = _module("new-york-city-taxi-fare-prediction", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    _nyc_raw(raw)
+    public.mkdir()
+    private.mkdir()
+    prepare(raw, public, private)
+
+    raw_train = pd.read_csv(raw / "train.csv", float_precision="round_trip")
+    old_train, old_test = train_test_split(raw_train, test_size=9914, random_state=0)
+    longitudes = old_test[["pickup_longitude", "dropoff_longitude"]]
+    latitudes = old_test[["pickup_latitude", "dropoff_latitude"]]
+    clean = (
+        old_test.passenger_count.between(1, 6)
+        & ((longitudes >= -74.263242) & (longitudes <= -72.986532)).all(axis=1)
+        & ((latitudes >= 40.568973) & (latitudes <= 41.709555)).all(axis=1)
+    )
+    assert 0 < (~clean).sum() < len(old_test)  # the uncleaned test held these rows
+
+    test = pd.read_csv(private / "test.csv", float_precision="round_trip")
+    # the same random sample without the rows outside Kaggle's test ranges, in the same order
+    pd.testing.assert_frame_equal(test, old_test[clean].reset_index(drop=True))
+    edges = old_test.key[old_test.pickup_longitude == -74.263242]
+    assert len(edges) > 0 and edges.isin(test.key).all()  # the ranges include their edges
+    # the training split is unchanged; the dropped test rows are not used
+    labels = pd.read_csv(public / "labels.csv", float_precision="round_trip")
+    pd.testing.assert_frame_equal(labels, old_train.reset_index(drop=True))
+    public_test = pd.read_csv(public / "test.csv", float_precision="round_trip")
+    pd.testing.assert_frame_equal(public_test, test.drop(columns="fare_amount"))
+    sample = pd.read_csv(public / "sample_submission.csv")
+    assert sample.key.tolist() == test.key.tolist()
+    assert (sample.fare_amount == 11.35).all()
 
 
 # ---------------------------------------------------------------- PTB-XL folds
