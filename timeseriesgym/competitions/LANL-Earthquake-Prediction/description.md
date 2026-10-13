@@ -19,7 +19,7 @@ This challenge is hosted by Los Alamos National Laboratory which enhances nation
 **Department of Energy, Office of Science, Basic Energy Sciences, Chemical Sciences, Geosciences and Biosciences Division:** The Geosciences core research.
 
 ## Evaluation
-Submissions are evaluated using the mean absolute error between the predicted time remaining before the next lab earthquake and the actual remaining time.
+Submissions are evaluated using the mean absolute error, over all test segments, between the predicted time remaining before the next lab earthquake and the actual remaining time at the last row of each segment.
 
 In statistics, mean absolute error (MAE) is a measure of errors between paired observations expressing the same phenomenon. MAE is calculated as:
 
@@ -37,9 +37,9 @@ For each `seg_id` in the test set folder, you must predict `time_to_failure`, wh
 
 ```
 seg_id,time_to_failure
-seg_E92rZW,0
-seg_izioDb,0
-seg_00WYmC,0
+seg_0NfqRu,0
+seg_0PH6hG,0
+seg_0Sncn3,0
 ...
 ```
 
@@ -60,13 +60,13 @@ Los Alamos' initial work showed that the prediction of laboratory earthquakes fr
 ## Dataset Description
 The goal of this competition is to use seismic signals to predict the timing of laboratory earthquakes. The data comes from a well-known experimental set-up used to study earthquake physics. The `acoustic_data` input signal is used to predict the time remaining before the next laboratory earthquake (`time_to_failure`).
 
-The training data is a single, continuous segment of experimental data. The test data consists of a folder containing many small segments. The data *within* each test file is continuous, but the test files do not represent a continuous segment of the experiment; thus, the predictions cannot be assumed to follow the same regular pattern seen in the training file.
+The training data is a single, continuous segment of experimental data: the first 12 earthquake cycles of the competition's training data, up to the 12th laboratory earthquake. The test data consists of a folder containing many small segments, cut from the 5 cycles that follow, which are not in the training data. The data *within* each test file is continuous, but the test files do not represent a continuous segment of the experiment; thus, the predictions cannot be assumed to follow the same regular pattern seen in the training file.
 
 For each `seg_id` in the test folder, you should predict a *single* `time_to_failure` corresponding to the time between the *last row of the segment* and the next laboratory earthquake.
 
 ### File descriptions
 * **train.csv** - A single, continuous training segment of experimental data.
-* **test** - A folder containing many small segments of test data: 2,500 files, one per `seg_id` (`test/<seg_id>.csv`), each with 15,000 consecutive rows of `acoustic_data`.
+* **test** - A folder containing many small segments of test data: 1,112 files, one per `seg_id` (`test/<seg_id>.csv`), each with 150,000 consecutive rows of `acoustic_data`, as in the competition. They are every whole 150,000-row segment of the 5 test cycles; no segment spans an earthquake, and neither the ids nor the order of the files tell where a segment lies in the experiment.
 * **sample_submission.csv** - A sample submission file in the correct format.
 
 ### Data fields
