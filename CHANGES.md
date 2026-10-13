@@ -6,8 +6,9 @@ behave. Each entry gives the old and new behaviour, the reason, and the commit. 
 and speed-ups that change no output are listed at the end.
 
 Results produced before these changes are not directly comparable for the challenges named
-under "Scores and validity", "Hyperparameter search", "Feature enhancement" and "Prepared data";
-the medals are not comparable for those named under "Medals and leaderboards".
+under "Scores and validity", "Predictor challenges", "Hyperparameter search", "Feature
+enhancement" and "Prepared data"; the medals are not comparable for those named under "Medals and
+leaderboards".
 
 ## Scores and validity
 
@@ -74,6 +75,74 @@ the medals are not comparable for those named under "Medals and leaderboards".
   code submission that does not import, is reported as invalid instead of aborting the whole
   `timeseriesgym grade` batch (5e8750c). One bad agent file used to lose the report for every
   other run.
+
+## Predictor challenges
+
+Two challenges: gift-eval-short-horizon and time-series-library-long-horizon-forecast. The code
+is the new package `timeseriesgym/predictor` (f5e9bda, e535b65, 56af8ea, b7626a4, 0e63610,
+2789748); the challenges change in 39a46a6, 7ba10ad and d541ce5, the agent instructions in
+15067c8, and the tests are in 12bf4d9 and 2db1b57.
+
+- **The test labels were in the public data.** GIFT-Eval published the full series from which
+  the answers are cut, and other frequencies of the same series, whose sums equal coarser labels
+  (the solar/W labels are the weekly sums of solar/D, solar/H and solar/10T). TSL's answers are
+  TSL's own test loader run over the public CSVs. The value-overlap scan (below) finds every
+  informative run of 16 test-label values in the previous public data: 485,616 runs in 5 of 5
+  GIFT-Eval datasets, 5,157,780 in 9 of 9 TSL datasets. Earlier results can have copied labels.
+- **Submission**: a predictor, the directory `submission/predictor/` with `predict.py`, instead
+  of an `.h5` of predictions. The grader builds the test windows from the full data, now in
+  `private/`, as the answers were built (the same windows in the same order; prepare asserts
+  that their labels equal the answers). It calls `predict(windows)` in rounds forward in time,
+  so that no call shows a value before it has been forecast, also through a related series:
+  TSL's four ETT datasets share one clock (ETTh1 is ETTm1 sampled at the hour). GIFT-Eval:
+  16,696 windows in 547 rounds (568 calls); TSL: 48,962 windows in 11,425 calls. A file of
+  predictions is now invalid for these two challenges, and so is a predictor that fails, breaks
+  the protocol, returns a non-finite forecast or one beyond the float32 range, or runs longer
+  than 2,400 s in all. `make_submission.py` points at `submission/predictor`;
+  `timeseriesgym grade-predictor` grades one directory; `validate_submission` checks a predictor
+  directory, or an uploaded `predict.py`, for its format only and never runs it.
+- **Scores**: the grade functions are unchanged and score the assembled forecasts as they would
+  score a static submission. The zero sample predictor scores 0.99472 on GIFT-Eval (MAPE), as a
+  zero submission did, and on TSL as before per dataset (MSE: ETTh1 1.10992 ... weather
+  0.63657); a predictor that holds the answers scores 0.
+- **Where the predictor runs**: through a launcher (`timeseriesgym/predictor/launch.py`), the
+  interface a sandbox implements. The default runs it as a subprocess of the grading process,
+  with the Python of `$TSGYM_PREDICTOR_PYTHON` (the agent environment's, so that the predictor
+  meets its packages) or the grader's own, 8 threads, a CPU-time limit and a minimal
+  environment. It is not a sandbox: the predictor can read what the grading user can, the
+  answers included.
+- **Public data, gift-eval-short-horizon** (supersedes "unchanged" under Prepared data): each
+  series of the 5 datasets ends where its own test windows begin (the series of
+  `validation_dataset` of the full data). The other frequencies are dropped (LOOP_SEATTLE/D and
+  H, hierarchical_sales/D, kdd_cup_2018_with_missing/D, solar/10T, D and H). The public features
+  carry Sequence lengths and `dataset.py` the `np.object` alias, so that `Dataset()` loads with
+  the agent environment's datasets 2.1.0 and numpy 1.26, where it failed (`KeyError: 'length'`,
+  then `np.object`). `sample_submission.h5` becomes `sample_predictor/`. New:
+  `check_predictor.py` with `predictor_tools/` (the local check) and `predictor_datasets.json`
+  (shapes and window counts, no values). The answers file is byte-identical.
+- **Public data, time-series-library-long-horizon-forecast**: each CSV ends at the row of TSL's
+  first test label. The public `data_loader.py` keeps the full files' borders and scaler
+  (`TSG_FULL_ROWS`) and gives the validation split for `flag="test"`, so `run.py` reports
+  validation results there. The 3.6 GB `sample_submission.h5` of zeros becomes
+  `sample_predictor/`; the local check and `predictor_datasets.json` are added. The answers have
+  the same content (every array equal); `test.h5` is now written in sorted dataset order, so its
+  bytes do not depend on the directory order (md5 9db94a8f; the old abc44058 could not be
+  reproduced by a rebuild). A rerun of prepare no longer fails on a TSL clone left in `raw/`.
+- **Checksums** of both challenges are regenerated; two further prepares verify them.
+- **The local check** (`python /home/data/check_predictor.py`) runs a predictor on validation
+  windows of the public data with the grader's format check, windows, calls and runner, and
+  prints each dataset's score from the challenge's own `grade.py` and a run-time estimate. It
+  gives no reward estimate. For a metric whose answers hold per-window scales (GIFT-Eval's
+  normalized MASE, pr1/a3-gift-mase) it computes them for the validation windows with the
+  metric's own `window_baselines`.
+- **Value-overlap scan** (`python -m timeseriesgym.predictor.leakscan <id>`): on the new public
+  data, 0 hits in 4 of 5 GIFT-Eval and 7 of 9 TSL datasets. The others are properties of the
+  data, not copies of the test period. m4_daily: 21 of its 4,196 informative test windows occur
+  verbatim in the public data, in another series or earlier in the same series (M4's own
+  duplicated segments). electricity (89) and traffic (193 runs): daily and weekly profiles that
+  recur exactly, in the same column at whole-day lags or in another sensor.
+- **Agent instructions**: they take priority over `description.md` and asked for a file of
+  predictions; they now say that some challenges take a predictor directory, and how to check it.
 
 ## Hyperparameter search
 

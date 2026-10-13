@@ -8,7 +8,7 @@ description: timeseriesgym/competitions/time-series-library-long-horizon-forecas
 
 dataset:
   answers: time-series-library-long-horizon-forecast/prepared/private/test.h5
-  sample_submission: time-series-library-long-horizon-forecast/prepared/public/sample_submission.h5
+  sample_submission: time-series-library-long-horizon-forecast/prepared/public/sample_predictor/predict.py
 
 grader:
   name: custom
@@ -16,3 +16,11 @@ grader:
   grade_fn: timeseriesgym.competitions.time-series-library-long-horizon-forecast.grade:grade
 
 preparer: timeseriesgym.competitions.time-series-library-long-horizon-forecast.prepare:prepare
+
+# The submission is a predictor directory (predict.py), which the grader runs on the hidden
+# test windows (timeseriesgym/predictor); the forecasts are scored with grade_fn.
+predictor_config:
+  windows: tsl             # timeseriesgym/predictor/windows.py: tsl_windows
+  metric: MSE              # the name the local check prints
+  timeout_sec: 2400        # the whole predictor run: 48,962 windows in 11,425 calls
+  cpus: 8

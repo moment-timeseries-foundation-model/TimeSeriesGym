@@ -13,6 +13,7 @@ from timeseriesgym.grade import (
     grade_feature_enhancement,
     grade_hyperparameter_search,
     grade_jsonl,
+    grade_predictor,
     grade_sample,
 )
 from timeseriesgym.registry import registry
@@ -240,6 +241,36 @@ def main():
         default=registry.get_data_dir(),
     )
 
+    # Grade predictor sub-parser
+    parser_grade_predictor = subparsers.add_parser(
+        name="grade-predictor",
+        help="Grade a predictor directory (gift-eval-short-horizon, "
+        "time-series-library-long-horizon-forecast) by running it on the hidden test windows.",
+    )
+    parser_grade_predictor.add_argument(
+        "folder_path",
+        help="The predictor directory (predict.py and its files).",
+        type=str,
+    )
+    parser_grade_predictor.add_argument(
+        "competition_id",
+        help=f"ID of the competition to grade. Valid options: {competition_ids}",
+        type=str,
+    )
+    parser_grade_predictor.add_argument(
+        "--python",
+        help="The Python interpreter to run the predictor with, e.g. the agent environment's "
+        "(default: $TSGYM_PREDICTOR_PYTHON, else this one). The predictor runs as a plain "
+        "subprocess, not in a sandbox.",
+        default=None,
+    )
+    parser_grade_predictor.add_argument(
+        "--data-dir",
+        help="Path to the directory where the data will be stored.",
+        required=False,
+        default=registry.get_data_dir(),
+    )
+
     # Dev tools sub-parser
     parser_dev = subparsers.add_parser("dev", help="Developer tools for extending TimeSeriesGym.")
     dev_subparsers = parser_dev.add_subparsers(dest="dev_command", help="Developer command to run.")
@@ -431,6 +462,15 @@ def main():
         report = grade_feature_enhancement(
             Path(args.folder_path), competition, path_to_solution_files=args.solution_files_path
         )
+        logger.info("Competition report:")
+        logger.info(json.dumps(report.to_dict(), indent=4))
+    if args.command == "grade-predictor":
+        from timeseriesgym.predictor.launch import SubprocessLauncher
+
+        new_registry = registry.set_data_dir(Path(args.data_dir))
+        competition = new_registry.get_competition(args.competition_id)
+        launcher = SubprocessLauncher(args.python) if args.python else None
+        report = grade_predictor(Path(args.folder_path), competition, launcher)
         logger.info("Competition report:")
         logger.info(json.dumps(report.to_dict(), indent=4))
     if args.command == "grade-code":

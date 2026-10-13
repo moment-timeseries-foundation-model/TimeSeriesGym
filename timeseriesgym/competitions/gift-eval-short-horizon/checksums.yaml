@@ -1,42 +1,49 @@
 private:
-  test.h5: 2c3604c3c12a92e92ef99023b84f7014
-public:
   LOOP_SEATTLE/5T/data-00000-of-00001.arrow: 526f4c1884af99491c58d662c8297598
   LOOP_SEATTLE/5T/dataset_info.json: 874f7a8bb9deaf03e89a26bc1be72e88
   LOOP_SEATTLE/5T/state.json: 7df033e04310f0a02808aadc9b74015b
-  LOOP_SEATTLE/D/data-00000-of-00001.arrow: 22da6b161ff8bc8f00fc522942c6be9d
-  LOOP_SEATTLE/D/dataset_info.json: 0e806a592ce607ea81e0168aa8ecf105
-  LOOP_SEATTLE/D/state.json: f0b85289b4b3d0bde6b3862f6909fb41
-  LOOP_SEATTLE/H/data-00000-of-00001.arrow: a65a7fa156e3bbea89729eda0a70d9f5
-  LOOP_SEATTLE/H/dataset_info.json: 1146ce1fb8ba9dc288e66322f2b8329b
-  LOOP_SEATTLE/H/state.json: 79f5b056b2c4ae603426b545ab08539b
   dataset.py: 42c16f2043eb2f36ac3c5d6daec23fd4
-  hierarchical_sales/D/data-00000-of-00001.arrow: 2aa8dc0d01367e7e443b6a2a337e1aa9
-  hierarchical_sales/D/dataset_info.json: 9a03b5bcd629dcfb6209f10b3f132a2a
-  hierarchical_sales/D/state.json: b7e96bbf682216376f82f4243ee8a4e8
   hierarchical_sales/W/data-00000-of-00001.arrow: 5162e031d0a183bd1a8e77593db2e7ee
   hierarchical_sales/W/dataset_info.json: b2f1c6c901d483e34d38a9594a717a92
   hierarchical_sales/W/state.json: e6369dd8be788c3800ce92736a295df6
-  kdd_cup_2018_with_missing/D/data-00000-of-00001.arrow: bf9c13cc0d28495e24d66e0f8c004084
-  kdd_cup_2018_with_missing/D/dataset_info.json: eed17baa45ecfc06a58da37aadffb3a0
-  kdd_cup_2018_with_missing/D/state.json: 28e70d0a4bdd8be88b76202e5fbaf69d
   kdd_cup_2018_with_missing/H/data-00000-of-00001.arrow: 4dac456e2f636b2a3930fed1e895c8ce
   kdd_cup_2018_with_missing/H/dataset_info.json: e9240f5019594ec97c23faba974ad394
   kdd_cup_2018_with_missing/H/state.json: 4a9461a0d622c022a5f041c4cbd30a22
   m4_daily/data-00000-of-00001.arrow: 8c676ef2e423750f094647dd4993a632
   m4_daily/dataset_info.json: 6bc04d8acb5a12f1999f18c244910670
   m4_daily/state.json: f3498728c1f4fbddc7cbf51db1713350
-  sample_submission.h5: 5c94f2240616da6b88af8463e7801617
-  solar/10T/data-00000-of-00001.arrow: e04bf91fa79d374aa34388f5ac991359
-  solar/10T/dataset_info.json: 9f81a2de9feeafa0d0646e44fb497e6d
-  solar/10T/state.json: abcf1f8177d5d4b35176abf5d2b2cd7a
-  solar/D/data-00000-of-00001.arrow: b82d6c9b0471c53d73c6bc7466c002fb
-  solar/D/dataset_info.json: ef17fb750c1fc703f3b7b4a5e4b18c4a
-  solar/D/state.json: 3698b719770db9f541e589183196273a
-  solar/H/data-00000-of-00001.arrow: 59f0f44272dfe380959f01990adf19e8
-  solar/H/dataset_info.json: f8d9ee9b2725604d7ba98d90a859c9e0
-  solar/H/state.json: 384ffa636b2c308698ae79495b3e35e8
   solar/W/data-00000-of-00001.arrow: 59a7375bd9ce8e898593d0247aeecd83
   solar/W/dataset_info.json: eed4089c0abbe1279be71501c1a25c6e
   solar/W/state.json: 6c1d7fa5ebe781f42f1c7dbbb84cf6e4
+  test.h5: 0787b6e3800efe25e3d2e78f0a261569
+public:
+  LOOP_SEATTLE/5T/data-00000-of-00001.arrow: 5f1b1692f3cabd2667171f4294da339d
+  LOOP_SEATTLE/5T/dataset_info.json: efdb5c824d02c6e09374e24929cd005c
+  LOOP_SEATTLE/5T/state.json: 1fbe2fd44993dbc1f76abfb328d87039
+  check_predictor.py: 828386203685190d51050f1234859f4f
+  dataset.py: 3f6480247c51d06ad0fd445e17d5dcb5
+  hierarchical_sales/W/data-00000-of-00001.arrow: 063c9b4e41fc97829c15498c287a4848
+  hierarchical_sales/W/dataset_info.json: 9be2f7fc48728694171abf8aae6e5a66
+  hierarchical_sales/W/state.json: 8ecab8f6330634226bbe947a89ce22af
+  kdd_cup_2018_with_missing/H/data-00000-of-00001.arrow: 63fb827b21951cd28ccd73abb7ad9643
+  kdd_cup_2018_with_missing/H/dataset_info.json: b8447908cff41222698f21ff45c3734e
+  kdd_cup_2018_with_missing/H/state.json: 7bcf17970f8432fa9ec42d741f981c54
+  m4_daily/data-00000-of-00001.arrow: 7c1396c3296477c06ec05804c339b0a3
+  m4_daily/dataset_info.json: 77ab6b864d992502a01a5df80da3f9c9
+  m4_daily/state.json: f3cfac0f372a3a7cbb21ad0db442a466
+  predictor_datasets.json: 6c53f27f336abbb3ba952c2707802c2e
+  predictor_tools/__init__.py: f83275fed17189122646866a67f44664
+  predictor_tools/check.py: a70de0bf9eaedd74c3c9f77cefd470f5
+  predictor_tools/config.json: 7555757461c2c3f7296db021e6af01f2
+  predictor_tools/contract.py: ef53e2e12542dd84d7dc7e0249dc6f91
+  predictor_tools/launch.py: dbc25743bd18ee79d1a2ac3dbf391ed6
+  predictor_tools/metric/__init__.py: d41d8cd98f00b204e9800998ecf8427e
+  predictor_tools/metric/grade.py: 20905a885c7ce4e593332cb16aac5e95
+  predictor_tools/protocol.py: 12b609eb2f1a94322724c762589b3043
+  predictor_tools/runner.py: d14ee8512fa2d108bfa1c787375b97cb
+  predictor_tools/windows.py: 850a287f6f8d27dd0578fcf3a59f721f
+  sample_predictor/predict.py: 6c5885ffa250821c68a322b1fdbd0e5d
+  solar/W/data-00000-of-00001.arrow: 5cc1a388ec790e74694ea258fd89afc0
+  solar/W/dataset_info.json: a99cd050351ff1c00f4bb513ab044aa9
+  solar/W/state.json: cd83f0abec4c46a22d4d0257a27455a9
 zip: d8fe2a8500d8f4b7c848d5d74b36e59c
