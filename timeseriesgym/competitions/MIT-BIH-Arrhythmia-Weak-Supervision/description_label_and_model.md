@@ -14,7 +14,7 @@ While isolated, infrequent PVCs are generally benign, frequent occurrences with 
 ### Technical Approach
 You will:
 
-- Implement six domain expert-defined heuristics as Labeling Functions (LFs)
+- Implement domain expert-defined heuristics as Labeling Functions (LFs): the original study used six, and five of them can be computed on the beats provided here
 - Use Snorkel, an open-source library, to model these heuristics within a factor graph framework
 - Generate probabilistic labels for each heartbeat instance
 - Develop and train a machine learning model using these weakly supervised labels
@@ -113,14 +113,16 @@ On an ECG, a PVC beat typically shows:
 
 ## Implementing Labeling Functions
 
-Based on these characteristics, we can implement six key heuristics as labeling functions:
+Based on these characteristics, the original study implemented six key heuristics as labeling functions:
 
-1. R-wave appears earlier than usual
+1. R-wave appears earlier than usual (this one cannot be computed here: each beat is a separate window, with no beat times or RR intervals)
 2. R-wave is taller than usual
 3. R-wave is wider than usual
 4. QRS-vector is directed opposite to the ST-vector
 5. QRS-complex is inverted
 6. Inverted R-wave is taller than usual
+
+These heuristics describe PVCs in the complete recordings of the original study. The beats here were prepared differently (fixed windows centred on a detected peak, cut from signals standardized per recording; see File Descriptions), so check on the data whether, and in which direction, a heuristic separates the beats before you rely on it.
 
 ![Example Labeling Functions](assets/Figure_3.jpg)
 
@@ -135,10 +137,10 @@ https://geekymedics.com/understanding-an-ecg/:
 
 To implement these heuristics effectively:
 1. **Signal Pre-processing**: Begin by removing baseline wandering using a forward/backward, fourth-order high-pass Butterworth filter.
-2. **Heartbeat Segmentation**: Segment ECG signals into individual beats by considering the time between alternate QRS-complexes as a heartbeat.
+2. **Heartbeat Segmentation**: The original study segmented each recording into beats, taking the time between alternate QRS-complexes as a heartbeat. Here the beats are already segmented, as fixed windows of 256 samples (see File Descriptions).
 3. **Feature Extraction**: Determine precise locations of QRS-complexes and T-waves using peak finding algorithms and RANSAC for baseline detection.
-4. **Threshold Determination**: For each heuristic, determine appropriate thresholds. For example, to identify an "early R-wave", use the Minimum Covariance Determinant algorithm to find the covariance of the most-normal subset of the frequency histogram, then set the threshold at 2 standard deviations from the estimated mean.
-5. **Patient-Specific Calibration**: To account for inter-patient variability, compute subject-specific thresholds for each heuristic automatically.
+4. **Threshold Determination**: For each heuristic, determine appropriate thresholds. For example, to identify a "wide R-wave", use the Minimum Covariance Determinant algorithm to find the covariance of the most-normal subset of the R-wave widths, then set the threshold at 2 standard deviations from the estimated mean.
+5. **Patient-Specific Calibration**: To account for inter-patient variability, the original study computed subject-specific thresholds for each heuristic. That is not possible here: the beats carry no record or patient ids, so the thresholds have to be set over all beats.
 
 ### The End-Model Classifier
 After obtaining probabilistic labels from the label model, you can train your final classifier. In the original work, the authors trained a noise-aware ResNet classifier using these probabilistic labels and the segmented ECG beats.
@@ -149,14 +151,14 @@ However, you are free to experiment with other model architectures - the key is 
 ## Getting Started
 
 - Explore the provided ECG data in the train_features.h5 and test_features.h5 files
-- Implement the six labeling functions described above
+- Implement the labeling functions described above (five of the six can be computed on this data)
 - Train a label model to combine these heuristics into probabilistic labels
 - Use these probabilistic labels to train your final classifier (ResNet or alternative)
 - Generate predictions for the test set
 
 ## File Descriptions
 
-* **train_features.h5** - Contains ECG signal segments for training your model. The file is organized with a 'train' group that includes two leads ("lead_1" and "lead_2"). Typically, lead_1 corresponds to a modified limb lead II (MLII) and lead_2 to a modified lead V1. All signals have been preprocessed and normalized. Access this data using `h5py` with the path 'train/LEAD_NUMBER' (e.g., 'train/lead_1', 'train/lead_2').
+* **train_features.h5** - Contains ECG signal segments for training your model. The file is organized with a 'train' group that includes two leads ("lead_1" and "lead_2"). Typically, lead_1 corresponds to a modified limb lead II (MLII) and lead_2 to a modified lead V1. Each beat is a window of 256 consecutive samples (about 0.71 s at the database's 360 samples per second) of both leads, centred on a peak that a peak detector found in lead_1 (`scipy.signal.find_peaks`, with peaks at least 150 samples apart): for most beats the R peak, at index 128. Normalization: each lead of a recording was standardized (mean 0, standard deviation 1 over the whole recording) before the windows were cut; the windows themselves were not rescaled. Only the windows are provided: there are no RR intervals, beat times or record (patient) ids. The rows follow the order of the recordings and, within a recording, of time, but where one recording ends is not marked, and as most normal beats were left out, neighbouring rows are often not neighbouring beats. Selection: the beats come from 40 of the database's 48 recordings. Only windows with exactly one annotation, a normal beat or a PVC, were kept: all PVC windows, but each normal-beat window only with probability 0.15. PVCs are therefore a much larger share of the beats here than in the original recordings, where most beats are normal. Access this data using `h5py` with the path 'train/LEAD_NUMBER' (e.g., 'train/lead_1', 'train/lead_2').
 
 * **test_features.h5** - Contains ECG signal segments for model evaluation. Maintains the same structure as train_features.h5 but with a 'test' group containing "lead_1" and "lead_2" datasets. These preprocessed and normalized signals are what your model needs to classify.
 
