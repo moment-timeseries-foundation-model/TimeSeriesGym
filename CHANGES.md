@@ -38,6 +38,14 @@ the medals are not comparable for those named under "Medals and leaderboards".
 - **ucr-anomaly-detection**: the score averages over every dataset in the answers (229df50).
   It iterated over the submission's keys, so a submission with only the easiest dataset was
   scored on that one alone.
+- **gift-eval-short-horizon**: the score is GIFT-Eval's leaderboard metric, each dataset's MASE
+  divided by the seasonal naive forecast's MASE, geometric mean over the 5 datasets (4c2294b).
+  It was MAPE, which divides by max(|actual|, eps): a non-zero forecast where the actual value is
+  exactly 0 gave 9.1e14 on hierarchical_sales, so the seasonal naive forecast scored 1.8e14 and
+  the zero sample 0.9947. Lower is better: seasonal naive now scores 1.0, naive 1.02262, the zero
+  sample 5.63105 and a perfect forecast 0; per dataset, the seasonal naive and naive MASE equal
+  GIFT-Eval's published values to 1e-9. Infinite predictions are invalid, like NaN ones. MAPE is
+  still logged. The answers must be prepared again (see "Prepared data").
 - **moment-anomaly-detection-score, time-series-library-itransformer-weather-forecast**: the shape
   is checked before `np.isclose` (229df50). It broadcasts, so a (1, n) or scalar submission
   could match.
@@ -126,13 +134,27 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
 
 ## Medals and leaderboards
 
-- **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 10 challenges
-  award no medals: context-is-key-moirai, context-is-key-nn5-chronos, gift-eval-short-horizon,
+- **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 9 challenges
+  award no medals: context-is-key-moirai, context-is-key-nn5-chronos,
   moment-anomaly-detection-score, ptb-xl-classification-challenge and its HPS and FE variants,
   time-series-exam-1-1, time-series-library-itransformer-weather-forecast, ucr-anomaly-detection
   (229df50). With one row, every score >= 0 was gold, even for lower-is-better metrics, and
   run-group medal totals counted every valid submission on them as gold.
+- **gift-eval-short-horizon**: `leaderboard.csv` lists the models of GIFT-Eval's own leaderboard
+  (Hugging Face space Salesforce/GIFT-Eval, revision 9d731e061162d5d8440204a2c455583d82e084d4 of
+  2026-10-09), each scored with the new metric from its published MASE on the 5 datasets
+  (b091026, dc7c088). It was a one-row placeholder (dummy, 0, on the MAPE scale), so no medals.
+  Kept: models marked `"testdata_leakage": "No"` with a result on all 5 datasets, 123 of 143;
+  the 20 others are flagged for leakage. Gold is rank 10 (0.71687), silver 24 (0.74775), bronze
+  49 (0.76343), median 0.77337; Seasonal_Naive scores 1.0 and Naive 1.02262. `leaderboard.py`
+  rebuilds the file from the pinned revision.
 - **Non-finite scores** never earn a medal (229df50).
+- **`is_lower_better` in reports** comes from each config's new `grader.lower_is_better`
+  (b94eb3b). It came from the leaderboard's order only, so without a real leaderboard it was None
+  and was written as false: wrong for csdi-implement-model-pm25, csdi-reproduce-pm25 and
+  time-series-library-long-horizon-forecast, where lower is better. A direction that is still
+  unknown (a config without the key) is written as null. Medals are ranked as before: a test
+  checks that every configured direction agrees with the challenge's real leaderboard.
 - **`awards_medals`** is now loaded into `Competition` but stays informational, as on Kaggle:
   new-york-city-taxi-fare-prediction and spaceship-titanic (`false`, real leaderboards) keep
   their medals (696cfe0).
@@ -190,8 +212,12 @@ Rebuilding these challenges gives different files; results on the old data are n
   `latest`; both are checked against an MD5 checksum, also with `--skip-verification` (7789b14).
   The tutorial and the two extracted text files are unchanged; `snorkel-docs.pdf` differs from
   the `latest` build in 66 bytes of build metadata.
-- **gift-eval-short-horizon**: unchanged. Its documented source is the Git LFS bundle, whose zip
-  matches `checksums.yaml`; the Hugging Face download path never matched it.
+- **gift-eval-short-horizon**: the private `test.h5` also holds each test window's MASE scale
+  and seasonal naive forecast, computed from the public test inputs, as the new score needs the
+  windows' history: `labels` is now a group of `target`, `seasonal_error` and `seasonal_naive`,
+  and its checksum is regenerated (4c2294b; two more prepares verify). The zip and the public
+  files are unchanged. The documented source is the Git LFS bundle, whose zip matches
+  `checksums.yaml`; the Hugging Face download path never matched it.
 - **m5-forecasting-accuracy**: the public `sell_prices.csv` has every training week (6,597,201
   rows; was 4,088,360) (d64a36f). Days were compared as strings, so d_2..d_9 and d_200..d_999
   counted as later than d_1913. Scores do not change: the grader reads prices from the answers.
@@ -298,8 +324,8 @@ tolerances), and the two missing-data variants got their own descriptions (5bc01
 1568f6d, c81bfbb, 98b7880, fba602d, 7924a0a, 3383eff, 05da7da, 2110c7e, c011506, 3f97b77, a1ab71c,
 ba20262, 7c8ab69, 1982829, 9d33b49, 2fea25d, 7184ca2, ee128f2, fe08ba1, bf7d9c8, 8eb58e3, b51204b,
 21a5539, 630b7c3, 2c6a043, fa269d1, e30030e, 948a8c4, a9f20f7, f88e57a, cd734df, 617f82d, e232319,
-ddba7bf, c044e1d, 9e5e756, 7c12345 and b8026f5. They change what agents are told, not how they are
-graded.
+ddba7bf, c044e1d, 9e5e756, 7c12345, b8026f5 and 9bf064a (the gift-eval metric). They change what
+agents are told, not how they are graded.
 
 The descriptions of LANL-Earthquake-Prediction, amp-parkinsons-disease-progression-prediction and
 ashrae-energy-prediction, and a new README section, say that their medals compare scores on

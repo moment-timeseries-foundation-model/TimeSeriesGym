@@ -456,6 +456,27 @@ def test_grading_report_directory_is_created_with_its_parents(tmp_path):
     assert len(list(out.glob("*_grading_report.json"))) == 1
 
 
+def test_reports_give_the_direction_of_the_score_without_a_leaderboard(tmp_path):
+    data = tmp_path / "data"
+    expected = {  # no leaderboard, a placeholder, a real one
+        "csdi-reproduce-pm25": True,
+        "time-series-library-long-horizon-forecast": True,
+        "ucr-anomaly-detection": False,
+        "new-york-city-taxi-fare-prediction": True,
+    }
+    entries = []
+    for competition_id in expected:
+        _prepared(data, competition_id, b"x")
+        missing = tmp_path / f"{competition_id}.csv"
+        entries.append({"competition_id": competition_id, "submission_path": str(missing)})
+    out = tmp_path / "reports"
+    grade_jsonl(_jsonl(tmp_path / "s.jsonl", entries), out, Registry(data))
+    (report_file,) = out.iterdir()
+    reports = json.loads(report_file.read_text())["competition_reports"]
+    # was false for the first three: bool(None), as the direction came from a leaderboard only
+    assert {r["competition_id"]: r["is_lower_better"] for r in reports} == expected
+
+
 def test_dict_scores_are_reported_as_json_objects():
     from datetime import datetime
 
