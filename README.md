@@ -239,8 +239,8 @@ resnet-tensorflow-to-pytorch
 
 ### Full Competition Set
 
-The complete set of 31 gradeable challenges is available in
-`TimeSeriesGym/experiments/splits/all.txt` (the two CSDI challenges have no grader yet).
+The complete set of 33 gradeable challenges is available in
+`TimeSeriesGym/experiments/splits/all.txt`.
 
 ## Docker Environment
 

@@ -1,6 +1,6 @@
-import pandas as pd
+"""Graded as csdi-reproduce-pm25: the same evaluation targets, submission format and metric
+(mean absolute error, lower is better)."""
 
+from timeseriesgym.utils import import_fn
 
-def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
-    # TODO: Implement grading logic for the csdi-reproduce-pm25 competition
-    raise NotImplementedError("This competition is not graded yet.")
+grade = import_fn("timeseriesgym.competitions.csdi-reproduce-pm25.grade:grade")
