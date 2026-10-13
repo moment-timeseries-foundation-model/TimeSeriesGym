@@ -5,7 +5,7 @@ Volatility is one of the most prominent terms you'll hear on any trading floor â
 
 As a leading global electronic market maker, Optiver is dedicated to continuously improving financial markets, creating better access and prices for options, ETFs, cash equities, bonds and foreign currencies on numerous exchanges around the world. Optiver's teams have spent countless hours building sophisticated models that predict volatility and continuously generate fairer options prices for end investors. However, an industry-leading pricing algorithm can never stop evolving, and there is no better place than Kaggle to help Optiver take its model to the next level.
 
-In the first three months of this competition, you'll build models that predict short-term volatility for hundreds of stocks across different sectors. You will have hundreds of millions of rows of highly granular financial data at your fingertips, with which you'll design your model forecasting volatility over 10-minute periods. In this version of the competition, your models will be evaluated on stocks held out from the original training data, over the same time buckets (`time_id`s) as the training stocks.
+In the first three months of this competition, you'll build models that predict short-term volatility for hundreds of stocks across different sectors. You will have hundreds of millions of rows of highly granular financial data at your fingertips, with which you'll design your model forecasting volatility over 10-minute periods. In this version of the competition, your models will be evaluated on stocks held out from the original training data, at time buckets (`time_id`s) whose targets are held out from the training data.
 
 Through this competition, you'll gain invaluable insight into volatility and financial market structure. You'll also get a better understanding of the sort of data science problems Optiver has faced for decades. We look forward to seeing the creative approaches the Kaggle community will apply to this ever complex but exciting trading challenge.
 
@@ -41,7 +41,7 @@ row_id,target
 
 This dataset contains stock market data relevant to the practical execution of trades in the financial markets. In particular, it includes order book snapshots and executed trades. With one second resolution, it provides a uniquely fine grained look at the micro-structure of modern financial markets.
 
-`book_test.parquet`, `trade_test.parquet` and `test.csv` contain the complete test inputs: 12 stocks held out from the original training data, with 45,959 target values to predict over the same time buckets as the 100 training stocks.
+`book_test.parquet`, `trade_test.parquet` and `test.csv` contain the complete test inputs: 12 stocks held out from the original training data, with 11,496 target values to predict at 958 time buckets, a quarter of the original 3,830 chosen at random. `train.csv` has the targets of the other 100 stocks at the other 2,872 time buckets: it has no target at a test time bucket, for any stock. The book and trade files hold every stock's data at every time bucket, the test time buckets included, as in the original competition, which gave the order book and trades of the test period but not their targets: `book_test.parquet` and `trade_test.parquet` for the 12 test stocks, `book_train.parquet` and `trade_train.parquet` for the 100 training stocks.
 
 ### Missing Data
 

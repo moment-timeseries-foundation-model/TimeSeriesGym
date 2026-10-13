@@ -11,6 +11,8 @@ from timeseriesgym.grade_code_helper import (
 )
 from timeseriesgym.utils import InvalidSubmissionError, get_logger
 
+from . import hidden_variant
+
 logger = get_logger(__name__)
 
 SCORE_KEYS = (
@@ -21,6 +23,9 @@ SCORE_KEYS = (
     "defined_functions",
     "executed_functions",
 )
+# the calls of `stomp`: each test case on the public inputs and on its hidden variant
+# (hidden_variant.py), whose inputs the sandbox computes from the public ones
+CASES = ("self", "self_variant", "join", "join_variant")
 
 
 def _keep_outputs(work: Path, case: str, outputs, n: int) -> dict:
@@ -61,29 +66,36 @@ def run_submission(work: Path, job: dict) -> None:
         f"{function_scores['total_functions']}",
     }
 
-    # task-specific grading: outputs need to be consistent with the answers
+    # task-specific grading: the outputs of each test case and of its hidden variant, which
+    # the trusted half compares with the answers
     stomp_func = load_attr(submission_module, attr_name="stomp", attr_type="function")
     cases = None
 
     if stomp_func:
-        # test case in config.yaml: only ref_data is provided (self-join)
-        try:
-            stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
-            outputs = stomp_func(**stomp_args)
-        except Exception as e:
-            logger.error(f"Error calling the stomp function (self-join): {e}")
-            outputs = None
-        cases = {"self": _keep_outputs(work, "self", outputs, 6)}
-
-        # task-specific test case: both ref_data and query_data are provided (join similarity)
-        try:
-            stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
-            stomp_args["query_data"] = np.load(coding_config["input_data_dir"] / "query_data.npy")
-            outputs = stomp_func(**stomp_args)
-        except Exception as e:
-            logger.error(f"Error calling the stomp function (join similarity): {e}")
-            outputs = None
-        cases["join"] = _keep_outputs(work, "join", outputs, 2)
+        stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
+        ref_data = stomp_args["ref_data"]
+        query_data = np.load(coding_config["input_data_dir"] / "query_data.npy")
+        variant = hidden_variant.transform
+        inputs = {
+            # test case in config.yaml: only ref_data is provided (self-join)
+            "self": (ref_data, None),
+            "self_variant": (variant(ref_data), None),
+            # task-specific test case: both ref_data and query_data are provided (join similarity)
+            "join": (ref_data, query_data),
+            "join_variant": (variant(ref_data), variant(query_data)),
+        }
+        cases = {}
+        for case, (ref, query) in inputs.items():
+            label = "self-join" if query is None else "join similarity"
+            try:
+                query = None if query is None else np.array(query)
+                outputs = stomp_func(
+                    **{**stomp_args, "ref_data": np.array(ref), "query_data": query}
+                )
+            except Exception as e:
+                logger.error(f"Error calling the stomp function ({label}): {e}")
+                outputs = None
+            cases[case] = _keep_outputs(work, case, outputs, 6 if query is None else 2)
 
     sandbox.write_json(work, "result.json", {"scores": scores, "cases": cases})
 
@@ -95,6 +107,24 @@ def _case(cases, case: str) -> dict:
     return info
 
 
+def _case_passes(info: dict, outputs, expected: np.ndarray, join: bool, case: str) -> bool:
+    """Whether one call returned the `expected` columns (mp, pi, ...) and, for join
+    similarity, None for the right and left profiles."""
+    if not info["six"]:
+        return False
+    try:
+        if outputs is None:
+            raise ValueError(info.get("error"))
+        is_output_close = outputs.shape == expected.shape and np.allclose(
+            outputs, expected, rtol=1e-3, atol=1e-5
+        )
+    except Exception as e:
+        logger.error(f"Error testing stomp outputs for {case}: {e}")
+        return False
+    # rmp, rpi, lmp, lpi should all be None in join similarity
+    return bool(is_output_close) and (not join or info.get("rest_none") is True)
+
+
 def grade_code(
     submission_file_path: Path,
     answers: pd.DataFrame,
@@ -102,7 +132,8 @@ def grade_code(
     private_paths: tuple[Path, ...] | None = None,
 ) -> dict:
     # The submission runs in the grading sandbox (run_submission); this compares its outputs
-    # with the answers.
+    # with the answers. Each test case passes only if the outputs also match on its hidden
+    # variant, whose expected outputs are derived from the answers (hidden_variant.py).
     with sandbox.run_code(
         f"{__name__}:run_submission", submission_file_path, coding_config, private_paths
     ) as run:
@@ -110,43 +141,29 @@ def grade_code(
         scores = sandbox.scores(result, SCORE_KEYS)
         cases = result.get("cases")
         if cases is not None:
-            cases = {case: _case(cases, case) for case in ("self", "join")}
+            cases = {case: _case(cases, case) for case in CASES}
             arrays = {case: run.array(f"{case}.npy") for case in cases}
 
     test_metric_pass, total_test_metric = 0, 2
 
     if cases is not None:
-        # test case in config.yaml: only ref_data is provided (self-join)
+        stomp_args = coding_config["required_functions"]["stomp"]["required_args"]
+        query_data = np.load(coding_config["input_data_dir"] / "query_data.npy")
+        n_query_windows = len(query_data) - int(stomp_args["window_size"]) + 1
         true_outputs = answers.to_numpy()
-        true_outputs = true_outputs[:, :6]  # outputs for self-join
-        if cases["self"]["six"]:
-            try:
-                if arrays["self"] is None:
-                    raise ValueError(cases["self"].get("error"))
-                mp_outputs = arrays["self"]
-                is_output_close = np.allclose(mp_outputs, true_outputs, rtol=1e-3, atol=1e-5)
-
-                if is_output_close:
-                    test_metric_pass += 1
-            except Exception as e:
-                logger.error(f"Error testing stomp outputs for self-join: {e}")
-
-        # task-specific test case: both ref_data and query_data are provided (join similarity)
-        true_outputs = answers.to_numpy()
-        true_outputs = true_outputs[:, 6:]  # outputs for join similarity
-        if cases["join"]["six"]:
-            try:
-                if arrays["join"] is None:
-                    raise ValueError(cases["join"].get("error"))
-                mp_outputs = arrays["join"]
-                is_output_close = np.allclose(mp_outputs, true_outputs, rtol=1e-3, atol=1e-5)
-                # rmp, rpi, lmp, lpi should all be None in join similarity
-                is_output_none = cases["join"].get("rest_none") is True
-
-                if is_output_close and is_output_none:
-                    test_metric_pass += 1
-            except Exception as e:
-                logger.error(f"Error testing stomp outputs for join similarity: {e}")
+        self_join, join = true_outputs[:, :6], true_outputs[:, 6:]
+        expected = {
+            "self": self_join,
+            "self_variant": hidden_variant.expected_self_join(self_join),
+            "join": join,
+            "join_variant": hidden_variant.expected_join(join, n_query_windows),
+        }
+        for test, label in (("self", "self-join"), ("join", "join similarity")):
+            if all(
+                _case_passes(cases[case], arrays[case], expected[case], test == "join", label)
+                for case in (test, f"{test}_variant")
+            ):
+                test_metric_pass += 1
 
     scores["test_metric"] = f"{test_metric_pass}/{total_test_metric}"
     return scores

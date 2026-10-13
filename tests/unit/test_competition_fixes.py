@@ -10,6 +10,7 @@ import importlib
 import pickle
 import re
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -411,8 +412,45 @@ from torch.utils.tensorboard import SummaryWriter
 def main(cfg: DictConfig) -> None:
     writer = SummaryWriter(log_dir="runs/x")
     writer.add_scalar("loss", 1.0, 0)
-    writer.add_graph(cfg.model, None)
+    model = hydra.utils.instantiate(cfg.model)
+    writer.add_graph(model, None)
 """
+
+
+def _uvarint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte, n = n & 0x7F, n >> 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _field(number: int, payload: bytes) -> bytes:  # a length-delimited protobuf field
+    return _uvarint(number << 3 | 2) + _uvarint(len(payload)) + payload
+
+
+def _event_file(path: Path, scalars: str | None = "simple_value") -> Path:
+    """An event file as SummaryWriter writes it: TFRecord records of a file_version Event, then
+    an Event whose summary holds a scalar (or none, as after add_graph alone)."""
+    crc = _fe().masked_crc32c
+
+    def record(data: bytes) -> bytes:
+        length = struct.pack("<Q", len(data))
+        return length + struct.pack("<I", crc(length)) + data + struct.pack("<I", crc(data))
+
+    wall_time = _uvarint(1 << 3 | 1) + struct.pack("<d", 1.0)  # double wall_time = 1
+    data = record(wall_time + _field(3, b"brain.Event:2"))  # string file_version = 3
+    value = _field(1, b"Loss/train")  # Summary.Value: string tag = 1
+    if scalars == "simple_value":
+        value += _uvarint(2 << 3 | 5) + struct.pack("<f", 0.5)  # float simple_value = 2
+    else:  # metadata = 9, plugin_data = 1, plugin_name = 1: the newer tensor-style scalars
+        value += _field(9, _field(1, _field(1, b"scalars")))
+    if scalars is not None:  # int64 step = 2, Summary summary = 5, repeated Value value = 1
+        data += record(wall_time + _uvarint(2 << 3) + _uvarint(1) + _field(5, _field(1, value)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
 
 
 def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
@@ -427,13 +465,56 @@ def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
     (tmp_path / "runs").mkdir()
     (tmp_path / "runs" / "x").write_text("not a log")  # any file used to count as a log
     assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(0.8)
-    (tmp_path / "runs" / "events.out.tfevents.1.host").write_bytes(b"\0")
+    _event_file(tmp_path / "runs" / "events.out.tfevents.1.host")
     assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(1.0)
 
-    assert ast.dump(ast.parse(fe.strip_comments(TRAIN + "  # note\n"))) == ast.dump(
-        ast.parse(TRAIN)
+
+def test_feature_rubric_does_not_count_code_in_strings():
+    fe = _fe()
+    quoted = f"CODE = {TRAIN!r}\n"  # every pattern the checks looked for, in a string literal
+    assert ast.literal_eval(ast.parse(quoted).body[0].value) == TRAIN
+    assert fe.evaluate_tensorboard_usage(quoted, Path("/nonexistent")) == 0.0  # was 0.8
+    assert fe.evaluate_hydra_usage(quoted, "model:\n  hidden: 8\n") == pytest.approx(0.2)  # was 0.8
+    aliased = TRAIN.replace("import hydra", "import hydra.utils").replace(
+        "from torch.utils.tensorboard import SummaryWriter", "import torch.utils.tensorboard as tb"
     )
-    assert "#" not in fe.strip_comments("def broken(:  # comment\n")
+    aliased = aliased.replace("SummaryWriter(", "tb.SummaryWriter(")
+    assert fe.evaluate_tensorboard_usage(aliased, Path("/nonexistent")) == pytest.approx(0.8)
+    assert fe.evaluate_hydra_usage(aliased, "model:\n  hidden: 8\n") == pytest.approx(1.0)
+
+
+def test_feature_rubric_needs_an_event_file_with_scalars(tmp_path):
+    fe = _fe()
+    # the CRC32C check value of b"123456789" is 0xE3069283; TFRecord rotates it and adds a delta
+    rotated = ((0xE3069283 >> 15) | (0xE3069283 << 17)) & 0xFFFFFFFF
+    assert fe.masked_crc32c(b"123456789") == (rotated + 0xA282EAD8) & 0xFFFFFFFF
+
+    runs = tmp_path / "runs"
+    real_file = _event_file(tmp_path / "real" / "events.out.tfevents.1.host")
+    real = real_file.read_bytes()
+    placeholders = {
+        "empty": b"",
+        "one byte": b"\0",  # passed before
+        "text": b"not an event file\n" * 10,
+        "truncated": real[:-3],
+        "a corrupted record": real[:20] + bytes([real[20] ^ 1]) + real[21:],
+        "no scalars (add_graph alone)": None,
+    }
+    for name, data in placeholders.items():
+        path = runs / "x" / f"events.out.tfevents.{len(name)}.host"
+        if data is None:
+            _event_file(path, scalars=None)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        assert fe.find_event_file(runs) is None, name
+        path.unlink()
+    (runs / "x" / "events.out.tfevents.9.link").symlink_to(real_file)
+    assert fe.find_event_file(runs) is None  # a symbolic link is not followed
+    for scalars in ("simple_value", "plugin"):
+        path = _event_file(runs / "y" / f"events.out.tfevents.{scalars}.host", scalars=scalars)
+        assert fe.find_event_file(runs) == path
+        path.unlink()
 
 
 def test_feature_rubric_accepts_the_type_hints_of_the_descriptions_examples():
@@ -466,8 +547,165 @@ def test_feature_rubric_scores_the_shipped_example_as_before():
     assert fe.has_class_docstrings(trees[0])
     assert fe.has_docstring_sections(trees, ["Args", "Returns"])
     config = (example / "conf" / "config.yaml").read_text()
-    assert fe.evaluate_hydra_usage(train, config) == pytest.approx(1.0)
+    assert fe.evaluate_hydra_usage(train, config, model) == pytest.approx(1.0)
     assert fe.evaluate_tensorboard_usage(train, example) == pytest.approx(0.8)  # no runs/ shipped
+
+
+MODEL_READS_THE_CONFIG = """
+class Net:
+    def __init__(self, config=None):
+        self.hidden = getattr(config.model, "hidden", 8)
+"""
+MODEL_TAKES_VALUES = """
+class Net:
+    def __init__(self, hidden=8):
+        self.hidden = hidden
+
+
+def build(hidden):
+    return Net(hidden)
+"""
+
+
+@pytest.mark.parametrize(
+    "main, body, model, builds",
+    [
+        # the old check: `cfg.model` or `cfg['model']` anywhere in train.py
+        ("cfg", "model = Net()\nprint('model config:', dict(cfg.model))", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net()\ncfg.model", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net()\nnote = 'cfg.model'", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net(cfg)", MODEL_TAKES_VALUES, 0),
+        ("config", "model = Net(config)", MODEL_READS_THE_CONFIG, 1),  # was rejected
+        ("cfg", "model = Net(config=cfg)", MODEL_READS_THE_CONFIG, 1),
+        ("cfg", "model = Net(**cfg.model)", MODEL_TAKES_VALUES, 1),
+        ("cfg", 'model = Net(cfg["model"].hidden)', MODEL_TAKES_VALUES, 1),  # was rejected
+        ("cfg", "section = cfg.model\nmodel = build(section.hidden)", MODEL_TAKES_VALUES, 1),
+        ("cfg", "model = hydra.utils.instantiate(cfg.model)", "", 1),
+    ],
+    ids=[
+        "print",
+        "bare reference",
+        "string",
+        "config ignored by the model",
+        "config read by the model",
+        "config as a keyword",
+        "unpacked section",
+        "subscripted section",
+        "value of an assigned section",
+        "hydra instantiate",
+    ],
+)
+def test_feature_rubric_needs_the_model_built_from_the_config(main, body, model, builds):
+    fe = _fe()
+    train = (
+        "import hydra\nfrom model import Net, build\nfrom omegaconf import DictConfig\n\n\n"
+        f'@hydra.main(config_path="conf", config_name="config")\n'
+        f"def main({main}: DictConfig) -> None:\n"
+        + "".join(f"    {line}\n" for line in body.split("\n"))
+    )
+    assert fe.builds_model_from_config(train, model) == bool(builds)
+    expected = 1.0 if builds else 0.8
+    assert fe.evaluate_hydra_usage(train, "model:\n  hidden: 8\n", model) == pytest.approx(expected)
+
+
+def _flake8_reports(monkeypatch, fe, problems: str = ""):
+    """flake8 is not installed everywhere the tests run: a run of it that reports `problems`."""
+    run = subprocess.CompletedProcess([], 1 if problems else 0, problems, "")
+    monkeypatch.setattr(fe.subprocess, "run", lambda *args, **kwargs: run)
+
+
+FE_CONFIG = {
+    "model_code_file": "model.py",
+    "training_file": "train.py",
+    "config_file": "config.yaml",
+}
+
+
+@pytest.mark.parametrize(
+    "failed_check, old_score",
+    [
+        (None, 0.9375),
+        ("no event file", 0.8875),
+        ("a flake8 problem in each file", 0.93056),
+        ("an unannotated function", 0.90972),
+        ("no model section in the config", 0.8875),
+    ],
+)
+def test_feature_enhancement_score_is_the_accuracy_gated_by_the_rubric(
+    tmp_path, monkeypatch, failed_check, old_score
+):
+    fe = _fe()
+    project = tmp_path / "project"  # the shipped example, with the logs that training writes
+    shutil.copytree(Path(fe.__file__).parent / "example", project)
+    _event_file(project / "runs" / "x" / "events.out.tfevents.1.host")
+    answers = pd.read_csv(project / "submission.csv")
+    answers.loc[:24, "label"] = (answers.loc[:24, "label"] + 1) % 5  # accuracy 0.75
+    _flake8_reports(monkeypatch, fe)
+    if failed_check == "no event file":
+        shutil.rmtree(project / "runs")
+    elif failed_check == "a flake8 problem in each file":
+        _flake8_reports(monkeypatch, fe, "train.py:1:1: E203 whitespace before ':'\n")
+    elif failed_check == "an unannotated function":
+        with open(project / "model.py", "a") as f:
+            f.write('\n\ndef helper(x):\n    """Return x."""\n    return x\n')
+    elif failed_check == "no model section in the config":
+        (project / "conf" / "config.yaml").write_text("name: run\n")
+
+    scores = fe.grade_feature_enhancement(project, answers, FE_CONFIG, project)
+    sub_scores = [scores["tensorboard_score"], scores["code_quality_score"], scores["hydra_score"]]
+    # the old score was the mean of the sub-scores and the accuracy
+    assert (sum(sub_scores) + scores["accuracy"]) / 4 == pytest.approx(old_score, abs=1e-5)
+    assert scores["accuracy"] == pytest.approx(0.75)
+    assert scores["overall_score"] == (0.75 if failed_check is None else 0.0)
+    assert scores["rubric_passed"] == (failed_check is None)
+    assert (min(sub_scores) == 1.0) == (failed_check is None)
+
+
+def test_feature_rubric_needs_a_working_flake8(tmp_path, monkeypatch):
+    fe = _fe()
+    files = [str(tmp_path / "model.py"), str(tmp_path / "train.py")]
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("flake8")
+
+    monkeypatch.setattr(fe.subprocess, "run", missing)
+    with pytest.raises(RuntimeError, match="flake8"):  # it gave half the lint credit
+        fe.check_linting(*files)
+    crashed = subprocess.CompletedProcess([], 1, "", "Traceback (most recent call last): ...")
+    monkeypatch.setattr(fe.subprocess, "run", lambda *args, **kwargs: crashed)
+    with pytest.raises(RuntimeError, match="flake8"):  # it counted as no problems
+        fe.check_linting(*files)
+
+
+def test_feature_rubric_runs_flake8_without_configs_or_noqa_and_allows_black_slices(
+    tmp_path, monkeypatch
+):
+    fe = _fe()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(fe.subprocess, "run", run)
+    fe.check_linting("model.py", "train.py")
+    for argv in calls:  # it ran `flake8 --max-line-length=100 <file>`
+        assert argv[0] == "flake8"
+        assert {"--isolated", "--disable-noqa", "--extend-ignore=E203"} <= set(argv)
+
+
+@pytest.mark.skipif(shutil.which("flake8") is None, reason="flake8 is not installed")
+def test_feature_rubric_lint_with_flake8(tmp_path, monkeypatch):
+    fe = _fe()
+    monkeypatch.chdir(tmp_path)
+    clean = tmp_path / "clean.py"
+    clean.write_text('"""Doc."""\n\nX = [1, 2, 3]\nY = X[1 : len(X) - 1]\n')  # black's slice
+    noqa = tmp_path / "noqa.py"
+    noqa.write_text('"""Doc."""\n\nX = "' + "x" * 100 + '"  # noqa: E501\n')
+    assert fe.check_linting(str(clean), str(clean))[0] == 1.0
+    assert fe.check_linting(str(clean), str(noqa))[0] < 1.0  # `# noqa` does not count
+    (tmp_path / "setup.cfg").write_text("[flake8]\nignore = E501\n")
+    assert fe.check_linting(str(clean), str(noqa))[0] < 1.0  # nor does a config file
 
 
 # ---------------------------------------------------------------- amp prepare
@@ -777,6 +1015,33 @@ def test_ucr_description_shows_the_shipped_dataset_helper():
     assert helper.read_text() in (directory / "description.md").read_text()
     public = load_yaml(directory / "checksums.yaml")["public"]
     assert public["anomaly_dataset.py"] == get_checksum(helper)  # prepare copies it to public/
+
+
+def test_ucr_prepare_reads_the_archives_indices_as_one_based_and_inclusive(tmp_path):
+    import h5py
+
+    prepare = _module("ucr-anomaly-detection", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    files = raw / "AnomalyDatasets_2021" / "UCR_TimeSeriesAnomalyDatasets2021" / "FilesAreInHere"
+    files = files / "UCR_Anomaly_FullData"
+    files.mkdir(parents=True)
+    public.mkdir()
+    private.mkdir()
+    # As in the archive's 005: points 1-4000 (1-based) are training data, and the anomaly is
+    # points 5391-5392, of length 5392 - 5391 + 1; the distorted point is the 5391st.
+    series = np.sin(np.arange(8184) / 4)
+    series[5390] -= 8.0
+    name = "005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1"
+    np.savetxt(files / f"{name}_4000_5391_5392.txt", series)
+    prepare(raw, public, private)
+
+    train = pd.read_csv(public / "train" / f"{name}.csv").to_numpy().ravel()
+    test = pd.read_csv(public / "test" / f"{name}.csv").to_numpy().ravel()
+    assert np.allclose(train, series[:4000]) and np.allclose(test, series[4000:])
+    with h5py.File(private / "labels.h5") as f:
+        labels = f["labels"][name][:]
+    assert np.flatnonzero(labels).tolist() == [1390, 1391]  # was [1391]: the dip was normal
+    assert np.argmin(test) == 1390
 
 
 # ---------------------------------------------------------------- MIT-BIH download

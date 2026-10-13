@@ -17,19 +17,19 @@ Each dataset consists of:
 The datasets vary in length, sampling frequency, and the nature of the anomalies they contain. Datasets that you need to process are specified in datasets.txt, each line is a dataset name. You can pass this name to the `UCRAnomalyDataset` class to load the dataset.
 
 ## Evaluation
-Submissions are evaluated using the adjusted F1 score, which balances precision and recall in anomaly detection. The scoring function finds the optimal threshold of the score that maximizes the F1 score. When the optimal threshold is found, the best F1 score is used as the score for that dataset.
+Submissions are evaluated by the average precision (AP) of your anomaly scores, the area under the precision-recall curve, computed on each dataset's point labels and averaged over the datasets. No threshold is needed: only the order of your scores within a dataset matters.
 
-### Adjusted F1 Score
-The adjusted F1 score addresses a common challenge in time series anomaly detection: the exact boundaries of anomalies are often ambiguous. The evaluation metric works as follows:
+### Average Precision
+For each dataset, every point of the test set is labelled 1 if it lies in the anomalous segment and 0 otherwise. The evaluation works as follows:
 
 1. For each dataset, your model provides an anomaly score for each data point (higher values indicate higher likelihood of anomaly)
-2. The evaluation divides the range of scores (from their minimum to their maximum) into 100 evenly spaced thresholds
-3. At each threshold, predictions are converted to binary (anomaly/not anomaly): points with a score at or above the threshold are anomalies
-4. Before calculating the F1 score, predictions are adjusted to account for slight misalignments in anomaly boundaries: if any point of the true anomalous segment is predicted as an anomaly, the whole segment counts as detected
-5. The F1 score is calculated for each threshold, and the maximum F1 score is used as the final score for that dataset
-6. The overall score is the mean of the dataset scores over all datasets in `datasets.txt`
+2. Each distinct score is a threshold: the points with a score at or above it are predicted as anomalies. Precision is the share of these points that are labelled 1, and recall is the share of the labelled points that are among them
+3. The dataset's score is the average precision: the precision at each threshold, weighted by the increase in recall from the previous threshold, summed over the thresholds (as `sklearn.metrics.average_precision_score(labels, scores)` computes it)
+4. The overall score is the mean of the dataset scores over all datasets in `datasets.txt`
 
-This adjustment ensures that your model is rewarded for correctly identifying anomalous regions, even if the exact points of anomaly onset/offset are slightly misaligned.
+A dataset scores 1.0 if every point of its anomalous segment has a higher score than every other point. Points with equal scores are predicted together, so constant or random scores earn about the share of anomalous points, which is small. Every normal point that is ranked above an anomalous one lowers the precision, so give the highest scores to the points of the anomaly itself rather than to a wide window around it.
+
+The scores must be finite numbers.
 
 ## Data Loading
 Use the provided `UCRAnomalyDataset` class in `anomaly_dataset.py` to load datasets:

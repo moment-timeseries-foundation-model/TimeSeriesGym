@@ -25,6 +25,7 @@ import pandas as pd
 import pytest
 import torch
 
+from tests.unit.test_code_graders import _r_csv, _source_of_brute_force, brute_force_stomp
 from timeseriesgym import sandbox
 from timeseriesgym.grade import grade_code, grade_hyperparameter_search
 from timeseriesgym.registry import Registry
@@ -34,27 +35,14 @@ STOMP = "stomp-R-to-python"
 RESNET = "resnet-tensorflow-to-pytorch"
 OPTIVER = "optiver-realized-volatility-prediction-hyperparameter-search"
 SEARCH = "import optuna\nstudy = optuna.create_study()\nstudy.optimize(objective, n_trials=20)\n"
-STOMP_COLUMNS = [
-    *(f"mp_self_{c}" for c in ("mp", "pi", "rmp", "rpi", "lmp", "lpi")),
-    "mp_join_mp",
-    "mp_join_pi",
-]
 
-# Not STOMP: a function of the inputs with the outputs' types and shapes, and whose outputs the
-# test answers are.
-STOMP_SUBMISSION = """
-import numpy as np
-
-
-def stomp(ref_data, query_data, window_size, exclusion_zone=0.5, verbose=2):
-    x = np.asarray(ref_data, dtype=float)
-    n = len(x) - window_size + 1
-    mp = np.array([x[i : i + window_size].std() for i in range(n)])
-    pi = np.arange(1, n + 1, dtype=float)
-    if query_data is None:
-        return mp, pi, mp + 1, pi + 1, np.full(n, np.inf), np.full(n, -np.inf)
-    return mp * float(np.mean(query_data)), pi, None, None, None, None
-"""
+# STOMP by its definition (tests/unit/test_code_graders.py): the grader also runs each test case
+# on a hidden variant, whose expected outputs follow from STOMP's invariances.
+STOMP_SUBMISSION = _source_of_brute_force().replace(
+    "\nstomp = brute_force_stomp\n",
+    "\ndef stomp(ref_data, query_data, window_size, exclusion_zone=0.5, verbose=2):\n"
+    "    return brute_force_stomp(ref_data, query_data, window_size, exclusion_zone, verbose)\n",
+)
 
 
 def _stomp_competition(tmp_path: Path):
@@ -62,16 +50,12 @@ def _stomp_competition(tmp_path: Path):
     competition = Registry(tmp_path / "data").get_competition(STOMP)
     competition.public_dir.mkdir(parents=True)
     competition.private_dir.mkdir(parents=True)
-    rng = np.random.default_rng(0)
-    ref, query = rng.normal(size=550), rng.normal(size=550)
+    rng = np.random.default_rng(7)
+    ref, query = rng.normal(size=(2, 550)).cumsum(axis=1)
     np.save(competition.public_dir / "ref_data.npy", ref)
     np.save(competition.public_dir / "query_data.npy", query)
-    namespace = {}
-    exec(STOMP_SUBMISSION, namespace)
-    self_join = namespace["stomp"](ref, None, 30)
-    join = namespace["stomp"](ref, query, 30)
-    answers = np.column_stack([*self_join, *join[:2]])
-    pd.DataFrame(answers, columns=STOMP_COLUMNS).to_csv(competition.answers, index=False)
+    self_join, join = brute_force_stomp(ref, None, 30), brute_force_stomp(ref, query, 30)
+    competition.answers.write_text(_r_csv(self_join, join))
     return competition
 
 

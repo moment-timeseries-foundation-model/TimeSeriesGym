@@ -73,10 +73,14 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
             else:
                 df = pd.read_csv(datasets_path / file, header=None)
 
+            # The archive's indices are 1-based and inclusive (it was made in MATLAB): points 1 to
+            # `end_training_data` are the training data, and the anomaly is points `anomaly_begin`
+            # to `anomaly_end`, of length end - begin + 1. Read as 0-based, the labels started one
+            # point late and missed the first point of each anomaly.
             training_df = df.iloc[: dataset_dict["end_training_data"]]
             test_df = df.iloc[dataset_dict["end_training_data"] :]
-            anomaly_begin = int(dataset_dict["anomaly_begin"]) - int(
-                dataset_dict["end_training_data"]
+            anomaly_begin = (
+                int(dataset_dict["anomaly_begin"]) - 1 - int(dataset_dict["end_training_data"])
             )
             anomaly_end = int(dataset_dict["anomaly_end"]) - int(dataset_dict["end_training_data"])
 

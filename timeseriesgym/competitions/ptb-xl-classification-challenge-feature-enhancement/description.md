@@ -13,45 +13,51 @@ Help improve cardiac diagnostics and potentially save lives!
 
 ## Grading Criteria - Detailed Requirements
 
-Your solution will be evaluated using the following specific criteria. Each section accounts for 25% of your final score:
+Your score is the accuracy of your `submission.csv` on the test set, provided that your solution passes **every** check of criteria 1-3 below; if any check fails, your score is 0. Each check is pass/fail. The checks read `train.py`, `model.py` and `conf/config.yaml`, and look for TensorBoard event files in your submission folder. Your code is parsed, not run: the checks of `train.py` look at its statements, so code in comments or string literals does not count.
 
-### 1. Traceability and Logging (25%)
+### 1. Traceability and Logging
 
-Implement comprehensive logging and experiment tracking with TensorBoard. Your solution must include ALL of the following:
+Implement logging and experiment tracking with TensorBoard. The code of `train.py` must contain ALL of the following:
 
-- **TensorBoard Import**: You must have `from torch.utils.tensorboard import SummaryWriter`
-- **SummaryWriter Initialization**: Initialize a SummaryWriter with an appropriate log directory (e.g., `writer = SummaryWriter(log_dir='runs/ecg_classification')`)
-- **Metric Logging**: Log training and validation metrics using `writer.add_scalar()` (loss, accuracy, learning rate, etc.)
-- **Model Graph Logging**: Log model architecture using `writer.add_graph(model, sample_input)`
-- **Actual Log Files**: Generate TensorBoard log files in a directory like "runs/", "logs/", or "tb_logs/"
-- **Writer Closure**: Remember to close the writer with `writer.close()` at the end of training
+- **TensorBoard Import**: `from torch.utils.tensorboard import SummaryWriter` (or `import torch.utils.tensorboard`)
+- **SummaryWriter Initialization**: a `SummaryWriter(...)` call with an appropriate log directory (e.g., `writer = SummaryWriter(log_dir='runs/ecg_classification')`)
+- **Metric Logging**: `writer.add_scalar(...)` calls that log training and validation metrics (loss, accuracy, learning rate, etc.)
+- **Model Graph Logging**: a `writer.add_graph(model, sample_input)` call that logs the model architecture
 
-### 2. Code Quality and Documentation (25%)
+And your submission folder must contain:
 
-Ensure code quality with ALL of the following:
+- **Actual Log Files**: at least one TensorBoard event file under `runs/`, `logs/` or `tb_logs/`, named `events.out.tfevents.*`, that holds at least one scalar logged with `add_scalar`, as `SummaryWriter` writes it (a valid TFRecord file of TensorBoard events). A placeholder file with such a name does not count. Run your training so that these files are written, and keep them.
 
-- **Module Docstrings**: Both model.py and train.py must begin with comprehensive module-level docstrings
-- **Type Annotations**: Every function and method must annotate all of its parameters (except `self` and `cls`) and its return type (e.g., `def train_epoch(model: nn.Module, ...) -> tuple[float, float]:`); `__init__` may leave out `-> None`
-- **Class Docstrings**: All classes must have docstrings explaining their purpose and behavior
-- **Function Docstrings**: All substantive functions (more than 2-3 lines) must have docstrings
-- **Args/Returns Sections**: Docstrings must include `Args:` and `Returns:` sections that clearly describe parameters and return values
-- **PEP 8 Compliance**: Code must adhere to PEP 8 guidelines (max line length 100 characters)
-- **Code Structure**: Functions should be well-organized with proper naming conventions
-- **Linting**: Code should pass basic flake8 linting with minimal errors
+Close the writer with `writer.close()` at the end of training, so that the logs are complete.
 
-### 3. Configuration Management (25%)
+### 2. Code Quality and Documentation
 
-Use Hydra for configuration management with ALL of the following elements:
+`model.py` and `train.py` must pass ALL of the following:
 
-- **Hydra Import**: You must have `import hydra` in your training script
-- **Hydra Decorator**: Use the `@hydra.main` decorator on your main function
-- **Config Import**: Import `OmegaConf` and/or `DictConfig` from `omegaconf`
-- **Config Usage**: Access model parameters from the config object (e.g., `cfg.model` or `cfg['model']`)
-- **YAML Config File**: Create a proper YAML config file in a `conf` directory that contains a `model` section with appropriate parameters
+- **Valid Python**: both files parse as Python
+- **Module Docstrings**: both files begin with a module-level docstring
+- **Type Annotations**: in each file, every function and method annotates all of its parameters (except `self` and `cls`) and its return type (e.g., `def train_epoch(model: nn.Module, ...) -> tuple[float, float]:`); `__init__` may leave out `-> None`. Each file defines at least one function.
+- **Class Docstrings**: `model.py` defines at least one class, and every class in it has a docstring
+- **Function Docstrings**: in each file, every function with more than 3 statements directly in its body has a docstring, and at least one documented function has 3 or more (counting the docstring)
+- **Args/Returns Sections**: `Args:` and `Returns:` sections in your docstrings (each must appear in at least one docstring of the two files; describe the parameters and return values of every function, as in the example below)
+- **Linting (PEP 8)**: `flake8 --isolated --disable-noqa --extend-ignore=E203 --max-line-length=100` reports no problems in either file. flake8's default checks apply, except E203 (the whitespace that black and ruff put around a slice's colon, as in `x[i : i + 1]`); `# noqa` comments and flake8 configuration files are ignored.
 
-### 4. Model Accuracy (25%)
+### 3. Configuration Management
 
-Ensure your model achieves good classification performance.
+Use Hydra for configuration management. The code of `train.py` must contain ALL of the following:
+
+- **Hydra Import**: `import hydra` (or `from hydra import ...`)
+- **Hydra Decorator**: the `@hydra.main(...)` decorator on your main function, written as `hydra.main`
+- **Config Import**: `OmegaConf` and/or `DictConfig`, imported from `omegaconf` (e.g., `from omegaconf import DictConfig`)
+- **Config Usage**: the model is built from the config's `model` section: `train.py` passes the section (`cfg.model`, `cfg['model']`) or a value read from it (e.g., `cfg.model.hidden_dims`) to a class or function of `model.py` or to `hydra.utils.instantiate`, or it passes the config to a class or function of `model.py` that reads the `model` section of its parameter (as `ECGClassifier(cfg)` in the example below, whose `__init__` reads `config.model`). Printing `cfg.model`, or only mentioning it, does not count.
+
+And your solution must contain:
+
+- **YAML Config File**: `conf/config.yaml`, with a `model` section that holds the model's parameters
+
+### 4. Model Accuracy
+
+If every check above passes, your score is the classification accuracy of `submission.csv`: the fraction of test ECGs whose label you predict correctly. Otherwise your score is 0. The grader also reports a sub-score for each of criteria 1-3 (the weighted share of its checks that pass, with partial credit for fewer than 20 flake8 problems); the sub-scores do not change your score.
 
 ## Code Requirements
 
@@ -168,14 +174,12 @@ Your submission directory must contain the following files:
 
 ### Metric
 
-Your solution will be evaluated on three dimensions:
+Your score is the classification accuracy of `submission.csv` if your solution passes every check of the Grading Criteria above, and 0 otherwise:
 
-1. **Traceability**: Proper implementation of TensorBoard logging
-2. **Code Quality**: Documentation, linting adherence, and code organization
-3. **Configuration**: Proper use of Hydra for experiment configuration
-4. **Feasibility**: Your model should simply work and whole workflow should be complete and output a valid `submission.csv` file.
-
-The final score will combine these engineering criteria with the model's classification accuracy.
+1. **Traceability**: TensorBoard logging, with its event files in your submission
+2. **Code Quality**: Documentation, type annotations, and no flake8 problems
+3. **Configuration**: Hydra configuration with a `conf/config.yaml`
+4. **Feasibility**: Your model should simply work: the whole workflow must run and output a valid `submission.csv` file, whose accuracy is your score.
 
 ### Submission Format
 
