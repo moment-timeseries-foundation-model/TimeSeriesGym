@@ -210,6 +210,42 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **Telemetry**: deepeval is imported only by the judge commands, after opting out; its cache
   moves to the user cache directory (e232319).
 
+## Agents' network and API keys
+
+Agent runs made before these changes had the internet and their provider keys; runs made after
+have neither, so their results are not directly comparable, least of all on the challenges that
+install packages or download weights at run time (agents/README.md lists them).
+
+- **No network** (3299c6d): agent containers were on Docker's default network, so agent code could
+  download the public data the challenges are built from (Kaggle, UCR, PhysioNet, Hugging Face,
+  this repository) and send anything anywhere. They now get Docker's `none` network: loopback
+  only. `run_agent.py --agent-network bridge` (or the name of an operator's network) gives a run
+  group a network; `metadata.json` records it as `agent_network`. `host` and `container:<id>` are
+  refused, and a container config that sets the network is an error.
+- **API keys stay on the host** (0348a4c, 3c96469, b92f1a1, 9d3fb13): `agents/run.py` put the
+  agent config's provider keys into the container's environment, where agent code could read
+  them. Each run now starts a model proxy on the host (`agents/model_proxy.py`) that holds the
+  keys and forwards only POST requests to the providers' model endpoints (OpenAI, Anthropic,
+  OpenRouter, Gemini's OpenAI-compatible API) for the models in the agent's config, up to a
+  request and a time budget (AIDE 1000 requests and 16200 s, MLAgentBench 10000 and 5400 s,
+  OpenHands 2000 and 23400 s). The container gets base URLs with a per-run token and dummy keys,
+  and reaches the proxy through a relay on `127.0.0.1:18080`. Configs give keys under
+  `model_proxy`; `${{ secrets.* }}` in `env_vars` or `kwargs` is refused. The proxy's log
+  (`<run>/model_proxy.jsonl`) holds counts, status codes and sizes, no content or keys.
+- **AIDE's Claude, Llama and Gemini variants** get an OpenAI key too (b92f1a1): their feedback
+  model is `gpt-4o-2024-08-06`, but their configs passed only the other provider's key. The
+  Llama (OpenRouter) and Gemini variants cannot reach their models until the AIDE fork reads
+  `OPENROUTER_BASE_URL` and uses Gemini's OpenAI-compatible API at `GEMINI_BASE_URL`.
+- **OpenHands builds when its image is built** (d98af77): `make build`, `playwright install` and
+  the NVIDIA container toolkit ran at agent start, the first two through a sudo rule for
+  `/agent_build.sh` (504e1ab), which is gone with the script. litellm uses its bundled model price
+  list. OpenHands' Docker runtime still builds its sandbox image at agent start, so OpenHands
+  needs `--agent-network bridge` for now.
+- **MLAgentBench's tiktoken encodings** are fetched when its image is built (d98af77); tiktoken
+  downloaded them on first use.
+- **Tests**: `tests/integration/test_agent_network.py` checks the isolation with a throwaway
+  container and needs Docker (3299c6d).
+
 ## Running agents and compiling submissions
 
 - **Exit codes**: `run_in_container` returns the agent's exit code (it returned `run_dir`), and
