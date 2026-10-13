@@ -54,14 +54,20 @@ def resnet_data(tmp_path_factory):
     return data_dir
 
 
-def _grade_resnet(data_dir, tmp_path, source: str):
+def _grade_resnet(data_dir, tmp_path, source: str, n_epochs: int | None = None):
+    """grade_code on `source`; `n_epochs` replaces the grading argument (a cheaper budget)."""
     submission = tmp_path / "submission.py"
     submission.write_text(source)
     competition = Registry(data_dir).get_competition(RESNET)
+    if n_epochs is not None:
+        competition.coding_config["required_functions"]["train"]["required_args"]["n_epochs"] = (
+            n_epochs
+        )
     return grade_code(submission, competition)
 
 
-# A cheap model that is enough for this data (logistic regression on the 50 time steps).
+# A cheap model that is enough for this data (logistic regression on the 50 time steps), but is
+# not the architecture of resnet.py.
 LINEAR = """
 import numpy as np
 import torch
@@ -79,19 +85,15 @@ class ResNet(nn.Module):
         return self.fc(x.flatten(1))
 
 
-def _epoch(model, loader, opt):
-    model.train()
-    for x, y in loader:
-        opt.zero_grad()
-        nn.functional.cross_entropy(model(x), y).backward()
-        opt.step()
-
-
 def train(model, train_data, val_data, batch_size, n_epochs, learning_rate, verbose):
     loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
     opt = torch.optim.Adam(model.parameters(), lr=0.01)
     for _ in range(n_epochs):
-        _epoch(model, loader, opt)
+        model.train()
+        for x, y in loader:
+            opt.zero_grad()
+            nn.functional.cross_entropy(model(x), y).backward()
+            opt.step()
     return model
 
 
@@ -102,26 +104,162 @@ def predict(model, test_data):
         return np.zeros(len(x), dtype=np.int64), torch.softmax(model(x), 1).numpy()
 """
 
+# The reference port (rl_envs' oracle): BatchNorm statistics re-estimated after training, so
+# that it passes after a single epoch; the budget tests grade with n_epochs=1 to stay cheap.
+REFERENCE = """
+
+import os
+
+import numpy as np
+import torch
+from torch import nn
+from torch.nn import Module
+
+
+class _Block(nn.Module):
+    '''Three Conv1D-BN(-ReLU) layers (kernels 8, 5, 3) plus a shortcut, as in Classifier_RESNET.'''
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, 8, padding="same"),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(),
+            nn.Conv1d(out_channels, out_channels, 5, padding="same"),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(),
+            nn.Conv1d(out_channels, out_channels, 3, padding="same"),
+            nn.BatchNorm1d(out_channels),
+        )
+        if in_channels != out_channels:  # "expand channels for the sum"
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, 1), nn.BatchNorm1d(out_channels)
+            )
+        else:  # "no need to expand channels because they are equal"
+            self.shortcut = nn.BatchNorm1d(out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(self.shortcut(x) + self.body(x))
+
+
+class ResNet(Module):
+    def __init__(
+        self,
+        output_directory,
+        input_shape,
+        n_classes,
+        n_feature_maps,
+        verbose=False,
+        random_seed=42,
+    ):
+        super().__init__()
+        torch.manual_seed(random_seed)
+        np.random.seed(random_seed)
+        self.output_directory = output_directory
+        self.verbose = verbose
+        n_channels = input_shape[0]
+        self.blocks = nn.Sequential(
+            _Block(n_channels, n_feature_maps),
+            _Block(n_feature_maps, n_feature_maps * 2),
+            _Block(n_feature_maps * 2, n_feature_maps * 2),
+        )
+        self.fc = nn.Linear(n_feature_maps * 2, n_classes)
+        os.makedirs(output_directory, exist_ok=True)
+        torch.save(self.state_dict(), os.path.join(output_directory, "model_init.pt"))
+        if verbose:
+            print(self)
+
+    def forward(self, x):
+        h = self.blocks(x).mean(dim=-1)  # GlobalAveragePooling1D
+        return torch.softmax(self.fc(h), dim=-1)  # Dense(n_classes, activation="softmax")
+
+
+def train(model, train_data, val_data, batch_size, n_epochs, learning_rate, verbose):
+    loader = torch.utils.data.DataLoader(
+        train_data, batch_size=int(min(len(train_data) / 10, batch_size)), shuffle=True
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, factor=0.5, patience=50, min_lr=1e-4
+    )
+    best = float("inf")
+    for epoch in range(n_epochs):
+        model.train()
+        total = 0.0
+        for x, y in loader:
+            optimizer.zero_grad()
+            probs = model(x)
+            loss = nn.functional.nll_loss(
+                torch.log(probs.clamp_min(1e-12)), y
+            )  # categorical cross-entropy
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(y)
+        epoch_loss = total / len(train_data)
+        scheduler.step(epoch_loss)
+        if epoch_loss < best:  # ModelCheckpoint(monitor="loss", save_best_only=True)
+            best = epoch_loss
+            torch.save(model.state_dict(), os.path.join(model.output_directory, "best_model.pt"))
+        if verbose:
+            print(f"epoch {epoch + 1}/{n_epochs} loss {epoch_loss:.4f}")
+    model.load_state_dict(torch.load(os.path.join(model.output_directory, "best_model.pt")))
+    _recompute_batchnorm_statistics(model, train_data, batch_size)
+    return model
+
+
+def _recompute_batchnorm_statistics(model, data, batch_size):
+    # With few optimizer steps (n_epochs=1) the BatchNorm running averages are far from the
+    # population statistics, and eval-mode predictions collapse. Re-estimate them with a
+    # cumulative average over the training data (no parameter update).
+    bns = [m for m in model.modules() if isinstance(m, nn.BatchNorm1d)]
+    saved = [bn.momentum for bn in bns]
+    for bn in bns:
+        bn.reset_running_stats()
+        bn.momentum = None
+    model.train()
+    with torch.no_grad():
+        for x, _ in torch.utils.data.DataLoader(data, batch_size=batch_size):
+            model(x)
+    for bn, m in zip(bns, saved, strict=False):
+        bn.momentum = m
+
+
+def predict(model, test_data):
+    model.eval()
+    xs, ys = zip(*[test_data[i] for i in range(len(test_data))], strict=False)
+    x = torch.stack(xs)
+    with torch.no_grad():
+        y_pred = model(x).numpy()
+    return np.asarray([int(y) for y in ys]), y_pred
+"""
+
 # More epochs than the grading arguments ask for (Sonnet's submission in a Claude Code
 # evaluation used max(n_epochs, 30) when n_epochs was 1); one epoch more is enough to fail.
-OVERTRAINED = LINEAR.replace("for _ in range(n_epochs):", "for _ in range(n_epochs + 1):")
+OVERTRAINED = REFERENCE.replace(
+    "for epoch in range(n_epochs):", "for epoch in range(n_epochs + 1):"
+)
 
-# The tensors copied out of the dataset first, then two passes per epoch over the copy.
-COPIED_OUT = LINEAR.replace(
-    "    loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)\n",
+# The tensors copied out of the dataset first (through numpy), then two passes per epoch.
+COPIED_OUT = REFERENCE.replace(
+    "    loader = torch.utils.data.DataLoader(\n"
+    "        train_data, batch_size=int(min(len(train_data) / 10, batch_size)), shuffle=True\n"
+    "    )\n",
     "    x = np.stack([train_data[i][0].numpy() for i in range(len(train_data))])\n"
     "    y = np.asarray([int(train_data[i][1]) for i in range(len(train_data))])\n"
     "    copy = torch.utils.data.TensorDataset(torch.from_numpy(x), torch.from_numpy(y))\n"
-    "    loader = torch.utils.data.DataLoader(copy, batch_size=batch_size, shuffle=True)\n",
-).replace("        _epoch(model, loader, opt)", "        _epoch(model, loader, opt)\n" * 2)
+    "    loader = torch.utils.data.DataLoader(copy, batch_size=64, shuffle=True)\n",
+).replace("        for x, y in loader:\n", "        for x, y in [*loader, *loader]:\n")
 
 # Training before `train` is called: at import, on the public training file.
 PRETRAINED_AT_IMPORT = (
-    LINEAR
+    REFERENCE
     + """
-_data = torch.load({path!r}, weights_only=False)
-_net = ResNet("./", [1, 50], 2, 64)
-train(_net, _data, None, 64, 30, 0.001, False)
+import tempfile
+
+_data = torch.load(@PATH@, weights_only=False)
+_net = ResNet(tempfile.mkdtemp() + "/", [1, 50], 2, 64)
+train(_net, _data, None, 64, 1, 0.001, False)
 _STATE = _net.state_dict()
 _init = ResNet.__init__
 
@@ -135,16 +273,13 @@ ResNet.__init__ = _pretrained_init
 """
 )
 
-# Passes that train nothing: validation each epoch, BatchNorm-style statistics in train mode,
-# and a training-accuracy forward pass with gradients but no back-propagation.
-EXTRA_PASSES = LINEAR.replace(
-    "        _epoch(model, loader, opt)\n",
-    "        _epoch(model, loader, opt)\n"
+# Passes that train nothing, besides the reference's own BatchNorm re-estimation: validation
+# each epoch, and a forward pass with gradients but no back-propagation.
+EXTRA_PASSES = REFERENCE.replace(
+    "        epoch_loss = total / len(train_data)\n",
+    "        epoch_loss = total / len(train_data)\n"
     "        predict(model, val_data)\n"
     "        model.train()\n"
-    "        with torch.no_grad():\n"
-    "            for x, _ in loader:\n"
-    "                model(x)\n"
     "        for x, _ in loader:\n"
     "            model(x).argmax(1)\n",
 )
@@ -252,6 +387,12 @@ UNTRAINED = FAITHFUL.replace(
 )
 
 
+# A ResNet without its shortcuts: the layers are defined but not used.
+NO_SHORTCUT = FAITHFUL.replace(
+    "        return torch.relu(self.sc(x) + h)", "        return torch.relu(h)"
+)
+
+
 def test_resnet_a_keras_faithful_port_passes_with_the_grading_arguments(resnet_data, tmp_path):
     # With n_epochs=1 it failed (accuracy 0.49); the grading arguments now ask for 40 epochs.
     report = _grade_resnet(resnet_data, tmp_path, FAITHFUL)
@@ -265,7 +406,7 @@ def test_resnet_an_untrained_model_fails(resnet_data, tmp_path):
 
 
 def test_resnet_a_submission_within_the_budget_passes(resnet_data, tmp_path):
-    report = _grade_resnet(resnet_data, tmp_path, LINEAR)
+    report = _grade_resnet(resnet_data, tmp_path, REFERENCE, n_epochs=1)
     assert report.valid_submission and report.test_metric == "1/1"
     assert report.executed_functions == "2/2" and report.executed_class_methods == "1/1"
 
@@ -274,20 +415,48 @@ def test_resnet_a_submission_within_the_budget_passes(resnet_data, tmp_path):
 def test_resnet_training_beyond_n_epochs_fails(resnet_data, tmp_path, source):
     # Sonnet's submission set n_epochs = max(n_epochs, 30) and passed; copying the tensors out
     # of the dataset first must not hide the extra passes.
-    report = _grade_resnet(resnet_data, tmp_path, source)
+    report = _grade_resnet(resnet_data, tmp_path, source, n_epochs=1)
     assert report.valid_submission and report.test_metric == "0/1"
     assert report.executed_functions == "2/2"  # the structural checks are unchanged
 
 
 def test_resnet_training_at_import_counts(resnet_data, tmp_path):
     path = "data/train_data.pt"  # the grading sandbox's copy of the public data, in its cwd
-    report = _grade_resnet(resnet_data, tmp_path, PRETRAINED_AT_IMPORT.format(path=path))
+    source = PRETRAINED_AT_IMPORT.replace("@PATH@", repr(path))
+    report = _grade_resnet(resnet_data, tmp_path, source, n_epochs=1)
     assert report.valid_submission and report.test_metric == "0/1"
 
 
 def test_resnet_passes_without_backpropagation_do_not_count(resnet_data, tmp_path):
-    report = _grade_resnet(resnet_data, tmp_path, EXTRA_PASSES)
+    report = _grade_resnet(resnet_data, tmp_path, EXTRA_PASSES, n_epochs=1)
     assert report.valid_submission and report.test_metric == "1/1"
+
+
+def test_resnet_another_architecture_fails_even_when_accurate(resnet_data, tmp_path):
+    # The linear model reaches accuracy 1.0 within the budget (it passed before the check).
+    report = _grade_resnet(resnet_data, tmp_path, LINEAR)
+    assert report.valid_submission and report.test_metric == "0/1"
+    assert report.executed_functions == "2/2"
+
+
+def _port(source: str):
+    namespace: dict = {}
+    exec(compile(source, "port", "exec"), namespace)
+    return namespace["ResNet"]
+
+
+@pytest.mark.parametrize(
+    "source, used",
+    [(FAITHFUL, 504_258), (REFERENCE, 504_258), (NO_SHORTCUT, 495_170), (LINEAR, 102)],
+    ids=["faithful", "reference", "no_shortcut", "linear"],
+)
+def test_resnet_architecture_counts_the_parameters_the_forward_pass_uses(tmp_path, source, used):
+    architecture = _module(RESNET, "architecture")
+    assert architecture.keras_trainable_parameters(1, 64, 2) == 504_258  # Keras' model.summary()
+    model = _port(source)(str(tmp_path) + "/", [1, 50], 2, 64)
+    assert architecture.trainable_parameters_in_use(model, torch.randn(10, 1, 50)) == used
+    registered = sum(p.numel() for p in model.parameters())
+    assert registered == (504_258 if source is NO_SHORTCUT else used)  # defined, not used
 
 
 class _Net(torch.nn.Module):
@@ -332,6 +501,7 @@ def test_resnet_description_states_the_grading_arguments():
     assert f"n_epochs={n_epochs}," in description
     assert f"greater than {threshold:.0%}" in description
     assert "n_epochs * len(train_data)" in description
+    assert "504,258 trainable parameters" in description  # keras_trainable_parameters(1, 64, 2)
 
 
 # ---------------------------------------------------------------- stomp: the hidden variant

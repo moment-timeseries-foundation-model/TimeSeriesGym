@@ -25,7 +25,12 @@ import pandas as pd
 import pytest
 import torch
 
-from tests.unit.test_code_graders import _r_csv, _source_of_brute_force, brute_force_stomp
+from tests.unit.test_code_graders import (
+    REFERENCE,
+    _r_csv,
+    _source_of_brute_force,
+    brute_force_stomp,
+)
 from timeseriesgym import sandbox
 from timeseriesgym.grade import grade_code, grade_hyperparameter_search
 from timeseriesgym.registry import Registry
@@ -115,24 +120,11 @@ def test_stomp_submissions_that_do_not_import_are_invalid(tmp_path, code):
     assert _stomp_scores(_grade_stomp(tmp_path, code)) == (False, None, None, None)
 
 
-RESNET_SUBMISSION = """
-import numpy as np
-import torch
-from torch import nn
-
-
-class ResNet(nn.Module):
-    def __init__(
-        self, output_directory, input_shape, n_classes, n_feature_maps, verbose=False,
-        random_seed=42,
-    ):
-        super().__init__()
-        torch.manual_seed(random_seed)
-        self.linear = nn.Linear(input_shape[0] * input_shape[1], n_classes)
-
-    def forward(self, x):
-        return self.linear(x.flatten(1))
-
+# The reference port's ResNet (tests/unit/test_code_graders.py), so that the architecture check
+# passes, with a `train` that trains nothing and a `predict` whose rule the answers follow.
+RESNET_SUBMISSION = (
+    REFERENCE
+    + """
 
 def train(
     model, train_data, val_data, batch_size=64, n_epochs=1, learning_rate=0.001, verbose=False
@@ -145,6 +137,7 @@ def predict(model, test_data):
     mean = x.mean((1, 2)).numpy()
     return y.numpy(), np.stack([-mean, mean], axis=1)
 """
+)
 
 
 def _resnet_competition(tmp_path: Path, wrong: int):

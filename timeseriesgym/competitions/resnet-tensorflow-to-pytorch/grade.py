@@ -15,6 +15,7 @@ from timeseriesgym.grade_code_helper import (
 )
 from timeseriesgym.utils import InvalidSubmissionError, get_logger
 
+from .architecture import keras_trainable_parameters, trainable_parameters_in_use
 from .training_budget import TrainingSampleCounter
 
 logger = get_logger(__name__)
@@ -48,6 +49,39 @@ def _test_outputs(submission_module, coding_config: dict):
     except Exception as e:
         logger.error(f"Error training and predicting for ResNet: {e}")
         return None
+
+
+def _parameters_in_use(submission_module, coding_config: dict) -> int | None:
+    """The trainable parameters a fresh ResNet's forward pass uses with the grading arguments
+    (architecture.py), or None if it cannot be built or run."""
+    resnet_config = coding_config["required_classes"]["ResNet"]
+    model = initialize_class(submission_module, "ResNet", resnet_config)
+    if model is None:
+        return None
+    try:
+        x = resnet_config["required_methods"]["forward"]["required_args"]["x"]
+        return int(trainable_parameters_in_use(model, x))
+    except Exception as e:
+        logger.error(f"Error counting the trainable parameters of ResNet: {e}")
+        return None
+
+
+def _architecture_matches(used: int | None, coding_config: dict) -> bool:
+    """Whether the forward pass uses exactly the Keras model's number of trainable parameters
+    for the grading arguments (architecture.py)."""
+    init_args = coding_config["required_classes"]["ResNet"]["required_methods"]["__init__"]
+    init_args = init_args["required_args"]
+    expected = keras_trainable_parameters(
+        int(init_args["input_shape"][0]),
+        int(init_args["n_feature_maps"]),
+        int(init_args["n_classes"]),
+    )
+    if used is not None and used != expected:
+        logger.warning(
+            f"ResNet's forward pass uses {used} trainable parameters; the Keras model of "
+            f"resnet.py has {expected} with these arguments: the test fails"
+        )
+    return used == expected
 
 
 def run_submission(work: Path, job: dict) -> None:
@@ -102,6 +136,10 @@ def run_submission(work: Path, job: dict) -> None:
     # grade function definitions and executions
     function_scores = grade_function(submission_module, coding_config)
 
+    # task-specific grading: the architecture (after the test model, outside its sample count);
+    # the trusted half compares the count with the Keras model's
+    parameters_in_use = _parameters_in_use(submission_module, coding_config)
+
     # combine all scores
     scores = {
         "defined_classes": f"{class_scores['defined_classes']}/{class_scores['total_classes']}",
@@ -122,6 +160,7 @@ def run_submission(work: Path, job: dict) -> None:
         "error": error,
         "samples": counter.samples,
         "sample_budget": sample_budget,
+        "parameters_in_use": parameters_in_use,
     }
     sandbox.write_json(work, "result.json", {"scores": scores, **result})
 
@@ -140,7 +179,8 @@ def grade_code(
     private_paths: tuple[Path, ...] | None = None,
 ) -> dict:
     # The submission runs in the grading sandbox (run_submission), which also counts the
-    # samples the test model is trained on; this compares its predictions with the answers.
+    # samples the test model is trained on and the parameters a fresh model's forward pass uses;
+    # this compares its predictions with the answers and the counts with their limits.
     with sandbox.run_code(
         f"{__name__}:run_submission", submission_file_path, coding_config, private_paths
     ) as run:
@@ -149,6 +189,9 @@ def grade_code(
         if not isinstance(result.get("two_outputs"), bool):
             raise InvalidSubmissionError("Submission invalid! Unusable results from the sandbox.")
         samples, sample_budget = _count(result, "samples"), _count(result, "sample_budget")
+        used = (
+            None if result.get("parameters_in_use") is None else _count(result, "parameters_in_use")
+        )
         preds = run.array("preds.npy")
 
     test_accuracy = 0.0
@@ -170,10 +213,12 @@ def grade_code(
             f"n_epochs * len(train_data) = {sample_budget}: the test fails"
         )
 
+    architecture_matches = _architecture_matches(used, coding_config)
+
     # the synthetic time series dataset is an easy task
     # the correct ResNet implementation should achieve > 80% accuracy with the provided parameters
     expected_accuracy = coding_config["required_functions"]["predict"]["expected_accuray"]
-    if within_budget and test_accuracy > expected_accuracy:
+    if within_budget and architecture_matches and test_accuracy > expected_accuracy:
         scores["test_metric"] = "1/1"
     else:
         scores["test_metric"] = "0/1"
