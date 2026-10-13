@@ -80,6 +80,34 @@ the medals are not comparable for those named under "Medals and leaderboards".
   `np.load` read all the declared data (a sparse file of 100 MiB of zeros, for MOMENT's 50
   answers, was read in full before the shape check), and returned a zip as an `NpzFile`. The
   shipped MOMENT and TSL iTransformer samples load as before.
+- **resnet-tensorflow-to-pytorch**: the test model may be trained on at most
+  `n_epochs * len(train_data)` samples (ec1faa1). The grader asked for `n_epochs=1` but never
+  checked it: a Claude Code submission set `n_epochs = max(n_epochs, 30)` and passed. The grader
+  now counts every sample back-propagated through an instance of the submission's `ResNet`
+  (copies and reloaded models included) from before the submission is imported until the test
+  model's predictions return, so copying the tensors out of the dataset does not hide extra
+  passes; forward passes without back-propagation do not count. Above the budget the test
+  fails. The accuracy test now runs before the structural checks, so nothing trained in the
+  structural call of `train` carries over. The count runs in the same process as the
+  submission, so code written to evade it is not stopped; it catches code that trains for more
+  passes than asked, whatever loop or copy of the data it uses.
+- **resnet-tensorflow-to-pytorch**: the grading arguments ask for `n_epochs=40` instead of 1
+  (f1ca4fc). A port with Keras' BatchNorm settings (PyTorch momentum 0.01) scored 0.49 to 0.51
+  after 1 epoch on 10 of 10 seeds: its running statistics lag the weights and eval-mode
+  predictions collapse to one class. Measured in tsgym-core on CPU, it passes on 12 of 20 seeds
+  after 25 epochs, 30 of 31 after 30 and 31 of 31 after 40. Ports with PyTorch's default
+  momentum pass from 3 epochs, and the reference port with re-estimated statistics passes at
+  every count. An untrained model and a one-layer convolution with average pooling score 0.49
+  to 0.51 at every count, so they still fail. A ResNet without its shortcuts also passes after
+  30 epochs: the accuracy test does not check the architecture. The threshold stays at 0.8,
+  because the accuracies are either about 0.5 or about 1.0. Grading a faithful port takes about
+  70 s.
+- **stomp-R-to-python**: each test also runs on a variant of its inputs, and passes only if the
+  outputs match on both (d918a7c). The tests used only the public inputs, so outputs computed
+  offline and pasted into the code passed. The variant reverses the inputs in time and maps
+  them by `-1.5 * x + 0.5`. The z-normalized distance does not change under either, so the R
+  answers give the variant's expected outputs exactly, and no reference implementation is
+  added. The reference port and two Claude Code ports pass as before.
 - **Unreadable submissions**: a ragged CSV, a wrong suffix, an unreadable `.h5` or `.npy`, or a
   code submission that does not import, is reported as invalid instead of aborting the whole
   `timeseriesgym grade` batch (5e8750c). One bad agent file used to lose the report for every
@@ -437,6 +465,8 @@ Three more, after reviews of agent runs:
   with the shipped ones, which belong to the real data. The integration tests still cover the
   real downloads.
 - The integration tests are marked `network` (58249d6): `-m "not network"` deselects them.
+- `test_code_graders.py` covers the resnet sample budget and epoch count and the stomp variant
+  through the registry and `grade_code` (a296e48). 6 of its 13 tests fail before the fixes.
 
 ## Packaging and CI
 

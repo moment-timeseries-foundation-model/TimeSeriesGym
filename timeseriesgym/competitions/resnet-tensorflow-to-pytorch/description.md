@@ -86,7 +86,7 @@ Submissions will be evaluated based on the following three criteria:
 
 - **Code Definition**: All required components must be implemented and conform to the specifications outlined in **Code Requirements**.
 - **Code Execution**: The `ResNet` class (including `__init__` and `forward`), as well as the `train` and `predict` functions, must execute successfully and produce valid outputs when given inputs that meet the specifications.
-- **Test Results**: A model trained using your implementation, with the grading arguments shown below, should achieve an accuracy greater than 80% on the test set, using the provided training dataset. The accuracy is that of `argmax(y_pred, axis=1)` against the ground-truth test labels.
+- **Test Results**: A model trained using your implementation, with the grading arguments shown below, should achieve an accuracy greater than 80% on the test set, using the provided training dataset. The accuracy is that of `argmax(y_pred, axis=1)` against the ground-truth test labels. The model must be trained for `n_epochs` passes over `train_data`, and no more: the grader counts the samples that are back-propagated through your `ResNet` (any instance of it, from the moment `submission.py` is imported until `predict` returns), and the test fails if there are more than `n_epochs * len(train_data)`. Forward passes without back-propagation, such as validation or predictions, do not count.
 
 The following sample code illustrates how test predictions are generated using your implemented `ResNet` model. The grader passes the arguments by keyword, with these values, so the parameter names must match the specifications above:
 
@@ -94,7 +94,7 @@ The following sample code illustrates how test predictions are generated using y
 from submission import ResNet, train, predict
 
 model = ResNet(output_directory="./output/", input_shape=[1, 50], n_classes=2, n_feature_maps=64, verbose=True, random_seed=42)
-model = train(model=model, train_data=train_data, val_data=val_data, batch_size=64, n_epochs=1, learning_rate=0.001, verbose=True)
+model = train(model=model, train_data=train_data, val_data=val_data, batch_size=64, n_epochs=40, learning_rate=0.001, verbose=True)
 y_true, y_pred = predict(model=model, test_data=test_data)
 ```
 
