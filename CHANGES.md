@@ -134,15 +134,20 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
 
 ## Medals and leaderboards
 
-- **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 10 challenges
-  award no medals: context-is-key-moirai, context-is-key-nn5-chronos, gift-eval-short-horizon,
+- **Placeholder leaderboards**: one-row "dummy" leaderboards are ignored, so these 9 challenges
+  award no medals: context-is-key-moirai, context-is-key-nn5-chronos,
   moment-anomaly-detection-score, ptb-xl-classification-challenge and its HPS and FE variants,
   time-series-exam-1-1, time-series-library-itransformer-weather-forecast, ucr-anomaly-detection
   (229df50). With one row, every score >= 0 was gold, even for lower-is-better metrics, and
   run-group medal totals counted every valid submission on them as gold.
-- **gift-eval-short-horizon**: its placeholder (dummy, 0) was on the MAPE scale; its one row is
-  now the new metric's reference, the seasonal naive forecast at 1.0 (b091026). With one row it
-  is still ignored, so there are no medals.
+- **gift-eval-short-horizon**: `leaderboard.csv` lists the models of GIFT-Eval's own leaderboard
+  (Hugging Face space Salesforce/GIFT-Eval, revision 9d731e061162d5d8440204a2c455583d82e084d4 of
+  2026-10-09), each scored with the new metric from its published MASE on the 5 datasets
+  (b091026, dc7c088). It was a one-row placeholder (dummy, 0, on the MAPE scale), so no medals.
+  Kept: models marked `"testdata_leakage": "No"` with a result on all 5 datasets, 123 of 143;
+  the 20 others are flagged for leakage. Gold is rank 10 (0.71687), silver 24 (0.74775), bronze
+  49 (0.76343), median 0.77337; Seasonal_Naive scores 1.0 and Naive 1.02262. `leaderboard.py`
+  rebuilds the file from the pinned revision.
 - **Non-finite scores** never earn a medal (229df50).
 - **`awards_medals`** is now loaded into `Competition` but stays informational, as on Kaggle:
   new-york-city-taxi-fare-prediction and spaceship-titanic (`false`, real leaderboards) keep
