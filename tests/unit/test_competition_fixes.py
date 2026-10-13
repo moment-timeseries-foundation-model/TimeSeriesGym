@@ -755,6 +755,33 @@ def test_ucr_description_shows_the_shipped_dataset_helper():
     assert public["anomaly_dataset.py"] == get_checksum(helper)  # prepare copies it to public/
 
 
+def test_ucr_prepare_reads_the_archives_indices_as_one_based_and_inclusive(tmp_path):
+    import h5py
+
+    prepare = _module("ucr-anomaly-detection", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    files = raw / "AnomalyDatasets_2021" / "UCR_TimeSeriesAnomalyDatasets2021" / "FilesAreInHere"
+    files = files / "UCR_Anomaly_FullData"
+    files.mkdir(parents=True)
+    public.mkdir()
+    private.mkdir()
+    # As in the archive's 005: points 1-4000 (1-based) are training data, and the anomaly is
+    # points 5391-5392, of length 5392 - 5391 + 1; the distorted point is the 5391st.
+    series = np.sin(np.arange(8184) / 4)
+    series[5390] -= 8.0
+    name = "005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1"
+    np.savetxt(files / f"{name}_4000_5391_5392.txt", series)
+    prepare(raw, public, private)
+
+    train = pd.read_csv(public / "train" / f"{name}.csv").to_numpy().ravel()
+    test = pd.read_csv(public / "test" / f"{name}.csv").to_numpy().ravel()
+    assert np.allclose(train, series[:4000]) and np.allclose(test, series[4000:])
+    with h5py.File(private / "labels.h5") as f:
+        labels = f["labels"][name][:]
+    assert np.flatnonzero(labels).tolist() == [1390, 1391]  # was [1391]: the dip was normal
+    assert np.argmin(test) == 1390
+
+
 # ---------------------------------------------------------------- MIT-BIH download
 
 
