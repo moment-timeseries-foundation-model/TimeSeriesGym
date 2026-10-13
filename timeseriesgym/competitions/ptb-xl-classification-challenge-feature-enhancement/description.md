@@ -49,7 +49,7 @@ Use Hydra for configuration management. `train.py` must contain ALL of the follo
 - **Hydra Import**: `import hydra` (or `from hydra import ...`)
 - **Hydra Decorator**: the `@hydra.main` decorator on your main function
 - **Config Import**: `OmegaConf` and/or `DictConfig`, imported from `omegaconf`
-- **Config Usage**: model parameters read from a config object named `cfg`, as `cfg.model` (or `cfg['model']`)
+- **Config Usage**: the model is built from the config's `model` section: `train.py` passes the section (`cfg.model`, `cfg['model']`) or a value read from it (e.g., `cfg.model.hidden_dims`) to a class or function of `model.py` or to `hydra.utils.instantiate`, or it passes the config to a class or function of `model.py` that reads the `model` section of its parameter (as `ECGClassifier(cfg)` in the example below, whose `__init__` reads `config.model`). Printing `cfg.model`, or only mentioning it, does not count.
 
 And your solution must contain:
 

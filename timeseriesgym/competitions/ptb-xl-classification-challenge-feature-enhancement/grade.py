@@ -76,7 +76,7 @@ def grade_feature_enhancement(
 
     # 3. Evaluate Hydra configuration usage
     logger.info("\n----- Evaluating Hydra Configuration Usage -----")
-    hydra_score = evaluate_hydra_usage(training_code_file, config_file)
+    hydra_score = evaluate_hydra_usage(training_code_file, config_file, model_code_file)
 
     # 4. Calculate model accuracy
     accuracy = grade(submission, answers)
@@ -142,8 +142,8 @@ def grade_feature_enhancement(
             logger.info("  - Import hydra and use the @hydra.main decorator")
         if not re.search(r"OmegaConf|DictConfig", training_code_file):
             logger.info("  - Use OmegaConf or DictConfig for configuration management")
-        if not re.search(r"cfg\.model|cfg\['model'\]", training_code_file):
-            logger.info("  - Access model parameters from the config object")
+        if not builds_model_from_config(training_code_file, model_code_file):
+            logger.info("  - Build the model from the config's model section (e.g. cfg.model)")
         if not config_file or "model:" not in config_file:
             logger.info("  - Create a proper YAML config file with model parameters")
 
@@ -463,6 +463,116 @@ def strip_comments(code: str) -> str:
         return re.sub(r"#.*", "", code)
 
 
+def _parse(code: str) -> ast.Module | None:
+    try:
+        return ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+
+
+def _model_section_owner(node: ast.AST) -> ast.AST | None:
+    """The object whose `model` section `node` reads (`x.model`, `x["model"]` or
+    `getattr(x, "model")`), else None. `self.model` is an attribute, not a config section."""
+    if isinstance(node, ast.Attribute) and node.attr == "model":
+        owner = node.value
+    elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+        owner = node.value if node.slice.value == "model" else None
+    elif (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "model"
+    ):
+        owner = node.args[0]
+    else:
+        return None
+    return None if isinstance(owner, ast.Name) and owner.id in ("self", "cls") else owner
+
+
+def _reads_a_parameters_model_section(definition: ast.AST) -> bool:
+    """Whether a function, or a method of a class, reads the model section of a parameter."""
+    for function in ast.walk(definition):
+        if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        args = function.args
+        params = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+        names = {arg.arg for arg in params if arg is not None} - {"self", "cls"}
+        for node in ast.walk(function):
+            owner = _model_section_owner(node)
+            if isinstance(owner, ast.Name) and owner.id in names:
+                return True
+    return False
+
+
+def builds_model_from_config(training_file: str, model_file: str = "") -> bool:
+    """
+    Check that train.py builds the model from the config's `model` section: it passes the
+    section, or a value read from it, to a class or function of model.py or to Hydra's
+    `instantiate`, or it passes an argument to a class or function of model.py that reads the
+    model section of its parameter (as `ECGClassifier(cfg)`, whose `__init__` reads
+    `config.model`). Printing or only mentioning `cfg.model` does not count.
+
+    Args:
+        training_file: The training script content
+        model_file: The model code content
+
+    Returns:
+        bool: Whether the model is built from the config's model section
+    """
+    training_tree, model_tree = _parse(training_file), _parse(model_file)
+    if training_tree is None:
+        return False
+    definitions = {
+        node.name: node
+        for node in (model_tree.body if model_tree is not None else [])
+        if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    aliases = {
+        alias.asname or alias.name: alias.name
+        for node in ast.walk(training_tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    # names bound to the model section or to values read from it (`model_cfg = cfg.model`)
+    section_names: set[str] = set()
+
+    def reads_section(expression: ast.AST) -> bool:
+        return any(
+            _model_section_owner(node) is not None
+            or (isinstance(node, ast.Name) and node.id in section_names)
+            for node in ast.walk(expression)
+        )
+
+    assignments = [n for n in ast.walk(training_tree) if isinstance(n, ast.Assign | ast.AnnAssign)]
+    for _ in range(3):
+        for node in assignments:
+            if node.value is not None and reads_section(node.value):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                section_names.update(
+                    name.id for t in targets for name in ast.walk(t) if isinstance(name, ast.Name)
+                )
+
+    for call in ast.walk(training_tree):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if isinstance(func, ast.Name):
+            name = aliases.get(func.id, func.id)
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        else:
+            continue
+        arguments = [*call.args, *(keyword.value for keyword in call.keywords)]
+        if (name in definitions or name == "instantiate") and any(map(reads_section, arguments)):
+            return True
+        if name in definitions and arguments:
+            if _reads_a_parameters_model_section(definitions[name]):
+                return True
+    return False
+
+
 def check_linting(model_file_path: str, training_file_path: str) -> tuple[float, list[str]]:
     """
     Check code linting and style compliance with PEP 8.
@@ -570,13 +680,14 @@ def check_linting(model_file_path: str, training_file_path: str) -> tuple[float,
     return linting_score, linting_details
 
 
-def evaluate_hydra_usage(training_file: str, config_file: str) -> float:
+def evaluate_hydra_usage(training_file: str, config_file: str, model_file: str = "") -> float:
     """
     Evaluate proper usage of Hydra for configuration management.
 
     Args:
         training_file: The training script content
         config_file: The Hydra config file content
+        model_file: The model code content (its classes and functions build the model)
 
     Returns:
         float: Score between 0 and 1
@@ -619,7 +730,7 @@ def evaluate_hydra_usage(training_file: str, config_file: str) -> float:
         logger.info("[HYDRA] ✗ Missing OmegaConf or DictConfig usage: 0.0/0.2")
 
     # Check if config is used for model parameters
-    has_model_config = re.search(r"cfg\.model|cfg\['model'\]", training_file)
+    has_model_config = builds_model_from_config(training_file, model_file)
     max_score += 0.2
     if has_model_config:
         score += 0.2

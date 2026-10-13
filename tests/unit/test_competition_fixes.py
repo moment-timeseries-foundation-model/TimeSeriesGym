@@ -408,7 +408,8 @@ from torch.utils.tensorboard import SummaryWriter
 def main(cfg: DictConfig) -> None:
     writer = SummaryWriter(log_dir="runs/x")
     writer.add_scalar("loss", 1.0, 0)
-    writer.add_graph(cfg.model, None)
+    model = hydra.utils.instantiate(cfg.model)
+    writer.add_graph(model, None)
 """
 
 
@@ -463,8 +464,65 @@ def test_feature_rubric_scores_the_shipped_example_as_before():
     assert fe.has_class_docstrings(trees[0])
     assert fe.has_docstring_sections(trees, ["Args", "Returns"])
     config = (example / "conf" / "config.yaml").read_text()
-    assert fe.evaluate_hydra_usage(train, config) == pytest.approx(1.0)
+    assert fe.evaluate_hydra_usage(train, config, model) == pytest.approx(1.0)
     assert fe.evaluate_tensorboard_usage(train, example) == pytest.approx(0.8)  # no runs/ shipped
+
+
+MODEL_READS_THE_CONFIG = """
+class Net:
+    def __init__(self, config=None):
+        self.hidden = getattr(config.model, "hidden", 8)
+"""
+MODEL_TAKES_VALUES = """
+class Net:
+    def __init__(self, hidden=8):
+        self.hidden = hidden
+
+
+def build(hidden):
+    return Net(hidden)
+"""
+
+
+@pytest.mark.parametrize(
+    "main, body, model, builds",
+    [
+        # the old check: `cfg.model` or `cfg['model']` anywhere in train.py
+        ("cfg", "model = Net()\nprint('model config:', dict(cfg.model))", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net()\ncfg.model", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net()\nnote = 'cfg.model'", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net(cfg)", MODEL_TAKES_VALUES, 0),
+        ("config", "model = Net(config)", MODEL_READS_THE_CONFIG, 1),  # was rejected
+        ("cfg", "model = Net(config=cfg)", MODEL_READS_THE_CONFIG, 1),
+        ("cfg", "model = Net(**cfg.model)", MODEL_TAKES_VALUES, 1),
+        ("cfg", 'model = Net(cfg["model"].hidden)', MODEL_TAKES_VALUES, 1),  # was rejected
+        ("cfg", "section = cfg.model\nmodel = build(section.hidden)", MODEL_TAKES_VALUES, 1),
+        ("cfg", "model = hydra.utils.instantiate(cfg.model)", "", 1),
+    ],
+    ids=[
+        "print",
+        "bare reference",
+        "string",
+        "config ignored by the model",
+        "config read by the model",
+        "config as a keyword",
+        "unpacked section",
+        "subscripted section",
+        "value of an assigned section",
+        "hydra instantiate",
+    ],
+)
+def test_feature_rubric_needs_the_model_built_from_the_config(main, body, model, builds):
+    fe = _fe()
+    train = (
+        "import hydra\nfrom model import Net, build\nfrom omegaconf import DictConfig\n\n\n"
+        f'@hydra.main(config_path="conf", config_name="config")\n'
+        f"def main({main}: DictConfig) -> None:\n"
+        + "".join(f"    {line}\n" for line in body.split("\n"))
+    )
+    assert fe.builds_model_from_config(train, model) == bool(builds)
+    expected = 1.0 if builds else 0.8
+    assert fe.evaluate_hydra_usage(train, "model:\n  hidden: 8\n", model) == pytest.approx(expected)
 
 
 def _flake8_reports(monkeypatch, fe, problems: str = ""):
