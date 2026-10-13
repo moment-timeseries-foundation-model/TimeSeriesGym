@@ -165,6 +165,19 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **LANL-Earthquake-Prediction**: test segment ids come from a seeded generator, duplicates are
   rejected, and the checksums are regenerated (7a8862f). Every prepare named the 2,500 segments
   differently, so checksums could never verify.
+- **LANL-Earthquake-Prediction**: the test is laid out as Kaggle's: every whole, non-overlapping
+  150,000-row segment inside one of the held-out earthquake cycles 13-17, 1,112 in all, labelled
+  with `time_to_failure` at its last row (6cd897f, 3c3dcb0). It was 500 random, possibly
+  overlapping 15,000-row windows from each of those cycles (2,500), which matched the training
+  distribution so closely that a 4-minute LightGBM on summary statistics scored better than
+  Kaggle's gold threshold (2.40159) and its rank-1 score (2.26589). No segment spans an
+  earthquake or touches a training row. The ids come from a generator seeded with a digest of the
+  private labels, and the files, answers and sample are in id order (they were grouped by
+  cycle), so neither ids nor order give a segment's position. `train.csv` (cycles 1-12) is
+  byte-identical, and prepare reads it in chunks instead of all 629M rows at once. On the new
+  test the sample scores 5.69625 (was 6.21077), the median of the training labels 3.00822, and
+  a LightGBM on 58 summary statistics of 150,000-row training windows 2.443 (2.415-2.443 over 5
+  seeds, about 10 CPU minutes), so no longer better than gold.
 - **Cloned task repositories**: shipped without `.git` (1568f6d) and pinned to commits (8dbe2b8;
   MOMENT to 37a8bde in 00279f6). The history held the reference solution (iTransformer), and
   moving branch heads changed the prepared data. The iTransformer prepare now also removes the
