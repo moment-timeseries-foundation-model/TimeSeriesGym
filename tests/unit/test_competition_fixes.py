@@ -5,8 +5,10 @@ prepare) is unaffected.
 """
 
 import ast
+import hashlib
 import importlib
 import pickle
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -588,6 +590,17 @@ def test_download_file_fails_instead_of_saving_an_error(tmp_path):
         download_file((tmp_path / "missing.csv").as_uri(), tmp_path / "missing_copy.csv")
 
 
+@pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+def test_download_file_checks_the_md5_checksum(tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("print(1)\n")
+    md5 = hashlib.md5(b"print(1)\n").hexdigest()
+    assert download_file(source.as_uri(), tmp_path / "a.py", md5=md5).read_text() == "print(1)\n"
+    with pytest.raises(ValueError, match="MD5 checksum"):  # e.g. a moved branch
+        download_file(source.as_uri(), tmp_path / "b.py", md5="0" * 32)
+    assert not (tmp_path / "b.py").exists()
+
+
 def test_stomp_prepare_files_and_failed_download(tmp_path, monkeypatch):
     module = _module("stomp-R-to-python", "prepare")
     public, private = tmp_path / "public", tmp_path / "private"
@@ -701,3 +714,40 @@ def test_mit_bih_download_fails_on_an_http_error(tmp_path, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         download.download_mitdb(tmp_path)
     assert len(calls) == 1
+
+
+def test_mit_bih_weak_supervision_downloads_are_pinned(tmp_path, monkeypatch):
+    import h5py
+
+    from timeseriesgym.utils import load_yaml
+
+    module = _module("MIT-BIH-Arrhythmia-Weak-Supervision", "prepare")
+    public, private = tmp_path / "public", tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    with h5py.File(public / "train_features.h5", "w") as f:
+        f["train/lead_1"] = np.zeros((3, 4))
+    with h5py.File(public / "train_labels.h5", "w") as f:
+        f["labels"] = np.eye(3)  # normal, PVC, other
+    for name in ("test_features.h5", "sample_submission.h5"):
+        (public / name).touch()
+    (private / "test_labels.h5").touch()
+    downloads = {}
+
+    def fake_download(url, destination, md5=None):
+        downloads[destination.name] = (url, md5)
+        destination.touch()
+        return destination
+
+    monkeypatch.setattr(module, "download_file", fake_download)
+    monkeypatch.setattr(module, "clone_repository", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: None)  # pdftotext
+    module.prepare(tmp_path / "raw", public, private)
+
+    # they were the moving `refs/heads/master` and `latest`, and unchecked
+    tutorial_url, tutorial_md5 = downloads["01_spam_tutorial.py"]
+    assert re.search("/snorkel-tutorials/[0-9a-f]{40}/", tutorial_url)
+    checksums = load_yaml(Path(module.__file__).parent / "checksums.yaml")["public"]
+    assert tutorial_md5 == checksums["01_spam_tutorial.py"]
+    docs_url, docs_md5 = downloads["snorkel-docs.pdf"]
+    assert "/v0.9.7/" in docs_url and re.fullmatch("[0-9a-f]{32}", docs_md5)

@@ -146,6 +146,102 @@ def test_non_finite_scores_earn_no_medal():
     assert grader.rank_score(0.1, leaderboard)["gold_medal"]
 
 
+def test_osic_leaderboard_lists_every_kaggle_team(tmp_path):
+    from timeseriesgym.registry import Registry
+
+    competition = Registry(tmp_path).get_competition("osic-pulmonary-fibrosis-progression")
+    leaderboard = get_leaderboard(competition)
+    # it held the top 20 of Kaggle's 2,097 teams, so gold was rank 2 (-6.8311), not Kaggle's
+    # rank 10 + int(0.002 * 2097) = 14
+    assert len(leaderboard) == 2097 and leaderboard["teamId"].is_unique
+    info = competition.grader.rank_score(-6.8412, leaderboard)
+    assert info["gold_threshold"] == -6.8412 and info["gold_medal"]
+    assert info["silver_threshold"] == -6.8533 and info["bronze_threshold"] == -6.8683
+    assert not competition.grader.rank_score(-6.8416, leaderboard)["gold_medal"]  # rank 15
+
+
+COMPETITIONS = Path(__file__).resolve().parents[2] / "timeseriesgym" / "competitions"
+# The columns of Kaggle's leaderboard view, which lists a finished competition's final standings,
+# as `ensure_leaderboard_exists` writes them; m5's file keeps the team names. Kaggle's leaderboard
+# download (`Rank,TeamId,TeamName,LastSubmissionDate,...`) is the public leaderboard: the ashrae,
+# online-sales and sberbank files were that, and recruit's another competition's.
+LEADERBOARD_COLUMNS = (
+    ["scoreNullable", "teamId", "hasTeamName", "submissionDate", "score", "hasScore"],
+    ["teamId", "teamName", "submissionDate", "score"],
+)
+# The last date in the public data of the challenges whose data have dates (file, column): the
+# competition's leaderboard can only be later. recruit's old file was dated 2016-05-24 to
+# 2016-08-30.
+DATA_ENDS = {
+    "ashrae-energy-prediction": "2016-12-31",  # test_features.csv, timestamp
+    "child-mind-institute-detect-sleep-states": "2019-07-05",  # train_events.csv, timestamp
+    "m5-forecasting-accuracy": "2016-06-19",  # calendar.csv, date
+    "new-york-city-taxi-fare-prediction": "2015-06-30",  # test.csv, pickup_datetime
+    "recruit-restaurant-visitor-forecasting": "2017-05-31",  # date_info.csv, calendar_date
+    "sberbank-russian-housing-market": "2016-10-19",  # macro.csv, timestamp
+}
+
+
+@pytest.mark.parametrize(
+    "competition_id", sorted(p.parent.name for p in COMPETITIONS.glob("*/leaderboard.csv"))
+)
+def test_shipped_leaderboards_are_final_standings_of_their_competition(competition_id):
+    leaderboard = pd.read_csv(COMPETITIONS / competition_id / "leaderboard.csv")
+    if len(leaderboard) < 2:
+        return  # a placeholder, which get_leaderboard ignores
+    assert list(leaderboard.columns) in LEADERBOARD_COLUMNS
+    assert leaderboard["teamId"].is_unique
+    scores = leaderboard["score"]  # ranked best first: rank_score reads positions
+    assert scores.notna().all()
+    assert scores.is_monotonic_increasing or scores.is_monotonic_decreasing
+    if competition_id in DATA_ENDS:
+        first_day = pd.to_datetime(leaderboard["submissionDate"]).min().normalize()
+        assert first_day > pd.Timestamp(DATA_ENDS[competition_id])
+
+
+def _fake_kaggle_api(rows: int, teams: int):
+    """A Kaggle client whose leaderboard view gives `rows` rows for `x`, which has `teams` teams."""
+    entries = [
+        SimpleNamespace(
+            scoreNullable=f"{0.1 + i / 1e4:.4f}",
+            teamId=i,
+            teamNameNullable=f"t{i}",
+            teamName=f"t{i}",
+            hasTeamName=True,
+            submissionDate="2020-10-06 06:58:33",
+            score=f"{0.1 + i / 1e4:.4f}",
+            hasScore=True,
+        )
+        for i in range(rows)
+    ]
+    listed = [
+        SimpleNamespace(ref="https://www.kaggle.com/competitions/x-two", teamCount=5),
+        SimpleNamespace(ref="https://www.kaggle.com/competitions/x", teamCount=teams),
+    ]
+    return SimpleNamespace(
+        competition_leaderboard_view=lambda competition: entries if competition == "x" else [],
+        competitions_list=lambda search, category: listed,
+    )
+
+
+def test_leaderboard_download_refuses_a_truncated_view(tmp_path, monkeypatch):
+    import timeseriesgym.data as data
+
+    monkeypatch.chdir(tmp_path)
+    competition = SimpleNamespace(id="x", leaderboard=tmp_path / "leaderboard.csv")
+    # one page of the view, as kaggle 1.6.17 reads it: it was written, as OSIC's 20 rows were
+    monkeypatch.setattr(data, "authenticate_kaggle_api", lambda: _fake_kaggle_api(20, 2097))
+    with pytest.raises(RuntimeError, match="20 rows .* 2097 teams"):
+        data.ensure_leaderboard_exists(competition, force=True)
+    assert not competition.leaderboard.exists()
+
+    # benchmarks make a final leaderboard a little longer than the team count
+    monkeypatch.setattr(data, "authenticate_kaggle_api", lambda: _fake_kaggle_api(2150, 2148))
+    data.ensure_leaderboard_exists(competition, force=True)
+    written = pd.read_csv(competition.leaderboard)
+    assert len(written) == 2150 and list(written.columns) in LEADERBOARD_COLUMNS
+
+
 # ---------------------------------------------------------------- hyperparameter search
 
 

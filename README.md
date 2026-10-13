@@ -177,6 +177,21 @@ timeseriesgym grade --submission submissions.jsonl --output-dir results/
 timeseriesgym grade-sample predictions.csv amp-parkinsons-disease-progression-prediction
 ```
 
+#### Medals
+
+Reports give Kaggle's medals (`gold_medal`, `silver_medal`, `bronze_medal`, `above_median`) and
+their thresholds, ranked by Kaggle's rules against the challenge's `leaderboard.csv`; challenges
+without a real leaderboard award none. The scores are TimeSeriesGym's own: most Kaggle-derived
+challenges hold out their test set from the competition's training data, while the leaderboard was
+scored on Kaggle's test set, so a medal places a score only approximately. Three challenges differ
+more, and their descriptions say so:
+
+- **LANL-Earthquake-Prediction**: the test segments have 15,000 rows; Kaggle's had 150,000.
+- **amp-parkinsons-disease-progression-prediction**: the test set is 10% of the patients in
+  Kaggle's training data; the leaderboard was scored on Kaggle's hidden test set.
+- **ashrae-energy-prediction**: the test set is the last two months of 2016; the leaderboard was
+  scored on Kaggle's test data from 2017 and 2018.
+
 #### Evaluating Hyperparameter Search Results
 
 ```bash

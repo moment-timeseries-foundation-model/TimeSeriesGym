@@ -570,6 +570,21 @@ def get_checksum(fpath: Path) -> str:
     return hash_md5.hexdigest()
 
 
+# Kaggle's final leaderboard has about as many rows as Kaggle counts teams, not exactly: it lists
+# Kaggle's benchmarks, and not every team (ashrae: 3,592 rows for 3,614 teams; recruit: 2,150 for
+# 2,148, two of them benchmarks). The leaderboard view is paged, and kaggle 1.6.17 reads only its
+# first page of 20 rows: OSIC's leaderboard was the top 20 of 2,097 teams.
+MIN_LEADERBOARD_ROWS_PER_TEAM = 0.95
+
+
+def kaggle_team_count(api, competition_id: str) -> int | None:
+    """The number of teams Kaggle reports for the competition, or None if it is not listed."""
+    for found in api.competitions_list(search=competition_id, category="all"):
+        if str(found.ref).rstrip("/").split("/")[-1] == competition_id:
+            return int(found.teamCount)
+    return None
+
+
 def ensure_leaderboard_exists(competition: Competition, force: bool = False) -> Path:
     """
     Ensures the leaderboard for a given competition exists in the competition's
@@ -590,6 +605,19 @@ def ensure_leaderboard_exists(competition: Competition, force: bool = False) -> 
     api = authenticate_kaggle_api()
     leaderboard = api.competition_leaderboard_view(competition=competition.id)
     if leaderboard:
+        # medal thresholds are ranked by the number of rows, so a truncated leaderboard is wrong
+        teams = kaggle_team_count(api, competition.id)
+        if teams is None:
+            raise RuntimeError(
+                f"Kaggle lists no competition `{competition.id}`, so the leaderboard's length "
+                "cannot be checked; not writing it."
+            )
+        if len(leaderboard) < MIN_LEADERBOARD_ROWS_PER_TEAM * teams:
+            raise RuntimeError(
+                f"Kaggle's leaderboard view gave {len(leaderboard)} rows for `{competition.id}`, "
+                f"which has {teams} teams: the view is paged, and this client reads only its first "
+                "page. Not writing the truncated leaderboard."
+            )
         leaderboard = [row.__dict__ for row in leaderboard]
         leaderboard_df = pd.DataFrame(leaderboard)
         leaderboard_df.drop(columns=["teamNameNullable", "teamName"], inplace=True)
