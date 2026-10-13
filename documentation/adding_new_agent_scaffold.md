@@ -184,11 +184,19 @@ kwargs_common: &kwargs_common
     # Agent-specific configuration
     agent.model: gpt-4
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    # Optional: API keys or other environment variables
-    API_KEY: ${{ secrets.API_KEY }}
+  model_proxy:
+    # API keys stay on the host, in the run's model proxy; the agent gets OPENAI_BASE_URL and
+    # a dummy OPENAI_API_KEY (see agents/README.md#network-and-model-access)
+    providers:
+      openai:
+        key: ${{ secrets.OPENAI_API_KEY }}
+        models: [gpt-4]
 ```
+
+Agent containers have no network. Your agent must call its models through the base URLs in its
+environment (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, ...; the official SDKs read them), and its
+image must contain everything it needs at run time. `env_vars` and `kwargs` may not hold
+`${{ secrets.* }}` values: agent code can read them.
 
 ## Step 5: Create Additional Agent Files
 
