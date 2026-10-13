@@ -340,6 +340,19 @@ Rebuilding these challenges gives different files; results on the old data are n
   the name prepare expects (e232319).
 - **Derived competitions**: preparing one no longer rewrites its shipped leaderboard when it is
   already the parent's (c459f01). The write failed on a read-only install.
+- **optiver-realized-volatility-prediction (and its -missing and hyperparameter-search
+  variants)**: the test is the 12 held-out stocks at 958 of the 3,830 time buckets (a seeded 25%),
+  and `train.csv` has the 100 training stocks at the other 2,872 time buckets only (4f4a40d,
+  2b5da40). The test was the 12 stocks at all 3,830 time buckets, so `train.csv` held the other
+  100 stocks' targets at every test time bucket: a model using their mean per time bucket scored
+  RMSPE 0.19451, better than Kaggle's winner (0.19548), and that mean times a per-stock scale
+  from the book data alone scored 0.254, against 0.323 for persistence. `train.csv` now has no
+  target at a test time bucket, for any stock. The book and trade files are unchanged: every
+  stock at every time bucket, as on Kaggle, which gave the test period's order book but not its
+  targets. The test has 11,496 rows (was 45,959) and `train.csv` 287,182 (was 382,973); scores
+  on the old split are not comparable (persistence: 0.30974, was 0.32349). Only the four CSVs
+  change, except that -missing also regenerates the checksums of its 200 NaN-injected parquet
+  files, which could not be reproduced (writer bytes; the NaN masks are seeded and unchanged).
 
 ## Benchmark composition
 
@@ -426,7 +439,8 @@ tolerances), and the two missing-data variants got their own descriptions (5bc01
 ba20262, 7c8ab69, 1982829, 9d33b49, 2fea25d, 7184ca2, ee128f2, fe08ba1, bf7d9c8, 8eb58e3, b51204b,
 21a5539, 630b7c3, 2c6a043, fa269d1, e30030e, 948a8c4, a9f20f7, f88e57a, cd734df, 617f82d, e232319,
 ddba7bf, c044e1d, 9e5e756, 7c12345, b8026f5 and 9bf064a (the gift-eval metric). They change what
-agents are told, not how they are graded.
+agents are told, not how they are graded. The three Optiver descriptions state the held-out time
+buckets (848cb92).
 
 The descriptions of LANL-Earthquake-Prediction, amp-parkinsons-disease-progression-prediction and
 ashrae-energy-prediction, and a new README section, say that their medals compare scores on
