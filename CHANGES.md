@@ -65,8 +65,9 @@ enhancement" and "Prepared data".
 ## Predictor challenges
 
 Two challenges: gift-eval-short-horizon and time-series-library-long-horizon-forecast. The code
-is the new package `timeseriesgym/predictor` (f5e9bda, e535b65, 56af8ea, b7626a4); the challenges
-change in 39a46a6 and 7ba10ad, the agent instructions in 15067c8, and the tests are in 12bf4d9.
+is the new package `timeseriesgym/predictor` (f5e9bda, e535b65, 56af8ea, b7626a4, 0e63610,
+2789748); the challenges change in 39a46a6, 7ba10ad and d541ce5, the agent instructions in
+15067c8, and the tests are in 12bf4d9 and 2db1b57.
 
 - **The test labels were in the public data.** GIFT-Eval published the full series from which
   the answers are cut, and other frequencies of the same series, whose sums equal coarser labels
@@ -117,7 +118,9 @@ change in 39a46a6 and 7ba10ad, the agent instructions in 15067c8, and the tests 
 - **The local check** (`python /home/data/check_predictor.py`) runs a predictor on validation
   windows of the public data with the grader's format check, windows, calls and runner, and
   prints each dataset's score from the challenge's own `grade.py` and a run-time estimate. It
-  gives no reward estimate.
+  gives no reward estimate. For a metric whose answers hold per-window scales (GIFT-Eval's
+  normalized MASE, pr1/a3-gift-mase) it computes them for the validation windows with the
+  metric's own `window_baselines`.
 - **Value-overlap scan** (`python -m timeseriesgym.predictor.leakscan <id>`): on the new public
   data, 0 hits in 4 of 5 GIFT-Eval and 7 of 9 TSL datasets. The others are properties of the
   data, not copies of the test period. m4_daily: 21 of its 4,196 informative test windows occur
