@@ -77,6 +77,46 @@ def test_ucr_requires_every_dataset():
         grade({"easy": labels.copy()}, answers)
 
 
+def test_ucr_score_is_the_average_precision_that_chance_does_not_earn():
+    from sklearn.metrics import average_precision_score
+
+    from timeseriesgym.metrics import adjusted_best_f1
+
+    grade = _grade_fn("ucr-anomaly-detection")
+    labels = np.zeros(2000)
+    labels[750:850] = 1
+    answers = {"a": labels}
+    rng = np.random.default_rng(0)
+    random = rng.random(2000)
+    comb = np.zeros(2000)
+    comb[::400] = 1.0  # knows nothing of the labels, but one tooth lands in the anomaly
+    for label_free in [random, comb, np.zeros(2000)]:
+        assert grade({"a": label_free}, answers) < 0.1  # about the share of anomalous points
+    # the old score, the point-adjusted best F1, paid the random scores and the comb
+    assert adjusted_best_f1(labels, random) > 0.5
+    assert adjusted_best_f1(labels, comb) > 0.9
+
+    honest = labels + rng.normal(0, 0.3, 2000)  # an imperfect detector
+    assert grade({"a": honest}, answers) == pytest.approx(average_precision_score(labels, honest))
+    assert 0.5 < grade({"a": honest}, answers) < 1.0
+    assert grade({"a": labels.copy()}, answers) == 1.0
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "column", "text"])
+def test_ucr_scores_must_be_finite_numbers_in_the_shape_of_the_labels(bad):
+    grade = _grade_fn("ucr-anomaly-detection")
+    labels = np.zeros(100)
+    labels[40:50] = 1
+    scores = {
+        "nan": np.full(100, np.nan),  # was graded 0.0
+        "inf": np.r_[np.zeros(99), np.inf],  # was graded 0.0
+        "column": labels.reshape(100, 1),  # was graded 1.0
+        "text": np.array(["a"] * 100),  # was an unexpected error
+    }[bad]
+    with pytest.raises(InvalidSubmissionError):
+        grade({"a": scores}, {"a": labels})
+
+
 # ---------------------------------------------------------------- exact-match graders
 
 
@@ -413,12 +453,14 @@ def test_aggregate_reports_accepts_code_reports():
 # ---------------------------------------------------------------- feature enhancement
 
 
-def test_feature_enhancement_grader_is_reachable(tmp_path):
+def test_feature_enhancement_grader_is_reachable(tmp_path, monkeypatch):
     from timeseriesgym.grade_helpers import GradingInput
     from timeseriesgym.registry import Registry
 
     cid = "ptb-xl-classification-challenge-feature-enhancement"
     competition = Registry(tmp_path).get_competition(cid)
+    clean = subprocess.CompletedProcess([], 0, "", "")  # flake8, which is not installed everywhere
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: clean)
     assert competition.feature_enhancement_config["model_code_file"] == "model.py"
     example = (
         Path(importlib.import_module("timeseriesgym").__file__).parent
@@ -436,7 +478,33 @@ def test_feature_enhancement_grader_is_reachable(tmp_path):
         )
     )
     assert isinstance(score, dict) and score["accuracy"] == pytest.approx(1.0)
-    assert 0.0 <= score["overall_score"] <= 1.0
+    assert not score["rubric_passed"] and score["overall_score"] == 0.0  # no TensorBoard logs
+
+
+def test_feature_enhancement_without_flake8_is_a_setup_error(tmp_path, monkeypatch):
+    import shutil
+
+    from timeseriesgym.grade import grade_feature_enhancement
+    from timeseriesgym.registry import Registry
+
+    cid = "ptb-xl-classification-challenge-feature-enhancement"
+    competition = Registry(tmp_path / "data").get_competition(cid)
+    example = Path(importlib.import_module("timeseriesgym").__file__).parent / "competitions"
+    folder = tmp_path / "submission"
+    shutil.copytree(example / cid / "example", folder)
+    competition.answers.parent.mkdir(parents=True)
+    shutil.copyfile(folder / "submission.csv", competition.answers)
+
+    clean = subprocess.CompletedProcess([], 0, "", "")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: clean)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    report = grade_feature_enhancement(folder, competition)
+    assert report.valid_submission and report.score["accuracy"] == pytest.approx(1.0)
+
+    # without flake8 no submission can pass the rubric: grading stops (each run was invalid)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(ValueError, match="flake8 is not installed"):
+        grade_feature_enhancement(folder, competition)
 
 
 # ---------------------------------------------------------------- RMSLE graders

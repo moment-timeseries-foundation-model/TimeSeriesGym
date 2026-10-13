@@ -213,9 +213,10 @@ timeseriesgym grade-feature-enhancement run/submission/ \
   --solution-files-path run/code/
 ```
 
-The score is a dict of sub-scores (TensorBoard, code quality, Hydra configuration, accuracy) and
-their mean, `overall_score`. Without `--solution-files-path`, the code, configuration and logs are
-read from the submission folder.
+The score is a dict: the sub-scores (TensorBoard, code quality, Hydra configuration), the
+accuracy, `rubric_passed`, and `overall_score`, which is the accuracy if every check of the three
+sub-scores passes and 0 otherwise. Without `--solution-files-path`, the code, configuration and
+logs are read from the submission folder.
 
 #### Evaluating Code Submissions
 

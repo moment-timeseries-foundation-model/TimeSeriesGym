@@ -38,6 +38,16 @@ the medals are not comparable for those named under "Medals and leaderboards".
 - **ucr-anomaly-detection**: the score averages over every dataset in the answers (229df50).
   It iterated over the submission's keys, so a submission with only the easiest dataset was
   scored on that one alone.
+- **ucr-anomaly-detection**: the score is each dataset's average precision on the point labels
+  (`sklearn.metrics.average_precision_score`), averaged over the datasets; it was the
+  point-adjusted best F1 (d7cb84e). Point adjustment pays chance: on the shipped data, 20 seeded
+  uniform-random submissions average 0.453 (0.377 to 0.543), and a label-free comb (every 400th
+  point 1) earns 0.540, both above a rolling z-score (0.364). In average precision, a constant
+  scores 0.0086 (the share of anomalous points), random scores 0.0095 (median of 20 seeds), the
+  comb 0.0088, a nearest-neighbour distance to the training series 0.417, and the labels 1.0.
+  The point-adjusted F1 is still logged. Scores must be finite numbers in the labels' shape: NaN
+  and infinite scores were graded 0.0, and an (n, 1) column of the labels 1.0. The placeholder
+  leaderboard stays ignored, so no medals.
 - **gift-eval-short-horizon**: the score is GIFT-Eval's leaderboard metric, each dataset's MASE
   divided by the seasonal naive forecast's MASE, geometric mean over the 5 datasets (4c2294b).
   It was MAPE, which divides by max(|actual|, eps): a non-zero forecast where the actual value is
@@ -131,6 +141,39 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
   cut at the `#`, losing any `model:` key after it.
 - **Reports**: dict scores are written as JSON objects (1fac171); they were a Python repr string
   that `from_dict` could not read.
+- **Score** (`overall_score`): the test accuracy if every rubric check passes, and 0 otherwise
+  (e87c88d); it was the mean of the TensorBoard, code-quality and Hydra sub-scores and the
+  accuracy. Three quarters of it came from keyword and AST checks: with the rubric passed, any
+  predictions scored at least 0.75, and the most frequent training class for every ECG 0.888.
+  The lint check passes only with no flake8 problems; the code-quality sub-score keeps its
+  partial credit. The sub-scores and the accuracy are still reported, with `rubric_passed`, and
+  the description lists what each check requires. The design is the RL conversion's (rl_envs
+  DEVIATIONS G12).
+- **Model from the config**: the Hydra check passes if `train.py` builds the model from the
+  config's `model` section: it passes the section, or a value read from it, to a class or
+  function of `model.py` or to `hydra.utils.instantiate`, or it passes an argument to a class or
+  function of `model.py` that reads a parameter's `model` section (ef6a6bd). The check looked for
+  the text `cfg.model` or `cfg['model']` in `train.py`: it rejected `ECGClassifier(config)` with
+  a model that reads `config.model`, and accepted `print(dict(cfg.model))`, which an agent added
+  in an evaluation run to pass it. The shipped example passes as before.
+- **flake8**: a dependency (7.1.1), and a flake8 that cannot run is a grading error (eda11ed). It
+  was neither declared nor installed in the tsgym-core image; a missing flake8 gave half the lint
+  credit, so no code-quality score could reach 1.0, and a run that failed without a report
+  counted as no problems. The shipped example's one flake8 problem (E203) is fixed (d754b5d).
+  Grading stops with a setup error when flake8 is not installed (ac59df8), as for a missing HPS
+  sample submission; every run in the batch was graded invalid.
+- **flake8 options**: the lint check runs `flake8 --isolated --disable-noqa --extend-ignore=E203
+  --max-line-length=100` (3cc2cce); it ran `flake8 --max-line-length=100`. A `# noqa` comment
+  or a configuration file in flake8's working directory could switch checks off, and E203
+  failed the slices that black and ruff write (`x[i : i + 1]`), the repository's own format.
+- **Code checks and event files**: the TensorBoard checks (the import, `SummaryWriter(...)`,
+  `.add_scalar(...)`, `.add_graph(...)`) and the Hydra checks (the import, `@hydra.main`,
+  `OmegaConf` or `DictConfig`) look at train.py's syntax tree; they were regular expressions,
+  so code in a string literal passed them (a train.py that held a training script as a string
+  scored 0.8 on both). A TensorBoard log must be an event file that holds a logged scalar
+  (CRC-checked TFRecord records, as SummaryWriter writes them); any file named
+  `events.out.tfevents.*`, even an empty one, counted (a7fbd91). The checks are the rl_envs
+  rubric's (F4-04). The shipped example with SummaryWriter's own event file passes every check.
 
 ## Medals and leaderboards
 
@@ -256,6 +299,13 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **ucr-anomaly-detection**: the shipped `anomaly_dataset.py` reads `train/{name}.csv` (e232319),
   and its docstring no longer says the sample submission holds the labels (7ed1429; its
   checksum changes).
+- **ucr-anomaly-detection labels**: the archive's indices are 1-based and inclusive, as its
+  readme says ("From 1 to X is training data"; an anomaly's length is end - begin + 1)
+  (e306273). The labels started one point late and missed each anomaly's first point: in 005,
+  the only labelled point was the one after the distorted point. The labels now have 621, 2,
+  301, 45 and 31 anomalous points (were 620, 1, 300, 44 and 30). The training split and the
+  public files are unchanged; the checksum of `labels.h5` is regenerated from two identical
+  rebuilds.
 - **Prepare scripts**: downloads are checked (`curl -fsSL`, checked subprocesses) and failures
   raise (262a3b3); an HTTP error page was saved as the data, stomp's answers included. The
   ucr, gift-eval and MIT-BIH-WS prepare scripts work from any directory, and the PTB-XL zip has
