@@ -1,5 +1,6 @@
-"""The agent's format check (agents/validation.py, environment/validate_submission.py), and the
-grading step after the agent's container has stopped (agents/grading.py)."""
+"""The agent's container has only public data and a format check; runs are graded afterwards in
+a separate container with the private data (agents/run.py, agents/validation.py,
+agents/grading.py, environment/validate_submission.py)."""
 
 import asyncio
 import importlib
@@ -11,6 +12,7 @@ import pickle
 import re
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,7 +23,7 @@ import pytest
 import requests
 
 from agents.grading import DATA_DIR, grade_run
-from agents.validation import submission_contract
+from agents.validation import OutdatedImageError, install_contract, submission_contract
 from environment import validate_submission as vs
 from timeseriesgym.registry import Registry
 
@@ -363,6 +365,125 @@ def test_the_format_check_runs_without_timeseriesgym(tmp_path):
     assert out.returncode == 0 and out.stdout.startswith(vs.VALID), out.stderr
 
 
+# ---------------------------------------------------------------- the agent's container
+
+
+class _FakeExecAPI:
+    def exec_create(self, container_id, cmd, user):
+        return {"Id": "exec-1"}
+
+    def exec_start(self, exec_id, stream):
+        yield b"agent output\n"
+
+    def exec_inspect(self, exec_id):
+        return {"ExitCode": 0}
+
+
+class _FakeAgentContainer:
+    def __init__(self, put_archive=None):
+        self.id, self.name = "c1", "competition-x"
+        self.client = SimpleNamespace(api=_FakeExecAPI())
+        self.events, self.archives = [], []
+        self._put_archive = put_archive
+
+    def put_archive(self, path, data):
+        self.events.append("put_archive")
+        if self._put_archive:
+            return self._put_archive(path, data)
+        self.archives.append((path, data))
+        return True
+
+    def start(self):
+        self.events.append("start")
+
+    def exec_run(self, cmd):
+        self.events.append(("exec_run", cmd))
+        return 0, b""
+
+    def stop(self):
+        self.events.append("stop")
+
+    def remove(self):
+        self.events.append("remove")
+
+
+def _run_agent_phase(tmp_path, monkeypatch, container) -> tuple[dict, list]:
+    agents_run = importlib.import_module("agents.run")
+    created = {}
+
+    def create(**kwargs):
+        created.update(kwargs)
+        return container
+
+    monkeypatch.setattr(agents_run, "create_competition_container", create)
+    monkeypatch.setattr(agents_run, "save_output", lambda c, run_dir, cfg: None)
+    competition = _competition(tmp_path, "spaceship-titanic", SPACESHIP_SAMPLE)
+    competition.private_dir.mkdir(parents=True)
+    competition.answers.write_text("PassengerId,Transported\n0001_01,True\n")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    agent = SimpleNamespace(kwargs_type=None, kwargs={}, env_vars={"K": "v"}, privileged=False)
+    exit_code = agents_run.run_in_container(
+        client=None,
+        competition=competition,
+        agent=agent,
+        image="img",
+        container_config={},
+        retain_container=False,
+        run_dir=run_dir,
+        logger=LOGGER,
+    )
+    assert exit_code == 0
+    return created, competition
+
+
+def test_the_agents_container_gets_only_the_public_data(tmp_path, monkeypatch):
+    container = _FakeAgentContainer()
+    created, competition = _run_agent_phase(tmp_path, monkeypatch, container)
+    # the answers were mounted at /private/data/<id>/prepared/private, behind a mode-700 directory
+    public = competition.public_dir.resolve().as_posix()
+    assert created["volumes_config"] == {public: {"bind": "/home/data", "mode": "ro"}}
+    passed = {k: v for k, v in created.items() if k != "competition"}
+    assert str(competition.private_dir) not in json.dumps(passed, default=str)
+    assert created["env_vars"] == {"COMPETITION_ID": "spaceship-titanic", "K": "v"}
+
+    # the format check's contract, written into the created container before it starts
+    assert container.events[:2] == ["put_archive", "start"]
+    ((path, data),) = container.archives
+    assert path == "/opt/timeseriesgym"
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        (member,) = tar.getmembers()
+        contract = json.loads(tar.extractfile(member).read())
+    assert member.name == "contract.json" and member.mode == 0o644
+    assert contract["data_dir"] == "/home/data" and contract["submission_dir"] == "/home/submission"
+    assert contract["file"]["id_columns"] == ["PassengerId"]
+    saved = json.loads((tmp_path / "run" / "validation_contract.json").read_text())
+    assert saved == contract
+    # no grading server to wait for; the agent starts once the entrypoint has prepared /home
+    (_, wait) = next(e for e in container.events if isinstance(e, tuple))
+    assert "/run/timeseriesgym-ready" in wait[-1] and "5000" not in " ".join(wait)
+
+
+def test_images_from_before_the_format_check_are_refused(tmp_path, monkeypatch):
+    def missing(path, data):
+        raise docker.errors.NotFound("Could not find the file /opt/timeseriesgym in container")
+
+    container = _FakeAgentContainer(put_archive=missing)
+    with pytest.raises(OutdatedImageError, match="Rebuild timeseriesgym-env"):
+        _run_agent_phase(tmp_path, monkeypatch, container)
+    assert container.events == ["put_archive", "stop", "remove"]  # the agent never started
+
+
+def test_the_contract_is_installed_as_a_file(tmp_path):
+    container = _FakeAgentContainer()
+    install_contract(container, {"kind": "none", "note": "x"})
+    ((_, data),) = container.archives
+    out = tmp_path / "out"
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        tar.extractall(out, filter="data")
+    assert json.loads((out / "contract.json").read_text()) == {"kind": "none", "note": "x"}
+
+
 # ---------------------------------------------------------------- the grading step
 
 
@@ -560,3 +681,34 @@ def test_run_agent_needs_the_grader_image(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="--skip-grading"):
         asyncio.run(run_agent.main(args))
+
+
+# ---------------------------------------------------------------- images
+
+
+def _stages(dockerfile: str) -> dict[str, str]:
+    """The Dockerfile's stages by name (the unnamed last one, the default target, is '')."""
+    parts = re.split(r"^FROM ", dockerfile, flags=re.M)[1:]
+    stages = {}
+    for part in parts:
+        first = part.splitlines()[0]
+        name = first.split(" AS ")[1].strip() if " AS " in first else ""
+        stages[name] = part
+    return stages
+
+
+def test_the_agents_image_has_no_graders_or_private_data():
+    stages = _stages((REPO / "environment" / "Dockerfile").read_text())
+    agent, grader = stages[""], stages["grader"]
+    assert list(stages)[-1] == ""  # `docker build -f environment/Dockerfile .` builds the agent's
+    for leak in ("COPY . ", "pip install -e", "/private", "grading_server", "flask"):
+        assert leak not in agent
+    tool = vs.CONTRACT_PATH.parent / "validate_submission.py"
+    assert f"COPY environment/validate_submission.py {tool}" in agent
+    assert "COPY . /timeseriesgym" in grader and 'ENTRYPOINT ["timeseriesgym"]' in grader
+    entrypoint = (REPO / "environment" / "entrypoint.sh").read_text()
+    assert "grading_server" not in entrypoint and "/private" not in entrypoint
+    agents_run = importlib.import_module("agents.run")
+    assert f"touch {agents_run.READY_FILE}" in entrypoint
+    wrapper = (REPO / "environment" / "validate_submission.sh").read_text()
+    assert f"exec /opt/conda/bin/python -I {tool} " in wrapper and "5000" not in wrapper

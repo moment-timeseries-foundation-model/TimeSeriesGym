@@ -41,5 +41,5 @@ mkdir -p $AGENT_DIR
 # signal that the entrypoint has finished
 touch $AGENT_DIR/entrypoint_done
 
-# wait for root entrypoint (a server), need this otherwise the container exits
+# wait for root entrypoint (it stays alive), need this otherwise the container exits
 wait

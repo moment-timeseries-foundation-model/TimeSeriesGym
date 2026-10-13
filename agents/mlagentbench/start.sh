@@ -38,7 +38,7 @@ export TIME_LIMIT=$(format_time $TIME_LIMIT_SECS)
 # --------- Environment checks
 
 # Confirm that we don't have access to this
-ls /private  # Expect "permission denied"
+ls /private  # Expect "No such file or directory": the answers are not in this container
 # Data should be mounted correctly
 ls /home/data  # Expect to see the data files
 # Confirm that validation tool works

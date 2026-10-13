@@ -375,9 +375,10 @@ def validate_submission(
     prediction files. `solution_file_path` is the solution code of a hyperparameter-search
     folder (a script or a directory, as for `grade_hyperparameter_search`).
 
-    The in-container grading server runs this as root on files the agent uploads, so agent code
-    is never imported here: code submissions are only parsed, models are not loaded, and pickles
-    are decoded with an allowlist of plain types (see `load_submissions`).
+    It may run on files an agent wrote, with the answers readable, so agent code is never
+    imported here: code submissions are only parsed, models are not loaded, and pickles are
+    decoded with an allowlist of plain types (see `load_submissions`). Agents themselves check
+    their submissions with environment/validate_submission.py, which has no answers.
     """
     if competition.hyperparameter_search_config is not None and submission.is_dir():
         _ensure_prepared(competition)

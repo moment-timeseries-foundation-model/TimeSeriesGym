@@ -1,7 +1,7 @@
-# Build context of environment/Dockerfile (`docker build -f environment/Dockerfile .`).
-# That image is the agent's container and `COPY . /timeseriesgym` makes everything in the
-# context readable by the agent, so only what the grading server needs is sent: the package
-# and the environment files. Everything else in a checkout stays out: git history, the Git LFS
+# Build context of environment/Dockerfile (`docker build -f environment/Dockerfile .`). The
+# agent's image copies only files of environment/; the grader's (`--target grader`) copies the
+# whole context, `COPY . /timeseriesgym`, so only what grading needs is sent: the package and
+# the environment files. Everything else in a checkout stays out: git history, the Git LFS
 # archive of raw challenge data (timeseriesgym/data/, which holds test answers), earlier runs,
 # prepared data, .env files and caches.
 *
