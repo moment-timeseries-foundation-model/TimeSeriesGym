@@ -146,6 +146,20 @@ One challenge: ptb-xl-classification-challenge-feature-enhancement.
   was neither declared nor installed in the tsgym-core image; a missing flake8 gave half the lint
   credit, so no code-quality score could reach 1.0, and a run that failed without a report
   counted as no problems. The shipped example's one flake8 problem (E203) is fixed (d754b5d).
+  Grading stops with a setup error when flake8 is not installed (ac59df8), as for a missing HPS
+  sample submission; every run in the batch was graded invalid.
+- **flake8 options**: the lint check runs `flake8 --isolated --disable-noqa --extend-ignore=E203
+  --max-line-length=100` (3cc2cce); it ran `flake8 --max-line-length=100`. A `# noqa` comment
+  or a configuration file in flake8's working directory could switch checks off, and E203
+  failed the slices that black and ruff write (`x[i : i + 1]`), the repository's own format.
+- **Code checks and event files**: the TensorBoard checks (the import, `SummaryWriter(...)`,
+  `.add_scalar(...)`, `.add_graph(...)`) and the Hydra checks (the import, `@hydra.main`,
+  `OmegaConf` or `DictConfig`) look at train.py's syntax tree; they were regular expressions,
+  so code in a string literal passed them (a train.py that held a training script as a string
+  scored 0.8 on both). A TensorBoard log must be an event file that holds a logged scalar
+  (CRC-checked TFRecord records, as SummaryWriter writes them); any file named
+  `events.out.tfevents.*`, even an empty one, counted (a7fbd91). The checks are the rl_envs
+  rubric's (F4-04). The shipped example with SummaryWriter's own event file passes every check.
 
 ## Medals and leaderboards
 
