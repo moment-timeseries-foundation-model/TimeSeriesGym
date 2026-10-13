@@ -7,6 +7,7 @@ import pandas as pd
 from numpy import ndarray
 from scipy.special import softmax
 
+from timeseriesgym import sandbox
 from timeseriesgym.utils import (
     RUNTIME_ONLY_HYPERPARAMETERS,
     InvalidSubmissionError,
@@ -296,6 +297,62 @@ def _solution_sources(solution_path: Path) -> list[str]:
     return sources
 
 
+def compare_models(work: Path, job: dict) -> None:
+    """The sandbox half of grade_relative_improvement: load the two submitted models (pickles
+    or TorchScript, which can run code) and compare their hyperparameters, as the native grader
+    did. Saves out/models.json: whether they differ, whether the baseline has the defaults, or
+    the error that made the native grader reject the submission."""
+    result = {}
+    try:
+        baseline_model = load_models(work / job["baseline_model_name"])
+        improved_model = load_models(work / job["improved_model_name"])
+        result["different"] = bool(have_different_hyperparameters(baseline_model, improved_model))
+        if result["different"] and job["default_baseline"] is not None:
+            result["default_baseline"] = bool(
+                has_default_hyperparameters(baseline_model.model, job["default_baseline"])
+            )
+    except Exception as e:
+        result = {"error": f"{type(e).__name__}: {e}"[:2000]}
+    sandbox.write_json(work, "models.json", result)
+
+
+def _compared_models(
+    submission_folder_path: Path,
+    hyperparameter_search_config: dict,
+    default_baseline: str | None,
+    private_paths,
+) -> dict:
+    """compare_models' verdict, run in the grading sandbox. Raises InvalidSubmissionError where
+    the native grader raised (a model that does not load, models of different types)."""
+    names = [
+        hyperparameter_search_config["baseline_model_name"],
+        hyperparameter_search_config["improved_model_name"],
+    ]
+    job = {
+        "baseline_model_name": names[0],
+        "improved_model_name": names[1],
+        "default_baseline": default_baseline,
+    }
+    with sandbox.run(
+        f"{__name__}:compare_models",
+        job,
+        sandbox.Limits.for_challenge(default_timeout_sec=600),
+        agent_files={name: Path(submission_folder_path) / name for name in names},
+        protected=private_paths or (),
+    ) as run:
+        result = run.result("models.json")
+    if isinstance(result, dict) and isinstance(result.get("error"), str):
+        raise InvalidSubmissionError(
+            f"Submission invalid! The models could not be loaded and compared: {result['error']}"
+        )
+    usable = isinstance(result, dict) and isinstance(result.get("different"), bool)
+    if usable and result["different"] and default_baseline is not None:
+        usable = isinstance(result.get("default_baseline"), bool)
+    if not usable:
+        raise InvalidSubmissionError("Submission invalid! Unusable results from the sandbox.")
+    return result
+
+
 def grade_relative_improvement(
     submission_folder_path: Path,
     answers: pd.DataFrame,
@@ -306,6 +363,7 @@ def grade_relative_improvement(
     lower_is_better: bool,
     packages_to_look_for: list[str] | None = None,
     default_baseline: str | None = None,
+    private_paths: tuple[Path, ...] | None = None,
 ) -> float:
     """
     Grades a hyperparameter search as the relative improvement of the improved submission's
@@ -321,6 +379,9 @@ def grade_relative_improvement(
     default list), if the two models have the same hyperparameters, or, when `default_baseline`
     names a class, if the baseline model is not that class with default hyperparameters (see
     `has_default_hyperparameters`).
+
+    The models are loaded and compared in the grading sandbox (`compare_models`), which cannot
+    read `private_paths`; the prediction files are graded here.
     """
     if sample_submission_path is None or not Path(sample_submission_path).is_file():
         raise ValueError(
@@ -341,11 +402,8 @@ def grade_relative_improvement(
         logger.info("[INFO] Hyperparameter searching attempt not found.")
         return np.inf * -1
 
-    baseline_model = load_models(
-        submission_folder_path / hyperparameter_search_config["baseline_model_name"]
-    )
-    improved_model = load_models(
-        submission_folder_path / hyperparameter_search_config["improved_model_name"]
+    models = _compared_models(
+        submission_folder_path, hyperparameter_search_config, default_baseline, private_paths
     )
     baseline_submission = load_submissions(
         submission_folder_path / hyperparameter_search_config["baseline_submission_name"]
@@ -354,13 +412,11 @@ def grade_relative_improvement(
         submission_folder_path / hyperparameter_search_config["improved_submission_name"]
     )
 
-    if not have_different_hyperparameters(baseline_model, improved_model):
+    if not models["different"]:
         logger.info("[INFO] The hyperparameters are the same as the baseline model.")
         return np.inf * -1
 
-    if default_baseline is not None and not has_default_hyperparameters(
-        baseline_model.model, default_baseline
-    ):
+    if default_baseline is not None and not models["default_baseline"]:
         logger.info(f"[INFO] The baseline model is not {default_baseline}() with defaults.")
         return np.inf * -1
 

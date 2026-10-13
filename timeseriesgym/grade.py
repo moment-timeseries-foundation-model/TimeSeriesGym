@@ -204,6 +204,7 @@ def grade_hyperparameter_search(
         hyperparameter_search_config=hyperparameter_search_config,
         solution_file_path=Path(path_to_solution) if path_to_solution else None,
         sample_submission_path=competition.sample_submission,
+        private_paths=_private_paths(competition),
     )
     score = competition.grader(grading_input)
 

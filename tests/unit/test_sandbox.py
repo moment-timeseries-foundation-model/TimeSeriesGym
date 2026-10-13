@@ -1,4 +1,4 @@
-"""Agent code runs in the grading sandbox (timeseriesgym/sandbox.py), never in the
+"""Agent code and models run in the grading sandbox (timeseriesgym/sandbox.py), never in the
 grading process, which holds the answers.
 
 The parity tests also pass on the commit before the sandbox: well-behaved submissions score as
@@ -9,6 +9,7 @@ behind, and crash, exhaust or hang the grader.
 
 import io
 import os
+import pickle
 import shutil
 import signal
 import subprocess
@@ -25,12 +26,14 @@ import pytest
 import torch
 
 from timeseriesgym import sandbox
-from timeseriesgym.grade import grade_code
+from timeseriesgym.grade import grade_code, grade_hyperparameter_search
 from timeseriesgym.registry import Registry
 
 REPO = Path(__file__).resolve().parents[2]
 STOMP = "stomp-R-to-python"
 RESNET = "resnet-tensorflow-to-pytorch"
+OPTIVER = "optiver-realized-volatility-prediction-hyperparameter-search"
+SEARCH = "import optuna\nstudy = optuna.create_study()\nstudy.optimize(objective, n_trials=20)\n"
 STOMP_COLUMNS = [
     *(f"mp_self_{c}" for c in ("mp", "pi", "rmp", "rpi", "lmp", "lpi")),
     "mp_join_mp",
@@ -394,6 +397,88 @@ def test_without_root_landlock_keeps_the_answers_from_agent_code():
         assert out.stdout.strip().splitlines()[-1] == "(False, None, None, None)"
     finally:
         shutil.rmtree(home)
+
+
+# ---------------------------------------------------------------- hyperparameter search
+
+
+class _Payload:
+    """Pickles to a call of `Path.touch`: unpickling it creates the marker file."""
+
+    def __init__(self, marker: Path):
+        self.marker = marker
+
+    def __reduce__(self):
+        return Path.touch, (self.marker,)
+
+
+class _Exit:
+    """Pickles to a call of `os._exit`."""
+
+    def __reduce__(self):
+        return os._exit, (0,)
+
+
+def _optiver_submission(tmp_path: Path, baseline, improved):
+    """A prepared Optiver hyperparameter search and a submission with these models."""
+    competition = Registry(tmp_path / "data").get_competition(OPTIVER)
+    competition.private_dir.mkdir(parents=True)
+    competition.public_dir.mkdir(parents=True)
+    answers = pd.DataFrame({"row_id": ["0-5", "0-11"], "target": [0.002, 0.001]})
+    answers.to_csv(competition.answers, index=False)
+    answers.assign(target=0.0).to_csv(competition.sample_submission, index=False)
+    folder = tmp_path / "submission"
+    folder.mkdir()
+    config = competition.hyperparameter_search_config
+    (folder / config["baseline_model_name"]).write_bytes(pickle.dumps(baseline))
+    (folder / config["improved_model_name"]).write_bytes(pickle.dumps(improved))
+    for name in (config["baseline_submission_name"], config["improved_submission_name"]):
+        answers.assign(target=[0.0025, 0.001]).to_csv(folder / name, index=False)
+    (tmp_path / "search.py").write_text(SEARCH)
+    return competition, folder
+
+
+def _grade_optiver(tmp_path: Path, baseline, improved):
+    competition, folder = _optiver_submission(tmp_path, baseline, improved)
+    return grade_hyperparameter_search(folder, competition, str(tmp_path / "search.py"))
+
+
+def test_hyperparameter_search_scores_are_unchanged(tmp_path):
+    from xgboost import XGBRegressor
+
+    report = _grade_optiver(tmp_path / "a", XGBRegressor(), XGBRegressor(max_depth=4))
+    assert report.valid_submission
+    assert report.score == pytest.approx(round(1 - np.sqrt(0.0625 / 2), 5))
+    report = _grade_optiver(tmp_path / "b", XGBRegressor(), XGBRegressor(n_jobs=4))
+    assert report.score == -np.inf  # the same hyperparameters
+    report = _grade_optiver(tmp_path / "c", XGBRegressor(max_depth=3), XGBRegressor(max_depth=4))
+    assert report.score == -np.inf  # not the default baseline
+
+
+def test_pickled_models_run_no_code_in_the_grading_process(tmp_path):
+    from xgboost import XGBRegressor
+
+    marker = tmp_path / "pwned"
+    report = _grade_optiver(tmp_path, XGBRegressor(), _Payload(marker))
+    assert not marker.exists()  # was created by pickle.load in the grader
+    assert not report.valid_submission
+
+
+def test_a_model_that_ends_its_process_is_invalid(tmp_path):
+    from xgboost import XGBRegressor
+
+    assert not _grade_optiver(tmp_path, XGBRegressor(), _Exit()).valid_submission  # ended it
+
+
+def test_a_linked_model_file_is_invalid(tmp_path):
+    from xgboost import XGBRegressor
+
+    competition, folder = _optiver_submission(tmp_path, XGBRegressor(), XGBRegressor(max_depth=4))
+    model = folder / "baseline_model.pkl"
+    model.rename(tmp_path / "baseline.pkl")
+    model.symlink_to(tmp_path / "baseline.pkl")  # was followed: it could name the answers
+    report = grade_hyperparameter_search(folder, competition, str(tmp_path / "search.py"))
+    assert not report.valid_submission
 
 
 # ---------------------------------------------------------------- reading sandbox outputs
