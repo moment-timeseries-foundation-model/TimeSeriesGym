@@ -8,19 +8,21 @@ In this challenge, we will focus on the **short-term** and **pointwise** forecas
 ## Evaluation
 
 ### Metric
-Submissions are evaluated based on the Mean Absolute Percentage Error (MAPE) between forecasts and ground truth.
+Submissions are evaluated with GIFT-Eval's leaderboard metric for point forecasts: the Mean Absolute Scaled Error (MASE) on each dataset, divided by the MASE of the seasonal naive forecast on the same dataset, and aggregated over the datasets by the geometric mean. **Lower is better.** A perfect forecast scores 0 and the seasonal naive forecast scores 1.0, so a score below 1 beats the seasonal naive forecast.
 
-The MAPE is computed for each dataset and then averaged over the datasets:
+The MASE of a forecast $F$ on dataset $d$ is computed over all of its forecast windows, and the score is the geometric mean of the ratios:
 
-$$MAPE = \frac{1}{D} \sum_{d=1}^{D} \frac{1}{n_d} \sum_{i=1}^{n_d} \left| \frac{A_{d,i} - F_{d,i}}{A_{d,i}} \right|$$
+$$MASE_d(F) = \frac{1}{n_d} \sum_{(w,h)} \frac{\left| A_{w,h} - F_{w,h} \right|}{s_w} \qquad Score = \left( \prod_{d=1}^{D} \frac{MASE_d(F)}{MASE_d(SN)} \right)^{1/D}$$
 
 Where:
 - $D$ is the number of datasets listed in `datasets.txt`
+- $A_{w,h}$ and $F_{w,h}$ are the actual and the forecasted value of window $w$ at step $h$
 - $n_d$ is the number of observations of dataset $d$ (all of its forecast windows), excluding those whose actual value is missing
-- $A_{d,i}$ is the actual value
-- $F_{d,i}$ is the forecasted value
+- $s_w$ is the scale of window $w$: the mean of $|y_t - y_{t-m}|$ over the window's history $y$ (its test input), over the pairs in which both values are present
+- $m$ is the dataset's season, from its frequency as in GIFT-Eval (gluonts' `get_seasonality`): 288 for 5-minute data (one day), 24 for hourly data, and 1 for daily and weekly data
+- $SN$ is the seasonal naive forecast: the last $m$ values of each window's history, repeated over the prediction length, after each missing value in the history is replaced by the last value present before it (at the start, by the first value present). Where $m = 1$, it is the naive forecast (the last value).
 
-The score is a fraction, not a percentage, and each dataset counts equally regardless of its number of observations. The grader uses scikit-learn's `mean_absolute_percentage_error`, which divides by max(|A|, machine epsilon): a non-zero forecast where the actual value is exactly 0 makes that dataset's error very large. Predictions must not contain NaN values.
+This is GIFT-Eval's evaluation (gluonts' `evaluate_model` with `MASE()`, `axis=None`, `mask_invalid_label=True`, `allow_nan_forecast=False` and the season above) and the normalization and geometric mean of its leaderboard. The forecast windows are GIFT-Eval's own, so the seasonal naive MASE of each dataset is the one GIFT-Eval publishes for it (for example 3.2784 on `m4_daily`). A window whose scale is 0 would not count, as in gluonts; no provided dataset has one. Predictions must be finite: NaN and infinite values make the submission invalid. The grader also logs the previous metric of this challenge, the MAPE averaged over the datasets, which does not affect the score.
 
 # Dataset Description
 
