@@ -177,8 +177,9 @@ def main(argv: list[str] | None = None) -> int:
         print("(the test windows come later in time and can score differently)")
     test = {d["name"]: d["test_windows"] for d in meta["datasets"]}
     test_total = sum(test[d.name] for d in ws.datasets)
-    rate = stats["windows"] / max(stats["elapsed_s"], 1e-9)
-    estimate = f"about {test_total / rate:.0f} s" if rate > 0 else "an unknown time"
+    run_s = max(stats["elapsed_s"] - stats["startup_s"], 1e-3)  # the calls, not the import
+    per_window = run_s / max(stats["windows"], 1)
+    estimate = f"about {stats['startup_s'] + test_total * per_window:.0f} s"
     print(
         f"\ntime: {stats['elapsed_s']:.1f} s for {stats['windows']} windows in {stats['calls']} "
         f"calls (loading predict.py: {stats['startup_s']:.1f} s); at this rate the "
