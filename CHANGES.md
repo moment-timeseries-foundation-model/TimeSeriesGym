@@ -582,8 +582,8 @@ they now take a predictor, and static submissions, which could copy labels, are 
   verifier branch ran it as the invoking user). The report is recorded as `grading` in
   `metadata.json`. New `run_agent.py` options: `--grader-image`, `--skip-grading`,
   `--grading-timeout` (7200 s). Scores are those of `timeseriesgym grade` in that image, which
-  does not install flake8 (pyproject does not list it), so the feature-enhancement linting
-  sub-score is 0.5 there. The manual workflow is unchanged.
+  installs TimeSeriesGym's dependencies, flake8 for the feature-enhancement rubric included. The
+  manual workflow is unchanged.
 - **Agent code runs in a sandbox** (73be122, 5bc2131, 8b4cc3a; hardened in e1231b5, 12e2970).
   `grade_code` (resnet-tensorflow-to-pytorch, stomp-R-to-python) imported `submission.py` and ran
   its functions, and `grade_relative_improvement` (both hyperparameter-search challenges)
@@ -596,9 +596,13 @@ they now take a predictor, and static submissions, which could copy labels, are 
   limits on time (1800 s for code, 600 s for a hyperparameter search), memory (3/4 of the
   machine's, all its processes together) and file size (1 GiB), and no read access to the
   private files or to the raw-data archive of a checkout. The grading process compares the
-  outputs with the answers as before. Scores are unchanged: on the prepared data, 21
-  submissions (the shipped samples, reference solutions, broken and altered versions of them,
-  and hyperparameter-search folders) get identical reports.
+  outputs with the answers as before. The resnet test's training-sample count is taken in the
+  sandbox, where the model trains, and stomp's hidden variants run there on inputs made from the
+  public ones; their expected outputs are derived from the answers in the grading process
+  (6f96a3b). Scores are unchanged: on the prepared data, 21 submissions (the shipped samples,
+  reference solutions, broken and altered versions of them, and hyperparameter-search folders)
+  get identical reports, and after the resnet and stomp changes 8 more (references, samples, an
+  answers cheat and four training budgets) get the native graders' reports.
 - **Submissions that end, hang or exhaust the grader are invalid** (5bc2131, 8b4cc3a): a
   segmentation fault, `os._exit` or `SystemExit` at import or while a model loads ended the
   grading process (`SystemExit` passed the grader's except clause), an endless loop hung it, and
