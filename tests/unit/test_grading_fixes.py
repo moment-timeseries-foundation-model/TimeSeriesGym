@@ -199,6 +199,49 @@ def test_shipped_leaderboards_are_final_standings_of_their_competition(competiti
         assert first_day > pd.Timestamp(DATA_ENDS[competition_id])
 
 
+def _fake_kaggle_api(rows: int, teams: int):
+    """A Kaggle client whose leaderboard view gives `rows` rows for `x`, which has `teams` teams."""
+    entries = [
+        SimpleNamespace(
+            scoreNullable=f"{0.1 + i / 1e4:.4f}",
+            teamId=i,
+            teamNameNullable=f"t{i}",
+            teamName=f"t{i}",
+            hasTeamName=True,
+            submissionDate="2020-10-06 06:58:33",
+            score=f"{0.1 + i / 1e4:.4f}",
+            hasScore=True,
+        )
+        for i in range(rows)
+    ]
+    listed = [
+        SimpleNamespace(ref="https://www.kaggle.com/competitions/x-two", teamCount=5),
+        SimpleNamespace(ref="https://www.kaggle.com/competitions/x", teamCount=teams),
+    ]
+    return SimpleNamespace(
+        competition_leaderboard_view=lambda competition: entries if competition == "x" else [],
+        competitions_list=lambda search, category: listed,
+    )
+
+
+def test_leaderboard_download_refuses_a_truncated_view(tmp_path, monkeypatch):
+    import timeseriesgym.data as data
+
+    monkeypatch.chdir(tmp_path)
+    competition = SimpleNamespace(id="x", leaderboard=tmp_path / "leaderboard.csv")
+    # one page of the view, as kaggle 1.6.17 reads it: it was written, as OSIC's 20 rows were
+    monkeypatch.setattr(data, "authenticate_kaggle_api", lambda: _fake_kaggle_api(20, 2097))
+    with pytest.raises(RuntimeError, match="20 rows .* 2097 teams"):
+        data.ensure_leaderboard_exists(competition, force=True)
+    assert not competition.leaderboard.exists()
+
+    # benchmarks make a final leaderboard a little longer than the team count
+    monkeypatch.setattr(data, "authenticate_kaggle_api", lambda: _fake_kaggle_api(2150, 2148))
+    data.ensure_leaderboard_exists(competition, force=True)
+    written = pd.read_csv(competition.leaderboard)
+    assert len(written) == 2150 and list(written.columns) in LEADERBOARD_COLUMNS
+
+
 # ---------------------------------------------------------------- hyperparameter search
 
 
