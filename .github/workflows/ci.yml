@@ -1,10 +1,12 @@
-# Lint and tests for every push and pull request. Uses no secrets; the tests need no network
+# Lint and tests for pushes to main and for pull requests (a pull request from a branch of this
+# repository runs once, not also for the push). Uses no secrets; the tests need no network
 # access beyond installing the dependencies, and no Kaggle credentials. README.md, "Running the
 # CI Checks Locally", gives the same commands.
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:

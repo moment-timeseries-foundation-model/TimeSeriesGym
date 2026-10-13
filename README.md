@@ -57,7 +57,7 @@ pre-commit install
 ### Running the CI Checks Locally
 
 GitHub Actions (`.github/workflows/ci.yml`) lints the code and runs the tests on Python 3.11 for
-every push and pull request. The same checks, locally:
+pushes to `main` and for pull requests. The same checks, locally:
 
 ```bash
 # Lint and format check, with the ruff version CI uses (the dev extra allows any ruff >= 0.3.0)
