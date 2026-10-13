@@ -104,6 +104,10 @@ RUN useradd -m nonroot \
     && chmod 755 /opt/timeseriesgym \
     && chmod +x /entrypoint.sh /home/validate_submission.sh /usr/local/bin/validate_submission
 
+# The user that agent code runs as when submissions are graded in the container as root
+# (timeseriesgym/sandbox.py)
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sandbox
+
 WORKDIR /home
 
 # IMPORTANT: This needs to run as root! Downstream Dockerfiles must not change the default USER for when the container starts.
