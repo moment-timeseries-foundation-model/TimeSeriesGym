@@ -772,11 +772,61 @@ def test_run_agent_needs_the_grader_image(tmp_path, monkeypatch):
         asyncio.run(run_agent.main(args))
 
 
+CONFIGS = REPO / "environment" / "config" / "container_configs"
+
+
+@pytest.mark.parametrize(
+    "privileged, config, allow, refused",
+    [
+        (True, "gpu_enabled.json", False, True),  # no Sysbox: was run
+        (True, "gpu_enabled.json", True, False),  # --allow-privileged-without-sysbox
+        (True, "default.json", False, False),  # "runtime": "sysbox-runc"
+        (False, "gpu_enabled.json", False, False),
+    ],
+)
+def test_privileged_agents_need_sysbox_unless_allowed(
+    tmp_path, monkeypatch, privileged, config, allow, refused
+):
+    run_agent = importlib.import_module("run_agent")
+    monkeypatch.setenv("I_ACCEPT_RUNNING_PRIVILEGED_CONTAINERS", "True")
+    agent = SimpleNamespace(privileged=privileged, name="agent", id="agent")
+    monkeypatch.setattr(run_agent.agent_registry, "get_agent", lambda agent_id: agent)
+    monkeypatch.setattr(run_agent.docker, "from_env", lambda: None)
+    monkeypatch.setattr(run_agent, "registry", run_agent.registry)  # main() replaces it
+    monkeypatch.setattr(run_agent, "is_dataset_prepared", lambda competition, **kw: True)
+
+    class StartedError(Exception):
+        pass
+
+    def started(*args, **kwargs):
+        raise StartedError
+
+    monkeypatch.setattr(run_agent, "create_run_dir", started)  # the first run would start here
+    (tmp_path / "set.txt").write_text("spaceship-titanic\n")
+    args = SimpleNamespace(
+        data_dir=str(tmp_path),
+        agent_id="agent",
+        skip_grading=True,
+        agent_network="none",
+        competition_set=str(tmp_path / "set.txt"),
+        allow_empty_private_dir=False,
+        allow_empty_answers_file=False,
+        container_config=str(CONFIGS / config),
+        allow_privileged_without_sysbox=allow,
+        start_seed=0,
+        n_seeds=1,
+        run_dir=str(tmp_path / "runs"),
+    )
+    expected = pytest.raises(ValueError, match="Sysbox") if refused else pytest.raises(StartedError)
+    with expected:
+        asyncio.run(run_agent.main(args))
+
+
 # ---------------------------------------------------------------- images
 
 
 def _stages(dockerfile: str) -> dict[str, str]:
-    """The Dockerfile's stages by name (the unnamed last one, the default target, is '')."""
+    """The Dockerfile's stages by name (an unnamed one is '')."""
     parts = re.split(r"^FROM ", dockerfile, flags=re.M)[1:]
     stages = {}
     for part in parts:

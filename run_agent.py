@@ -15,7 +15,7 @@ import docker
 from agents.grading import GRADER_IMAGE, GRADING_TIMEOUT, grade_run
 from agents.registry import Agent
 from agents.registry import registry as agent_registry
-from agents.run import run_in_container
+from agents.run import check_privileges, run_in_container
 from environment.defaults import DEFAULT_CONTAINER_CONFIG_PATH
 from timeseriesgym.data import is_dataset_prepared
 from timeseriesgym.registry import Competition, registry
@@ -164,6 +164,7 @@ async def main(args):
 
     with open(args.container_config) as f:
         container_config = json.load(f)
+    check_privileges(agent, container_config, args.allow_privileged_without_sysbox)
 
     # Create tasks for each (competition * seed)
     logger.info(f"Launching run group: {run_group}")
@@ -266,6 +267,15 @@ if __name__ == "__main__":
         type=str,
         required=False,
         default="none",
+    )
+    parser.add_argument(
+        "--allow-privileged-without-sysbox",
+        help="Run an agent that needs a privileged container (OpenHands) even if the container "
+        "configuration does not use Sysbox. Its code can then reach the host, and the private "
+        "data on it.",
+        action="store_true",
+        required=False,
+        default=False,
     )
     parser.add_argument(
         "--retain",

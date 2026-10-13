@@ -40,6 +40,21 @@ def instructions(network: str) -> str:
     return string.Template(INSTRUCTIONS.read_text()).substitute(network_access=line)
 
 
+def check_privileges(agent: Agent, container_config: dict, allow_without_sysbox: bool) -> None:
+    """A privileged agent container can reach the host's devices, and through them the host's
+    copy of the private data, unless it runs under Sysbox (`"runtime": "sysbox-runc"` in the
+    container configuration), which keeps it in a user namespace. Raises ValueError for a
+    privileged agent without Sysbox, unless `allow_without_sysbox`."""
+    privileged = agent.privileged or bool(container_config.get("privileged"))
+    if privileged and container_config.get("runtime") != "sysbox-runc" and not allow_without_sysbox:
+        raise ValueError(
+            "The agent runs in a privileged container, and the container configuration does not "
+            'use Sysbox ("runtime": "sysbox-runc"): agent code could reach the host and the '
+            "private data there. Use a configuration with Sysbox, or pass "
+            "--allow-privileged-without-sysbox to accept this (see agents/README.md)."
+        )
+
+
 def save_output(container: Container, save_dir: Path, container_config: dict) -> Path:
     """
     Extracts the submission, logs, and code directories from the container
