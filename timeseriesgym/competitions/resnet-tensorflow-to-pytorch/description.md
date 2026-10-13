@@ -94,7 +94,7 @@ The following sample code illustrates how test predictions are generated using y
 from submission import ResNet, train, predict
 
 model = ResNet(output_directory="./output/", input_shape=[1, 50], n_classes=2, n_feature_maps=64, verbose=True, random_seed=42)
-model = train(model=model, train_data=train_data, val_data=val_data, batch_size=64, n_epochs=1, learning_rate=0.001, verbose=True)
+model = train(model=model, train_data=train_data, val_data=val_data, batch_size=64, n_epochs=40, learning_rate=0.001, verbose=True)
 y_true, y_pred = predict(model=model, test_data=test_data)
 ```
 
