@@ -7,6 +7,7 @@ of the two months before the test is public. The weather covers the whole year.
 
 import hashlib
 import importlib
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -122,3 +123,11 @@ def test_prepare_is_deterministic(tmp_path):
     second = _run(tmp_path / "b")
     for a, b in zip(first[1:], second[1:], strict=True):
         assert _digest(a) == _digest(b)
+
+
+def test_description_states_the_split():
+    text = (Path(ASHRAE.__file__).parent / "description.md").read_text()
+    assert "the training labels cover 2016-01-01 to 2016-08-31" in text
+    assert "the test set covers 2016-10-31 to 2016-12-31" in text
+    assert "The two months in between (2016-09-01 to 2016-10-30) have no labels" in text
+    assert (ASHRAE.TRAIN_LABELS_END, ASHRAE.TEST_START) == ("2016-09-01", "2016-10-31")
