@@ -1,29 +1,40 @@
-"""Counts the samples a submitted ResNet is trained on, however `train` reads its data.
+"""Counts the samples a submission trains on, however `train` reads its data and calls its model.
 
 The grader asks for `n_epochs` passes over `train_data`. Counting reads of the dataset would
-miss a submission that copies the tensors out once and loops over the copy, so the count is
-taken at the model instead: while the counter is active, every call of an instance of the
-submission's `ResNet` class (also a copy, a reloaded model or one built inside `train`) whose
-output is back-propagated adds its batch size. Forward passes without back-propagation
-(validation, predictions, BatchNorm statistics) add nothing.
+miss a submission that copies the tensors out once and loops over the copy, and counting calls
+of the `ResNet` itself would miss one that trains through another method (`model.logits(x)`,
+a submodule, `torch.func.functional_call`). The count is taken at the layers instead: while the
+counter is active, the output of every call of a module with trainable parameters of its own
+(a convolution, a batch normalization, a dense layer, ...) gets a gradient hook. Each backward
+pass then counts once, with the median batch size of the layer outputs it reached, so a network
+of many layers counts its batch once, and every backward pass counts, also several over one
+forward pass. Forward passes without back-propagation (validation, predictions, BatchNorm
+statistics) add nothing.
 
 Agent code runs in the grader's process, so code written to evade the count is not stopped by
-it; the count catches code that trains for more passes than asked, whatever loop it uses.
+it; the grader also rejects a model that is better than a constant without any counted sample.
 """
 
-from collections.abc import Callable
+import statistics
+from collections import defaultdict
 
 import torch
 
 
-class TrainingSampleCounter:
-    """`samples` is the number of back-propagated samples through instances of
-    `model_class()` (None until the class exists) while the counter is entered."""
+def _has_own_parameters(module: torch.nn.Module) -> bool:
+    return any(p.requires_grad for p in torch.nn.Module.parameters(module, recurse=False))
 
-    def __init__(self, model_class: Callable[[], type | None]):
-        self._model_class = model_class
+
+class TrainingSampleCounter:
+    """`samples`: the samples back-propagated through layers with parameters while entered."""
+
+    def __init__(self):
         self._handle = None
-        self.samples = 0
+        self._batches = defaultdict(list)  # backward pass (autograd graph task) -> batch sizes
+
+    @property
+    def samples(self) -> int:
+        return int(sum(statistics.median(sizes) for sizes in self._batches.values()))
 
     def __enter__(self) -> "TrainingSampleCounter":
         self._handle = torch.nn.modules.module.register_module_forward_hook(self._on_forward)
@@ -34,15 +45,14 @@ class TrainingSampleCounter:
         self._handle = None
 
     def _on_forward(self, module, args, output) -> None:
-        cls = self._model_class()
-        if not isinstance(cls, type) or not isinstance(module, cls):
+        if not isinstance(output, torch.Tensor) or not output.requires_grad or output.dim() == 0:
             return
-        if isinstance(output, torch.Tensor) and output.requires_grad and output.dim() > 0:
+        if _has_own_parameters(module):
             output.register_hook(self._counter(int(output.shape[0])))
 
     def _counter(self, batch: int):
         def count(grad):
             if self._handle is not None:  # back-propagated while the counter is active
-                self.samples += batch
+                self._batches[torch._C._current_graph_task_id()].append(batch)
 
         return count
