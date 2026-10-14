@@ -191,8 +191,8 @@ more, and their descriptions say so:
   Kaggle's own 2,624 test segments.
 - **amp-parkinsons-disease-progression-prediction**: the test set is 10% of the patients in
   Kaggle's training data; the leaderboard was scored on Kaggle's hidden test set.
-- **ashrae-energy-prediction**: the test set is the last two months of 2016; the leaderboard was
-  scored on Kaggle's test data from 2017 and 2018.
+- **ashrae-energy-prediction**: the test set is the last two months of 2016, two months after the
+  training labels end; the leaderboard was scored on Kaggle's test data from 2017 and 2018.
 
 #### Evaluating Hyperparameter Search Results
 
