@@ -328,6 +328,18 @@ Rebuilding these challenges gives different files; results on the old data are n
   test the sample scores 5.69625 (was 6.21077), the median of the training labels 3.00822, and
   a LightGBM on 58 summary statistics of 150,000-row training windows 2.443 (2.415-2.443 over 5
   seeds, about 10 CPU minutes), so no longer better than gold.
+- **ashrae-energy-prediction**: the training labels end on 2016-08-31, two months before the
+  test (031135d, ba50742). They ran to 2016-10-30, right up to the test (the last two months of
+  2016), while Kaggle's test (2017-2018) lay up to two years after its training year. So a lookup
+  table without any model, each building-meter's mean log reading over its last 7 training days,
+  scored RMSLE 1.145, better than Kaggle's gold threshold (1.244) and its rank-1 score (1.231).
+  The readings of 2016-09-01 to 2016-10-30 are now in neither split. The test, the sample, the
+  answers, `building_metadata.csv` and both weather files are unchanged (the weather covers the
+  whole year); only `train_label.csv` changes (13,358,457 rows; was 16,745,071), and its
+  checksum is regenerated (two prepares, identical files). On the new split the same tables score
+  1.852 (last 7 days), 1.840 (14) and 1.837 (28), the building-meter mean over all training days
+  1.448, and a quick LightGBM 1.126 (about 5 CPU minutes, 3 seeds within 0.003), still better
+  than gold. The sample still scores 4.7002. The description states the gap.
 - **Cloned task repositories**: shipped without `.git` (1568f6d) and pinned to commits (8dbe2b8;
   MOMENT to 37a8bde in 00279f6). The history held the reference solution (iTransformer), and
   moving branch heads changed the prepared data. The iTransformer prepare now also removes the
