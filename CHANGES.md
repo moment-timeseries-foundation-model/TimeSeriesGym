@@ -670,7 +670,7 @@ they now take a predictor, and static submissions, which could copy labels, are 
   outputs with the answers as before. The resnet test's training-sample count and its count of
   the parameters a fresh model uses are taken in the sandbox, where the model trains, and the
   grading process compares them with their limits, and rejects an accurate model trained on no
-  counted sample, a rule that needs the answers (6f96a3b, 906c4f0, MERGE). stomp's hidden variants
+  counted sample, a rule that needs the answers (6f96a3b, 906c4f0, 024398c). stomp's hidden variants
   run there on inputs made from the public ones; their expected outputs are derived from the
   answers in the grading process (6f96a3b). Scores are unchanged: on the prepared data, 21
   submissions (the shipped samples, reference solutions, broken and altered versions of them,
