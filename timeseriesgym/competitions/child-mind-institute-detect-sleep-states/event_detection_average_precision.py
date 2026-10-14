@@ -540,34 +540,52 @@ def event_detection_ap(
         columns=[event_column_name, "tolerance", series_id_column_name],
     )
 
-    # Create match evaluation groups: event-class x tolerance x series_id
-    detections_grouped = aggregation_keys.merge(
-        detections_filtered, on=[event_column_name, series_id_column_name], how="left"
-    ).groupby([event_column_name, "tolerance", series_id_column_name])
+    # Create match evaluation groups: event-class x tolerance x series_id. The tolerances of an
+    # event class share its detections, which are merged and sorted once per event-class x
+    # series_id (with the event class's first tolerance) rather than once per tolerance.
+    detections_grouped = (
+        aggregation_keys.drop_duplicates([event_column_name, series_id_column_name])
+        .merge(detections_filtered, on=[event_column_name, series_id_column_name], how="left")
+        .groupby([event_column_name, "tolerance", series_id_column_name])
+    )
     ground_truths_grouped = aggregation_keys.merge(
         ground_truths, on=[event_column_name, series_id_column_name], how="left"
     ).groupby([event_column_name, "tolerance", series_id_column_name])
     # Match detections to ground truth events by evaluation group
-    detections_matched = []
+    detections_sorted = {}
+    detections_matched = {}  # event-class x tolerance: (matched, score) of each series_id
     for key in aggregation_keys.itertuples(index=False):
-        dets = detections_grouped.get_group(key)
-        gts = ground_truths_grouped.get_group(key)
-        detections_matched.append(match_detections(dets["tolerance"].iloc[0], gts, dets))
-    detections_matched = pd.concat(detections_matched)
-
-    # Compute AP per event x tolerance group
-    event_classes = ground_truths[event_column_name].unique()
-    ap_table = (
-        detections_matched.query("event in @event_classes")
-        .groupby([event_column_name, "tolerance"])
-        .apply(
-            lambda group: average_precision_score(
-                group["matched"].to_numpy(),
-                group[score_column_name].to_numpy(),
-                class_counts[group[event_column_name].iat[0]],
+        event, tolerance, series_id = key
+        if (event, series_id) not in detections_sorted:  # its first tolerance
+            detections_sorted[event, series_id] = (
+                detections_grouped.get_group(key)
+                .sort_values(score_column_name, ascending=False)
+                .dropna()
             )
+        dets = detections_sorted[event, series_id]
+        gts = ground_truths_grouped.get_group(key)
+        is_matched = greedy_match(
+            gts["tolerance"].iloc[0], gts, dets[time_column_name], time_column_name
         )
-    )
+        detections_matched.setdefault((event, tolerance), []).append(
+            (is_matched, dets[score_column_name].to_numpy())
+        )
+
+    # Compute AP per event x tolerance group (each in the detections' order, as before)
+    event_classes = ground_truths[event_column_name].unique()
+    ap_keys, ap_values = [], []
+    for (event, tolerance), groups in detections_matched.items():
+        matches = np.concatenate([m for m, _ in groups])
+        if len(matches) and event in event_classes:
+            scores = np.concatenate([s for _, s in groups])
+            ap_keys.append((event, tolerance))
+            ap_values.append(average_precision_score(matches, scores, class_counts[event]))
+    if not ap_keys:  # no detection at all; the table of the whole merge failed here as well
+        raise ValueError("there are no detections to score")
+    ap_table = pd.Series(
+        ap_values,
+        index=pd.MultiIndex.from_tuples(ap_keys, names=[event_column_name, "tolerance"]),
+    ).sort_index()
     # Average over tolerances, then over event classes
     mean_ap = ap_table.groupby(event_column_name).mean().sum() / len(event_classes)
 

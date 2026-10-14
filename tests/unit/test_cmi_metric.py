@@ -8,6 +8,7 @@ do neither; the scores must stay bitwise the same. KAGGLE holds the two function
 import importlib
 import struct
 import time
+import tracemalloc
 
 import numpy as np
 import pandas as pd
@@ -388,3 +389,19 @@ def test_grading_time_is_linear_in_the_rows():
     start = time.perf_counter()
     grade(submission, solution)
     assert time.perf_counter() - start < 10
+
+
+def test_memory_does_not_grow_with_the_tolerances():
+    """The detections were merged once per tolerance: scoring held about 21 times the
+    submission's size at its peak (traced allocations). Merged once, it holds about 2."""
+    rng = np.random.default_rng(0)
+    solution = _solution(rng, series=10, nights=20, missing=0.0)
+    submission = _submission(rng, solution, rows=50_000)
+    size = submission.memory_usage(deep=True).sum()
+    tracemalloc.start()
+    try:
+        grade(submission, solution)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 5 * size
