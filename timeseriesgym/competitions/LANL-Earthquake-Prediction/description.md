@@ -37,9 +37,9 @@ For each `seg_id` in the test set folder, you must predict `time_to_failure`, wh
 
 ```
 seg_id,time_to_failure
-seg_0NfqRu,0
-seg_0PH6hG,0
-seg_0Sncn3,0
+seg_069voO,0
+seg_09PQ3K,0
+seg_09Qwuf,0
 ...
 ```
 
@@ -66,7 +66,7 @@ For each `seg_id` in the test folder, you should predict a *single* `time_to_fai
 
 ### File descriptions
 * **train.csv** - A single, continuous training segment of experimental data.
-* **test** - A folder containing many small segments of test data: 1,112 files, one per `seg_id` (`test/<seg_id>.csv`), each with 150,000 consecutive rows of `acoustic_data`, as in the competition. They are every whole 150,000-row segment of the 5 test cycles; no segment spans an earthquake, and neither the ids nor the order of the files tell where a segment lies in the experiment.
+* **test** - A folder containing many small segments of test data: 1,068 files, one per `seg_id` (`test/<seg_id>.csv`), each with 150,000 consecutive rows of `acoustic_data`, as in the competition. They are cut from the 5 test cycles with a random gap of 4,096 to 8,191 rows between consecutive segments, so no two are adjacent; no segment spans an earthquake, and neither the ids nor the order of the files tell where a segment lies in the experiment.
 * **sample_submission.csv** - A sample submission file in the correct format.
 
 ### Data fields

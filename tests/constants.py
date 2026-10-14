@@ -11,7 +11,7 @@ sample_submission_scores = {
     "child-mind-institute-detect-sleep-states": 0.0,
     "g2net-gravitational-wave-detection": 0.5,
     "hms-harmful-brain-activity-classification": 1.3897860161039564,
-    "LANL-Earthquake-Prediction": 5.69625,  # 1,112 segments of 150,000 rows
+    "LANL-Earthquake-Prediction": 5.69511,  # 1,068 segments of 150,000 rows
     "spaceship-titanic": 0.50345,
     "ventilator-pressure-prediction": 17.65486,
 }
