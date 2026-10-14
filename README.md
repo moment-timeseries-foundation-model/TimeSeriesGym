@@ -187,13 +187,13 @@ challenges hold out their test set from the competition's training data, while t
 scored on Kaggle's test set, so a medal places a score only approximately. Three challenges differ
 more, and their descriptions say so:
 
-- **LANL-Earthquake-Prediction**: the test is 1,112 segments of 150,000 rows, as long as Kaggle's,
+- **LANL-Earthquake-Prediction**: the test is 1,068 segments of 150,000 rows, as long as Kaggle's,
   but cut from the last 5 earthquake cycles of Kaggle's training data; the leaderboard was scored on
   Kaggle's own 2,624 test segments.
 - **amp-parkinsons-disease-progression-prediction**: the test set is 10% of the patients in
   Kaggle's training data; the leaderboard was scored on Kaggle's hidden test set.
-- **ashrae-energy-prediction**: the test set is the last two months of 2016; the leaderboard was
-  scored on Kaggle's test data from 2017 and 2018.
+- **ashrae-energy-prediction**: the test set is the last two months of 2016, two months after the
+  training labels end; the leaderboard was scored on Kaggle's test data from 2017 and 2018.
 
 #### Evaluating Hyperparameter Search Results
 

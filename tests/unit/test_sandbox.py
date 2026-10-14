@@ -121,7 +121,8 @@ def test_stomp_submissions_that_do_not_import_are_invalid(tmp_path, code):
 
 
 # The reference port's ResNet (tests/unit/test_code_graders.py), so that the architecture check
-# passes, with a `train` that trains nothing and a `predict` whose rule the answers follow.
+# passes, with a `train` that back-propagates one small batch (a model better than a constant
+# must have been trained) and a `predict` whose rule the answers follow.
 RESNET_SUBMISSION = (
     REFERENCE
     + """
@@ -129,6 +130,8 @@ RESNET_SUBMISSION = (
 def train(
     model, train_data, val_data, batch_size=64, n_epochs=1, learning_rate=0.001, verbose=False
 ):
+    model.train()
+    model(train_data.tensors[0][:8]).sum().backward()
     return model
 
 

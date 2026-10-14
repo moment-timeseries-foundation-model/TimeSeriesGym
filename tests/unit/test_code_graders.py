@@ -285,6 +285,38 @@ EXTRA_PASSES = REFERENCE.replace(
 )
 
 
+# Training through a method other than forward (Opus's port in a Claude Code evaluation called
+# `model.logits(xb)`, which the first counter, at ResNet calls only, did not see).
+LOGITS = REFERENCE.replace(
+    "    def forward(self, x):\n",
+    "    def logits(self, x):\n"
+    "        return self.fc(self.blocks(x).mean(dim=-1))\n"
+    "\n"
+    "    def forward(self, x):\n",
+).replace(
+    "            probs = model(x)\n", "            probs = torch.softmax(model.logits(x), dim=-1)\n"
+)
+LOGITS_OVERTRAINED = LOGITS.replace(
+    "for epoch in range(n_epochs):", "for epoch in range(n_epochs + 1):"
+)
+
+# No training at all, and a rule instead: the cosine starts at 1, the sine at 0.
+RULE = (
+    REFERENCE
+    + """
+
+def train(model, train_data, val_data, batch_size, n_epochs, learning_rate, verbose):
+    return model
+
+
+def predict(model, test_data):
+    x = torch.stack([test_data[i][0] for i in range(len(test_data))])
+    cosine = (x[:, 0, 0] > 0.5).long().numpy()
+    return np.zeros(len(x), dtype=np.int64), np.eye(2, dtype=np.float32)[cosine]
+"""
+)
+
+
 # A port of the Keras model with Keras' settings: BatchNormalization(momentum=0.99, epsilon=1e-3)
 # is BatchNorm1d(momentum=0.01, eps=1e-3); mini-batch min(n / 10, batch_size); Adam; the
 # best-loss checkpoint. Measured in tsgym-core (CPU, 4 threads): test accuracy 0.49-0.51 on 10
@@ -432,6 +464,20 @@ def test_resnet_passes_without_backpropagation_do_not_count(resnet_data, tmp_pat
     assert report.valid_submission and report.test_metric == "1/1"
 
 
+def test_resnet_training_through_another_method_counts(resnet_data, tmp_path):
+    assert "probs = torch.softmax(model.logits(x), dim=-1)" in LOGITS  # the training step
+    report = _grade_resnet(resnet_data, tmp_path, LOGITS, n_epochs=1)
+    assert report.valid_submission and report.test_metric == "1/1"
+    report = _grade_resnet(resnet_data, tmp_path, LOGITS_OVERTRAINED, n_epochs=1)
+    assert report.valid_submission and report.test_metric == "0/1"
+
+
+def test_resnet_an_accurate_model_without_counted_training_is_invalid(resnet_data, tmp_path):
+    # It used to pass: no sample over the budget, the right architecture, accuracy 1.0.
+    report = _grade_resnet(resnet_data, tmp_path, RULE, n_epochs=1)
+    assert not report.valid_submission and report.test_metric is None
+
+
 def test_resnet_another_architecture_fails_even_when_accurate(resnet_data, tmp_path):
     # The linear model reaches accuracy 1.0 within the budget (it passed before the check).
     report = _grade_resnet(resnet_data, tmp_path, LINEAR)
@@ -460,36 +506,50 @@ def test_resnet_architecture_counts_the_parameters_the_forward_pass_uses(tmp_pat
 
 
 class _Net(torch.nn.Module):
+    """Layers with parameters, a method other than forward, and a softmax forward."""
+
     def __init__(self):
         super().__init__()
-        self.fc = torch.nn.Linear(3, 2)
+        self.conv = torch.nn.Conv1d(1, 4, 3, padding=1)
+        self.bn = torch.nn.BatchNorm1d(4)
+        self.fc = torch.nn.Linear(4, 2)
+
+    def logits(self, x):
+        return self.fc(torch.relu(self.bn(self.conv(x))).mean(dim=-1))
 
     def forward(self, x):
-        return self.fc(x)
+        return torch.softmax(self.logits(x), dim=-1)
 
 
-def test_sample_counter_counts_backpropagated_samples_of_any_instance():
+def test_sample_counter_counts_every_backpropagated_batch_once():
+    from torch.func import functional_call, grad
+
     counter_cls = _module(RESNET, "training_budget").TrainingSampleCounter
-    x = torch.randn(5, 3)
+    x = torch.randn(5, 1, 8)
     net = _Net()
-    with counter_cls(lambda: _Net) as counter:
-        net(x).sum().backward()  # 5
+    with counter_cls() as counter:
+        net(x).sum().backward()  # 5: three layers, one batch
+        net.logits(x).sum().backward()  # 10: another method than forward
+        net.conv(x).sum().backward()  # 15: a submodule
+        torch.autograd.grad(net(x[:2]).sum(), list(net.parameters()))  # 17
+        out = net.logits(x)
+        out.sum().backward(retain_graph=True)
+        out.mean().backward()  # 27: two backward passes over one forward
         with torch.no_grad():
             net(x)  # no gradient
         net(x)  # never back-propagated
-        copy.deepcopy(net)(x).sum().backward()  # 10: a copy
+        copy.deepcopy(net)(x).sum().backward()  # 32: a copy
         buffer = io.BytesIO()
         torch.save(net, buffer)
         buffer.seek(0)
-        torch.load(buffer, weights_only=False)(x[:2]).sum().backward()  # 12: a reloaded model
-        torch.nn.Linear(3, 2)(x).sum().backward()  # another class: not counted
-    assert counter.samples == 12
+        torch.load(buffer, weights_only=False)(x[:2]).sum().backward()  # 34: a reloaded model
+        net.eval()  # BatchNorm statistics are buffers, which torch.func cannot update
+        params = {k: v.detach() for k, v in net.named_parameters()}
+        grad(lambda p: functional_call(net, p, (x,)).sum())(params)  # 39: torch.func
+        net.train()
+    assert counter.samples == 39
     net(x).sum().backward()  # after the counter: not counted
-    assert counter.samples == 12
-
-    with counter_cls(lambda: None) as counter:  # the class does not exist (yet)
-        net(x).sum().backward()
-    assert counter.samples == 0
+    assert counter.samples == 39
 
 
 def test_resnet_description_states_the_grading_arguments():

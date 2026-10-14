@@ -92,6 +92,13 @@ the medals are not comparable for those named under "Medals and leaderboards". T
   structural call of `train` carries over. The count runs in the same process as the
   submission, so code written to evade it is not stopped; it catches code that trains for more
   passes than asked, whatever loop or copy of the data it uses.
+- **resnet-tensorflow-to-pytorch**: the training count is taken at the layers (7d81be5). The
+  first counter hooked calls of the submission's `ResNet` only, so a port that trains through
+  another method, as `model.logits(x)` in a Claude Code evaluation submission, counted 0
+  samples, and an over-trained port using that idiom would have passed. Now every
+  back-propagated batch through layers with parameters counts once, through any method, a
+  submodule or `torch.func`. A test model more accurate than the best constant class with no
+  counted training sample is an invalid submission.
 - **resnet-tensorflow-to-pytorch**: the grading arguments ask for `n_epochs=40` instead of 1
   (f1ca4fc). A port with Keras' BatchNorm settings (PyTorch momentum 0.01) scored 0.49 to 0.51
   after 1 epoch on 10 of 10 seeds: its running statistics lag the weights and eval-mode
@@ -316,23 +323,48 @@ Rebuilding these challenges gives different files; results on the old data are n
 - **LANL-Earthquake-Prediction**: test segment ids come from a seeded generator, duplicates are
   rejected, and the checksums are regenerated (7a8862f). Every prepare named the 2,500 segments
   differently, so checksums could never verify.
-- **LANL-Earthquake-Prediction**: the test is laid out as Kaggle's: every whole, non-overlapping
-  150,000-row segment inside one of the held-out earthquake cycles 13-17, 1,112 in all, labelled
-  with `time_to_failure` at its last row (6cd897f, 3c3dcb0). It was 500 random, possibly
-  overlapping 15,000-row windows from each of those cycles (2,500), which matched the training
-  distribution so closely that a 4-minute LightGBM on summary statistics scored better than
-  Kaggle's gold threshold (2.40159) and its rank-1 score (2.26589). No segment spans an
-  earthquake or touches a training row. The ids come from a generator seeded with a digest of the
-  private labels, and the files, answers and sample are in id order (they were grouped by
-  cycle), so neither ids nor order give a segment's position. `train.csv` (cycles 1-12) is
+- **LANL-Earthquake-Prediction**: the test is laid out as Kaggle's: 150,000-row segments from
+  the held-out earthquake cycles 13-17, 1,068 in all, each labelled with `time_to_failure` at its
+  last row (6cd897f, 3c3dcb0, 0ed1739, 1cee982). It was 500 random, possibly overlapping
+  15,000-row windows from each of those cycles (2,500), which matched the training distribution
+  so closely that a 4-minute LightGBM on summary statistics scored better than Kaggle's gold
+  threshold (2.40159) and its rank-1 score (2.26589). Consecutive segments are a random
+  4,096-8,191 rows apart, and each cycle's last segment ends a random 0-4,095 rows before the
+  cycle's end (0ed1739). The signal comes in 4,096-row recording bins and every cycle ends on a
+  bin boundary, so segments cut back to back from the cycle ends, as 6cd897f first did, gave away
+  their distance to the earthquake in their bin phase: a predictor reading it with a table from
+  `train.csv`, without modelling the signal, scored MAE 2.18. No segment spans an earthquake or
+  comes within a bin of a training row. The gaps and the ids come from generators seeded with
+  digests of private data, and the files, answers and sample are in id order (they were grouped
+  by cycle), so neither ids nor order give a segment's position. `train.csv` (cycles 1-12) is
   byte-identical, and prepare reads it in chunks instead of all 629M rows at once. On the new
-  test the sample scores 5.69625 (was 6.21077), the median of the training labels 3.00822, and
-  a LightGBM on 58 summary statistics of 150,000-row training windows 2.443 (2.415-2.443 over 5
-  seeds, about 10 CPU minutes), so no longer better than gold.
+  test the sample scores 5.69511 (was 6.21077), the median of the training labels 3.00716, a
+  LightGBM on 58 summary statistics of 150,000-row training windows 2.443 (2.409-2.443 over 5
+  seeds, about 10 CPU minutes), and a stronger one (68 features, leave-one-cycle-out CV) 2.168,
+  better than Kaggle's winner.
+- **ashrae-energy-prediction**: the training labels end on 2016-08-31, two months before the
+  test (031135d, ba50742). They ran to 2016-10-30, right up to the test (the last two months of
+  2016), while Kaggle's test (2017-2018) lay up to two years after its training year. So a lookup
+  table without any model, each building-meter's mean log reading over its last 7 training days,
+  scored RMSLE 1.145, better than Kaggle's gold threshold (1.244) and its rank-1 score (1.231).
+  The readings of 2016-09-01 to 2016-10-30 are now in neither split. The test, the sample, the
+  answers, `building_metadata.csv` and both weather files are unchanged (the weather covers the
+  whole year); only `train_label.csv` changes (13,358,457 rows; was 16,745,071), and its
+  checksum is regenerated (two prepares, identical files). On the new split the same tables score
+  1.852 (last 7 days), 1.840 (14) and 1.837 (28), the building-meter mean over all training days
+  1.448, and a quick LightGBM 1.126 (about 5 CPU minutes, 3 seeds within 0.003), still better
+  than gold. The sample still scores 4.7002. The description states the gap.
 - **Cloned task repositories**: shipped without `.git` (1568f6d) and pinned to commits (8dbe2b8;
   MOMENT to 37a8bde in 00279f6). The history held the reference solution (iTransformer), and
   moving branch heads changed the prepared data. The iTransformer prepare now also removes the
   files it meant to and ships `itransformer.txt`.
+- **time-series-library-itransformer-weather-forecast**: prepare stubs `DataEmbedding_inverted`
+  in the clone's `layers/Embed.py` (705b61f). Old: the class shipped filled in there, and it is
+  the answer to the four TODOs of `models/iTransformer.py`; an agent run printed it and copied it.
+  New: its four lines are the same TODOs as in `models/iTransformer.py`, so the class reads as it
+  does there; it is stubbed, not deleted, because `models/TimeXer.py` imports it. Only the
+  checksum of `layers/Embed.py` changes (a42f4197…). Scores do not change: `models/iTransformer.py`
+  defines its own class and does not import the one in `layers/Embed.py`.
 - **ucr-anomaly-detection, gift-eval-short-horizon**: checksums regenerated for the 5 / 55
   datasets that prepare keeps (00279f6); they listed all 250 / 55 and never verified.
 - **ucr-anomaly-detection**: the shipped `anomaly_dataset.py` reads `train/{name}.csv` (e232319),
@@ -459,7 +491,7 @@ TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011, 
 test segments are cut from Kaggle's training data, amp's test patients come from Kaggle's training
 data, and ashrae's leaderboard was scored on 2017-2018, its test set here on the end of 2016.
 
-Three more, after reviews of agent runs:
+Four more, after reviews of agent runs:
 
 - **MIT-BIH-Arrhythmia-Weak-Supervision** (both descriptions; fffb8ed). Old: beats were "a
   256-point time series ... preprocessed and normalized", and the heuristics included an early
@@ -476,6 +508,10 @@ Three more, after reviews of agent runs:
 - **context-is-key-nn5-chronos, context-is-key-moirai** (0921392). New: `cik_benchmark` and
   `run_baselines` import only with the repository root on the module search path, so scripts
   saved elsewhere need `PYTHONPATH`. Reason: agents' scripts failed with `ModuleNotFoundError`.
+- **csdi-implement-model-pm25, csdi-reproduce-pm25** (9015586). New: the target mask that
+  `model.evaluate` returns is empty here, all zeros, because the targets are withheld; the values
+  to submit are selected by the ids of `sample_submission.csv`. Reason: an agent run selected
+  them with that mask and submitted only NaN values.
 
 ## Tests
 
@@ -493,6 +529,9 @@ Three more, after reviews of agent runs:
 - `test_code_graders.py` covers the resnet sample budget and epoch count and the stomp variant
   through the registry and `grade_code` (a296e48). 6 of its 13 tests fail before the fixes. The
   architecture check adds 5 (b402c61); 2 of its 18 tests fail without that check.
+- `test_cmi_metric.py` compares the child-mind-institute metric with Kaggle's code, kept verbatim
+  in the test (19a9b52, 4f3df4f; 23 tests). Its timing test fails before 19a9b52 (20,000 rows took
+  52 s) and its memory test before 4f3df4f (the peak was 21 times the submission's size).
 
 ## Packaging and CI
 
@@ -514,6 +553,27 @@ Refactors, lint and speed-ups whose outputs were checked to be unchanged: c5b82b
 8a1bdf5, 28aed04, e2979b1, 0207ff5, e3e2baf, ac3a518, 0a22d57, 78e393a, 882338c, ff0dce7,
 9caa01b, f22a953, 2ac8b72, 126d7ab, a15ddc8, 362d0b8, and the test-only commits b20b786, 15abdfb
 and 7ad6b1c.
+
+- **child-mind-institute-detect-sleep-states**: the metric's matching and merging are faster, with
+  bitwise the same scores (19a9b52, 4f3df4f).
+  - Old: `match_detections` compared every detection with every ground truth through
+    `itertuples`, about 3 ms per submitted row, and `event_detection_ap` merged the detections
+    once per tolerance (10 copies). One candidate per minute on every test series, the density of
+    Kaggle's winners (2,111,880 rows), took 6,209 s and 7.1 GB; 5,000,000 rows needed more than
+    16 GB.
+  - New: a detection is matched from the ground truths within the tolerance of it, with the same
+    rule (the nearest one not yet matched, the first on ties, matched rows remembered as tuples),
+    and the detections are merged and sorted once per event x series. 2,111,880 rows take 4.4 s
+    at a peak RSS of 0.8 GB, and 5,000,000 rows 11.2 s at 1.9 GB.
+  - Identity: `test_cmi_metric.py` compares the scores with Kaggle's code bit for bit, on random
+    submissions and on edge cases: equal errors, equal ground-truth rows, rows holding a NaN,
+    tied scores among competing detections, empty series, events without a step, each tolerance,
+    integers past 2**52 and empty cells. Two agent submissions from the RL-environment
+    evaluations were also compared. On random subsets of 10,559 to 84,475 rows, the scores are
+    equal with the answers' events without a step dropped (229df50) and kept (before it). On the
+    whole submissions, with them kept as Kaggle's code ran in those evaluations, both give
+    0.20026379351789475 and 0.36276039952706707. A submission without any detection still raises
+    `ValueError`.
 
 ## Second pull request: isolated agents, separate grading, sandboxed agent code
 
@@ -609,13 +669,15 @@ they now take a predictor, and static submissions, which could copy labels, are 
   private files or to the raw-data archive of a checkout. The grading process compares the
   outputs with the answers as before. The resnet test's training-sample count and its count of
   the parameters a fresh model uses are taken in the sandbox, where the model trains, and the
-  grading process compares them with their limits (6f96a3b, 906c4f0). stomp's hidden variants
+  grading process compares them with their limits, and rejects an accurate model trained on no
+  counted sample, a rule that needs the answers (6f96a3b, 906c4f0, MERGE). stomp's hidden variants
   run there on inputs made from the public ones; their expected outputs are derived from the
   answers in the grading process (6f96a3b). Scores are unchanged: on the prepared data, 21
   submissions (the shipped samples, reference solutions, broken and altered versions of them,
   and hyperparameter-search folders) get identical reports, and after the resnet and stomp
-  changes 11 more (references, ports with and without shortcuts, samples, an answers cheat and
-  training budgets) get the native graders' reports.
+  changes 14 more (references, ports with and without shortcuts or training through
+  `logits()`, an untrained rule, samples, an answers cheat and training budgets) get the native
+  graders' reports.
 - **Submissions that end, hang or exhaust the grader are invalid** (5bc2131, 8b4cc3a): a
   segmentation fault, `os._exit` or `SystemExit` at import or while a model loads ended the
   grading process (`SystemExit` passed the grader's except clause), an endless loop hung it, and
