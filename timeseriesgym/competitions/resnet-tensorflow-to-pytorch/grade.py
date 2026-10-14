@@ -12,7 +12,7 @@ from timeseriesgym.grade_code_helper import (
     load_attr,
     load_grading_datasets,
 )
-from timeseriesgym.utils import get_logger
+from timeseriesgym.utils import InvalidSubmissionError, get_logger
 
 from .architecture import keras_trainable_parameters, trainable_parameters_in_use
 from .training_budget import TrainingSampleCounter
@@ -81,7 +81,7 @@ def grade_code(
     # The test model may be trained on at most n_epochs passes over train_data. The count
     # starts before the submission is imported and the test runs before any other call of
     # `train`, so no training outside it (at import, or kept from another call) goes uncounted.
-    counter = TrainingSampleCounter(lambda: getattr(submission_module, "ResNet", None))
+    counter = TrainingSampleCounter()
     with counter:
         spec.loader.exec_module(submission_module)
 
@@ -142,6 +142,15 @@ def grade_code(
             logger.error(f"Error computing accuracy for ResNet predictions: {e}")
             test_accuracy = 0.0
 
+    # A model better than any constant class that was trained on no sample the counter saw
+    # (stored weights, a hand-written rule, or training it cannot see) is not graded.
+    best_constant = float(answers["label"].value_counts(normalize=True).max())
+    if counter.samples == 0 and test_accuracy > best_constant:
+        raise InvalidSubmissionError(
+            f"the test model reached accuracy {test_accuracy:.4f}, above the best constant class "
+            f"({best_constant:.4f}), but no training sample was back-propagated through a layer "
+            "with parameters: train it with `train`, through the model's layers"
+        )
     within_budget = counter.samples <= sample_budget
     if not within_budget:
         logger.warning(

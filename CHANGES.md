@@ -91,6 +91,13 @@ the medals are not comparable for those named under "Medals and leaderboards".
   structural call of `train` carries over. The count runs in the same process as the
   submission, so code written to evade it is not stopped; it catches code that trains for more
   passes than asked, whatever loop or copy of the data it uses.
+- **resnet-tensorflow-to-pytorch**: the training count is taken at the layers (7d81be5). The
+  first counter hooked calls of the submission's `ResNet` only, so a port that trains through
+  another method, as `model.logits(x)` in a Claude Code evaluation submission, counted 0
+  samples, and an over-trained port using that idiom would have passed. Now every
+  back-propagated batch through layers with parameters counts once, through any method, a
+  submodule or `torch.func`. A test model more accurate than the best constant class with no
+  counted training sample is an invalid submission.
 - **resnet-tensorflow-to-pytorch**: the grading arguments ask for `n_epochs=40` instead of 1
   (f1ca4fc). A port with Keras' BatchNorm settings (PyTorch momentum 0.01) scored 0.49 to 0.51
   after 1 epoch on 10 of 10 seeds: its running statistics lag the weights and eval-mode
