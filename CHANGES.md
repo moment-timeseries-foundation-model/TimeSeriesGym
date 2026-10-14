@@ -528,6 +528,9 @@ Four more, after reviews of agent runs:
 - `test_code_graders.py` covers the resnet sample budget and epoch count and the stomp variant
   through the registry and `grade_code` (a296e48). 6 of its 13 tests fail before the fixes. The
   architecture check adds 5 (b402c61); 2 of its 18 tests fail without that check.
+- `test_cmi_metric.py` compares the child-mind-institute metric with Kaggle's code, kept verbatim
+  in the test (19a9b52, 4f3df4f; 23 tests). Its timing test fails before 19a9b52 (20,000 rows took
+  52 s) and its memory test before 4f3df4f (the peak was 21 times the submission's size).
 
 ## Packaging and CI
 
@@ -549,3 +552,24 @@ Refactors, lint and speed-ups whose outputs were checked to be unchanged: c5b82b
 8a1bdf5, 28aed04, e2979b1, 0207ff5, e3e2baf, ac3a518, 0a22d57, 78e393a, 882338c, ff0dce7,
 9caa01b, f22a953, 2ac8b72, 126d7ab, a15ddc8, 362d0b8, and the test-only commits b20b786, 15abdfb
 and 7ad6b1c.
+
+- **child-mind-institute-detect-sleep-states**: the metric's matching and merging are faster, with
+  bitwise the same scores (19a9b52, 4f3df4f).
+  - Old: `match_detections` compared every detection with every ground truth through
+    `itertuples`, about 3 ms per submitted row, and `event_detection_ap` merged the detections
+    once per tolerance (10 copies). One candidate per minute on every test series, the density of
+    Kaggle's winners (2,111,880 rows), took 6,209 s and 7.1 GB; 5,000,000 rows needed more than
+    16 GB.
+  - New: a detection is matched from the ground truths within the tolerance of it, with the same
+    rule (the nearest one not yet matched, the first on ties, matched rows remembered as tuples),
+    and the detections are merged and sorted once per event x series. 2,111,880 rows take 4.4 s
+    at a peak RSS of 0.8 GB, and 5,000,000 rows 11.2 s at 1.9 GB.
+  - Identity: `test_cmi_metric.py` compares the scores with Kaggle's code bit for bit, on random
+    submissions and on edge cases: equal errors, equal ground-truth rows, rows holding a NaN,
+    tied scores among competing detections, empty series, events without a step, each tolerance,
+    integers past 2**52 and empty cells. Two agent submissions from the RL-environment
+    evaluations were also compared. On random subsets of 10,559 to 84,475 rows, the scores are
+    equal with the answers' events without a step dropped (229df50) and kept (before it). On the
+    whole submissions, with them kept as Kaggle's code ran in those evaluations, both give
+    0.20026379351789475 and 0.36276039952706707. A submission without any detection still raises
+    `ValueError`.
