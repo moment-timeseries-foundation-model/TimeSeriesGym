@@ -5,6 +5,8 @@ video.
 
 """
 
+import bisect
+
 import numpy as np
 import pandas as pd
 import pandas.api.types
@@ -288,14 +290,144 @@ def match_detections(
     tolerance x series_id evaluation group.
     """
     detections_sorted = detections.sort_values(score_column_name, ascending=False).dropna()
-    is_matched = np.full_like(detections_sorted[event_column_name], False, dtype=bool)
+    detections_sorted["matched"] = greedy_match(
+        tolerance, ground_truths, detections_sorted[time_column_name], time_column_name
+    )
+
+    return detections_sorted
+
+
+def greedy_match(
+    tolerance: float, ground_truths: pd.DataFrame, detection_times: pd.Series, time_column: str
+) -> np.ndarray:
+    """Which detections match, in the order of `detection_times` (decreasing confidence).
+
+    In turn, each detection takes the ground truth nearest to it with an error below
+    `tolerance` that no earlier detection took, the first in `ground_truths` order on ties.
+    Matched ground truths are remembered as row tuples, so a row equal to a matched one counts
+    as matched too, and a row holding a float NaN (which equals no other) never does.
+
+    This is the result of `_match_loop`, which compares every detection with every ground
+    truth, in time linear in the detections: a detection can only take one of the few ground
+    truths within the tolerance of it, so the next detection to match is the first one after
+    the last match that is near a ground truth still free.
+    """
+    gt_times = ground_truths[time_column]
+    if not _exact_in_float64(tolerance, gt_times, detection_times):
+        return _match_loop(tolerance, ground_truths, detection_times, time_column)
+    try:
+        aliases = _matched_aliases(ground_truths)
+    except TypeError:  # an unhashable value: the loop fails as it did, if it gets that far
+        return _match_loop(tolerance, ground_truths, detection_times, time_column)
+    gt = gt_times.to_numpy(dtype=np.float64)
+    det = detection_times.to_numpy(dtype=np.float64)
+    is_matched = np.zeros(len(det), dtype=bool)
+    finite = np.flatnonzero(np.isfinite(gt))  # no other ground truth is within any tolerance
+    if len(det) == 0 or len(finite) == 0:
+        return is_matched
+
+    # Every (detection, ground truth) pair with an error below the tolerance. The errors grow
+    # (as computed, too) away from a detection's position among the sorted ground truths.
+    order = finite[np.argsort(gt[finite], kind="stable")]
+    gt_sorted = gt[order]
+    position = np.searchsorted(gt_sorted, det)
+    pair_det, pair_gt = [], []
+    with np.errstate(invalid="ignore"):
+        for step, first in ((-1, position - 1), (1, position)):
+            dets, idx = np.arange(len(det)), first
+            while len(dets):
+                inside = (idx >= 0) & (idx < len(gt_sorted))
+                dets, idx = dets[inside], idx[inside]
+                near = np.abs(det[dets] - gt_sorted[idx]) < tolerance
+                dets, idx = dets[near], idx[near]
+                pair_det.append(dets)
+                pair_gt.append(order[idx])
+                idx = idx + step
+    pair_det, pair_gt = np.concatenate(pair_det), np.concatenate(pair_gt)
+    by_gt = np.lexsort((pair_det, pair_gt))
+    pair_det, pair_gt = pair_det[by_gt], pair_gt[by_gt]
+    cuts = np.flatnonzero(np.diff(pair_gt)) + 1
+    # For each ground truth still free: the detections near it, in order, from `start` on.
+    pending = {
+        int(pair_gt[a]): pair_det[a:b].tolist()
+        for a, b in zip(np.r_[0, cuts], np.r_[cuts, len(pair_gt)], strict=True)
+        if b > a
+    }
+    cursor = dict.fromkeys(pending, 0)
+    is_free = np.ones(len(gt), dtype=bool)
+    start = 0
+    while pending:
+        nearest = len(det)  # the next detection near a free ground truth
+        for j in list(pending):
+            cursor[j] = bisect.bisect_left(pending[j], start, cursor[j])
+            if cursor[j] == len(pending[j]):
+                del pending[j]
+            else:
+                nearest = min(nearest, pending[j][cursor[j]])
+        if nearest == len(det):
+            break
+        with np.errstate(invalid="ignore"):
+            error = np.abs(det[nearest] - gt)
+            candidate = is_free & (error < tolerance)
+        best = int(np.argmin(np.where(candidate, error, np.inf)))  # the first minimum
+        is_matched[nearest] = True
+        for j in aliases[best]:
+            is_free[j] = False
+            pending.pop(j, None)
+        start = nearest + 1
+    return is_matched
+
+
+def _exact_in_float64(tolerance, *times: pd.Series) -> bool:
+    """Whether float64 arithmetic gives the loop's errors and comparisons exactly.
+
+    The loop computes with the Python values of the columns. NumPy integers and floats convert
+    to float64 the same way; only two integer columns are subtracted exactly, which float64
+    matches while both stay below 2**52.
+    """
+    if not all(isinstance(t.dtype, np.dtype) and t.dtype.kind in "iuf" for t in times):
+        return False
+    if isinstance(tolerance, bool | np.bool_):
+        return False
+    if isinstance(tolerance, int | np.integer):
+        if not abs(int(tolerance)) < 2**52:
+            return False
+    elif not isinstance(tolerance, float):  # Python float or np.float64
+        return False
+    if all(t.dtype.kind in "iu" for t in times):
+        return all(len(t) == 0 or max(abs(int(t.min())), abs(int(t.max()))) < 2**52 for t in times)
+    return True
+
+
+def _matched_aliases(ground_truths: pd.DataFrame) -> list[list[int]]:
+    """For each ground truth, those that count as matched once it is matched.
+
+    The loop keeps the matched rows as tuples and skips any row equal to one of them. Each
+    pass of itertuples makes new float objects, so the tuples are taken from two passes, as
+    the loop compares those of different passes.
+    """
+    kept: dict = {}
+    for k, row in enumerate(ground_truths.itertuples(index=False)):
+        kept.setdefault(row, []).append(k)
+    aliases = [[] for _ in range(len(ground_truths))]
+    for j, row in enumerate(ground_truths.itertuples(index=False)):
+        for k in kept.get(row, ()):
+            aliases[k].append(j)
+    return aliases
+
+
+def _match_loop(
+    tolerance: float, ground_truths: pd.DataFrame, detection_times: pd.Series, time_column: str
+) -> np.ndarray:
+    """The original assignment: every detection against every ground truth (Kaggle's code)."""
+    is_matched = np.zeros(len(detection_times), dtype=bool)
     gts_matched = set()
-    for i, det in enumerate(detections_sorted.itertuples(index=False)):
+    for i, det_time in enumerate(detection_times):
         best_error = tolerance
         best_gt = None
 
         for gt in ground_truths.itertuples(index=False):
-            error = abs(getattr(det, time_column_name) - getattr(gt, time_column_name))
+            error = abs(det_time - getattr(gt, time_column))
             if error < best_error and gt not in gts_matched:
                 best_gt = gt
                 best_error = error
@@ -304,9 +436,7 @@ def match_detections(
             is_matched[i] = True
             gts_matched.add(best_gt)
 
-    detections_sorted["matched"] = is_matched
-
-    return detections_sorted
+    return is_matched
 
 
 def precision_recall_curve(
