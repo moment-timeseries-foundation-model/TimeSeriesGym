@@ -332,6 +332,13 @@ Rebuilding these challenges gives different files; results on the old data are n
   MOMENT to 37a8bde in 00279f6). The history held the reference solution (iTransformer), and
   moving branch heads changed the prepared data. The iTransformer prepare now also removes the
   files it meant to and ships `itransformer.txt`.
+- **time-series-library-itransformer-weather-forecast**: prepare stubs `DataEmbedding_inverted`
+  in the clone's `layers/Embed.py` (705b61f). Old: the class shipped filled in there, and it is
+  the answer to the four TODOs of `models/iTransformer.py`; an agent run printed it and copied it.
+  New: its four lines are the same TODOs as in `models/iTransformer.py`, so the class reads as it
+  does there; it is stubbed, not deleted, because `models/TimeXer.py` imports it. Only the
+  checksum of `layers/Embed.py` changes (a42f4197…). Scores do not change: `models/iTransformer.py`
+  defines its own class and does not import the one in `layers/Embed.py`.
 - **ucr-anomaly-detection, gift-eval-short-horizon**: checksums regenerated for the 5 / 55
   datasets that prepare keeps (00279f6); they listed all 250 / 55 and never verified.
 - **ucr-anomaly-detection**: the shipped `anomaly_dataset.py` reads `train/{name}.csv` (e232319),
@@ -458,7 +465,7 @@ TimeSeriesGym's test sets with Kaggle leaderboards scored on Kaggle's (279b011, 
 test segments are cut from Kaggle's training data, amp's test patients come from Kaggle's training
 data, and ashrae's leaderboard was scored on 2017-2018, its test set here on the end of 2016.
 
-Three more, after reviews of agent runs:
+Four more, after reviews of agent runs:
 
 - **MIT-BIH-Arrhythmia-Weak-Supervision** (both descriptions; fffb8ed). Old: beats were "a
   256-point time series ... preprocessed and normalized", and the heuristics included an early
@@ -475,6 +482,10 @@ Three more, after reviews of agent runs:
 - **context-is-key-nn5-chronos, context-is-key-moirai** (0921392). New: `cik_benchmark` and
   `run_baselines` import only with the repository root on the module search path, so scripts
   saved elsewhere need `PYTHONPATH`. Reason: agents' scripts failed with `ModuleNotFoundError`.
+- **csdi-implement-model-pm25, csdi-reproduce-pm25** (9015586). New: the target mask that
+  `model.evaluate` returns is empty here, all zeros, because the targets are withheld; the values
+  to submit are selected by the ids of `sample_submission.csv`. Reason: an agent run selected
+  them with that mask and submitted only NaN values.
 
 ## Tests
 
