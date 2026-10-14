@@ -84,3 +84,13 @@ def test_cik_descriptions_say_the_repository_must_be_on_the_module_path(competit
     # agents' scripts outside the repository failed with ModuleNotFoundError
     assert "`PYTHONPATH=<path to context-is-key-forecasting>`" in text
     assert "ModuleNotFoundError: No module named 'cik_benchmark'" in text
+
+
+@pytest.mark.parametrize("competition_id", ["csdi-implement-model-pm25", "csdi-reproduce-pm25"])
+def test_csdi_descriptions_say_evaluates_target_mask_is_empty(competition_id):
+    text = " ".join((_directory(competition_id) / "description.md").read_text().split())
+    # prepare withholds the targets, so `evaluate`'s target mask (observed in the ground file,
+    # missing in the missing file) is all zeros; an agent run selected positions by it and
+    # submitted only NaN values
+    assert "(its third value, `eval_points` in `evaluate` in `utils.py`) is empty here" in text
+    assert "select them by the ids in `sample_submission.csv`" in text

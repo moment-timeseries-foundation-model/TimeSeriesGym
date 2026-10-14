@@ -971,6 +971,96 @@ def test_long_horizon_prepare_does_not_swallow_failures(tmp_path, monkeypatch):
         module.prepare(tmp_path, tmp_path, tmp_path)
 
 
+# DataEmbedding_inverted as the iTransformer task's clone (branch itransformer-weather-eval at
+# 493256f) has it: with the four TODOs in models/iTransformer.py, filled in in layers/Embed.py.
+ITRANSFORMER_TODOS = """class DataEmbedding_inverted(nn.Module):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+        super(DataEmbedding_inverted, self).__init__()
+        self.value_embedding = ...#TODO: fill in the missing part
+        self.dropout = ...#TODO: fill in the missing part
+
+    def forward(self, x, x_mark):
+        x = x.permute(0, 2, 1)
+        # x: [Batch Variate Time]
+        if x_mark is None:
+            x = ...#TODO: fill in the missing part
+        else:
+            x = ...#TODO: fill in the missing part
+        # x: [Batch Variate d_model]
+        return self.dropout(x)
+"""
+ITRANSFORMER_FILLED = """class DataEmbedding_inverted(nn.Module):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+        super(DataEmbedding_inverted, self).__init__()
+        self.value_embedding = nn.Linear(c_in, d_model)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x, x_mark):
+        x = x.permute(0, 2, 1)
+        # x: [Batch Variate Time]
+        if x_mark is None:
+            x = self.value_embedding(x)
+        else:
+            x = self.value_embedding(torch.cat([x, x_mark.permute(0, 2, 1)], 1))
+        # x: [Batch Variate d_model]
+        return self.dropout(x)
+"""
+# A neighbouring class of layers/Embed.py with two of the same lines, which must stay.
+EMBED_NEIGHBOUR = """
+
+class DataEmbedding_wo_pos(nn.Module):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+        super(DataEmbedding_wo_pos, self).__init__()
+        self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x, x_mark):
+        if x_mark is None:
+            x = self.value_embedding(x)
+        else:
+            x = self.value_embedding(x) + self.temporal_embedding(x_mark)
+        return self.dropout(x)
+"""
+
+
+def test_itransformer_prepare_stubs_the_embedding_the_task_asks_for(tmp_path, monkeypatch):
+    module = _module("time-series-library-itransformer-weather-forecast", "prepare")
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    for d in (raw, public, private):
+        d.mkdir()
+    np.save(raw / "pred.npy", np.zeros((2, 96, 21), dtype=np.float32))
+    (raw / "weather.csv").write_text("date,OT\n")
+    (raw / "itransformer.txt").write_text("paper\n")
+    header = "import torch\nimport torch.nn as nn\n\n\n"
+
+    def fake_clone(url, destination, branch=None, commit=None):
+        (destination / "layers").mkdir(parents=True)
+        (destination / "models").mkdir()
+        (destination / "layers" / "Embed.py").write_text(
+            header + ITRANSFORMER_FILLED + EMBED_NEIGHBOUR
+        )
+        (destination / "models" / "iTransformer.py").write_text(header + ITRANSFORMER_TODOS)
+        (destination / "models" / "TimeXer.py").write_text(
+            "from layers.Embed import DataEmbedding_inverted, PositionalEmbedding\n"
+        )
+        return destination
+
+    monkeypatch.setattr(module, "clone_repository", fake_clone)
+    module.prepare(raw, public, private)
+    embed = (public / "Time-Series-Library" / "layers" / "Embed.py").read_text()
+    # The answer is gone; the class is still there (TimeXer imports it), with the very TODOs of
+    # models/iTransformer.py, and the rest of the file is unchanged.
+    assert "nn.Linear(c_in, d_model)" not in embed
+    assert "torch.cat([x, x_mark.permute(0, 2, 1)], 1)" not in embed
+    assert embed == header + ITRANSFORMER_TODOS + EMBED_NEIGHBOUR
+    # The checksum of the real stubbed file (the clone at 493256f) is the one recorded.
+    checksums = (Path(module.__file__).parent / "checksums.yaml").read_text()
+    assert "Time-Series-Library/layers/Embed.py: a42f4197cd31c423f4f4c2eb645ce108" in checksums
+    # A clone without the filled-in class (another commit) fails instead of shipping it.
+    with pytest.raises(ValueError, match="DataEmbedding_inverted"):
+        module.stub_embedding(public / "Time-Series-Library" / "layers" / "Embed.py")
+
+
 # ---------------------------------------------------------------- missing-data variants
 
 
