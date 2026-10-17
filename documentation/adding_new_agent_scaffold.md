@@ -66,7 +66,7 @@ COPY . ${AGENT_DIR}
 WORKDIR ${AGENT_DIR}
 
 # Do not set ENTRYPOINT, CMD or USER: the base image's /entrypoint.sh must start as root and
-# runs the grading server; run_agent.py then runs ${AGENT_DIR}/start.sh as `nonroot`.
+# prepares /home; run_agent.py then runs ${AGENT_DIR}/start.sh as `nonroot`.
 ```
 
 ## Step 3: Create a Start Script
@@ -184,11 +184,19 @@ kwargs_common: &kwargs_common
     # Agent-specific configuration
     agent.model: gpt-4
     agent.steps: *step_count
-  env_vars:
-    <<: *env_vars
-    # Optional: API keys or other environment variables
-    API_KEY: ${{ secrets.API_KEY }}
+  model_proxy:
+    # API keys stay on the host, in the run's model proxy; the agent gets OPENAI_BASE_URL and
+    # a dummy OPENAI_API_KEY (see agents/README.md#network-and-model-access)
+    providers:
+      openai:
+        key: ${{ secrets.OPENAI_API_KEY }}
+        models: [gpt-4]
 ```
+
+Agent containers have no network. Your agent must call its models through the base URLs in its
+environment (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, ...; the official SDKs read them), and its
+image must contain everything it needs at run time. `env_vars` and `kwargs` may not hold
+`${{ secrets.* }}` values: agent code can read them.
 
 ## Step 5: Create Additional Agent Files
 
@@ -243,6 +251,14 @@ Add your agent to the registry by updating the appropriate files in TimeSeriesGy
 
 ## Step 7: Building and Testing Your Agent
 
+Build the base environment and the grader, if you have not yet (see the main README):
+
+```bash
+docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfile .
+docker build --platform=linux/amd64 --target grader -t timeseriesgym-grader \
+  -f environment/Dockerfile .
+```
+
 Build your agent's Docker image:
 
 ```bash
@@ -283,14 +299,18 @@ agents/aide/
 ### Execution Flow
 
 1. TimeSeriesGym builds the agent's Docker image
-2. Competition data is mounted to `/home/data/`
+2. The competition's public data is mounted to `/home/data/`; the container never gets the
+   private data or the graders
 3. `start.sh` is executed, which:
    - Sets up the environment
    - Prepares instructions
    - Creates symbolic links for output directories
    - Launches the agent with appropriate parameters
-4. The agent processes the competition and generates a submission
+4. The agent processes the competition and generates a submission, whose format it can check
+   with `validate_submission` (against the sample submission; it gives no score)
 5. Output files are collected from the linked directories
+6. After the agent's container has stopped, the run is graded in a separate container of the
+   grader image, with the private data
 
 ## Advanced Integration Considerations
 

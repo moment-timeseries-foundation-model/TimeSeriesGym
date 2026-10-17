@@ -278,20 +278,23 @@ def test_prepare_keeps_each_windows_scale_and_seasonal_naive_forecast(tmp_path):
 
     # deterministic: the same bytes twice
     assert _md5(private / "test.h5") == _md5(private2 / "test.h5")
-    assert _md5(public / "sample_submission.h5") == _md5(public2 / "sample_submission.h5")
+    files = sorted(p.relative_to(public) for p in public.rglob("*") if p.is_file())
+    assert files == sorted(p.relative_to(public2) for p in public2.rglob("*") if p.is_file())
+    assert [_md5(public / f) for f in files] == [_md5(public2 / f) for f in files]
 
     answers = load_answers(private / "test.h5")
     assert set(answers) == {"target", "seasonal_error", "seasonal_naive"}
-    with h5py.File(raw / "test.h5") as f:  # prepare moves the datasets, not test.h5
+    with h5py.File(raw / "test.h5") as f:
         raw_labels = f["label"][()]
     names = list(TOY_DATASETS)
     assert list(answers["target"].dtype.names) == names
     for name in names:
         np.testing.assert_array_equal(answers["target"][name][0], raw_labels[name][0])
 
-    # solar/W: weekly, season 1: the last value of each window's history
+    # solar/W: weekly, season 1: the last value of each window's history (the full series are
+    # private: the public ones end before the test windows)
     dataset_class = _module("dataset").Dataset
-    solar = dataset_class(name="solar/W", term="short", to_univariate=False, storage_path=public)
+    solar = dataset_class(name="solar/W", term="short", to_univariate=False, storage_path=private)
     histories = [entry["target"] for entry in solar.test_data.input]
     np.testing.assert_array_equal(
         answers["seasonal_naive"]["solar/W"][0],
@@ -303,18 +306,17 @@ def test_prepare_keeps_each_windows_scale_and_seasonal_naive_forecast(tmp_path):
     )
     # LOOP_SEATTLE/5T: season 288, a day of 5-minute steps
     loop = dataset_class(
-        name="LOOP_SEATTLE/5T", term="short", to_univariate=False, storage_path=public
+        name="LOOP_SEATTLE/5T", term="short", to_univariate=False, storage_path=private
     )
     history = next(iter(loop.test_data.input))["target"]
     np.testing.assert_array_equal(
         answers["seasonal_naive"]["LOOP_SEATTLE/5T"][0][0], history[-288:][: loop.prediction_length]
     )
 
-    # graded through the loaders: seasonal naive 1.0; the zero sample is valid
+    # graded through the loaders: seasonal naive 1.0; the zero forecasts of the sample
+    # predictor are valid
     assert _grade(answers["seasonal_naive"], answers) == 1.0
-    with h5py.File(public / "sample_submission.h5") as f:
-        sample = f["submission"][()]
-    assert np.isfinite(_grade(sample, answers))
+    assert np.isfinite(_grade(np.zeros(1, dtype=answers["target"].dtype), answers))
 
 
 # ---------------------------------------------------------------- leaderboard

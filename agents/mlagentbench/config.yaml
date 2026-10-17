@@ -16,6 +16,12 @@ mlagentbench:
     max-retries: 10 # retry if the agent doesn't give a valid action response
     max-tokens: 16384 # max output tokens for gpt-4o-mini-2024-07-18
   env_vars:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     TIME_LIMIT_SECS: *time_limit
     STEP_LIMIT: *step_count
+  model_proxy: # the API key stays on the host, in the run's model proxy (agents/model_proxy.py)
+    providers:
+      openai:
+        key: ${{ secrets.OPENAI_API_KEY }}
+        models: [gpt-4o-2024-08-06, gpt-4.0-mini] # llm-name, edit-script-llm-name, fast-llm-name
+    max_requests: 10000 # up to about 3 model calls per step
+    max_seconds: 5400 # the time limit and 30 minutes

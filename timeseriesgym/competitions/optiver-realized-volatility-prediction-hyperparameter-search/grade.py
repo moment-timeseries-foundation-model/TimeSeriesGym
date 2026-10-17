@@ -28,6 +28,7 @@ def grade_hyperparameter_search(
     hyperparameter_search_config: dict,
     solution_file_path: Path | None = None,
     sample_submission_path: Path | None = None,
+    private_paths: tuple[Path, ...] | None = None,
 ) -> float:
     return grade_relative_improvement(
         submission_folder_path,
@@ -36,6 +37,7 @@ def grade_hyperparameter_search(
         solution_file_path,
         sample_submission_path,
         grade_fn=grade,
+        private_paths=private_paths,
         lower_is_better=True,  # RMSPE
         packages_to_look_for=["optuna"],
         default_baseline="xgboost.sklearn.XGBRegressor",  # the description requires XGBRegressor()

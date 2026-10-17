@@ -12,9 +12,10 @@ from typing import Any
 
 import docker
 
+from agents.grading import GRADER_IMAGE, GRADING_TIMEOUT, grade_run
 from agents.registry import Agent
 from agents.registry import registry as agent_registry
-from agents.run import run_in_container
+from agents.run import check_privileges, run_in_container
 from environment.defaults import DEFAULT_CONTAINER_CONFIG_PATH
 from timeseriesgym.data import is_dataset_prepared
 from timeseriesgym.registry import Competition, registry
@@ -33,6 +34,7 @@ class Task:
     agent: Agent
     competition: Competition
     container_config: dict[str, Any]
+    agent_network: str = "none"  # Docker network of the agent's container
 
 
 async def worker(
@@ -75,6 +77,7 @@ async def worker(
                 retain_container=args.retain,
                 run_dir=task.path_to_run,
                 logger=run_logger,
+                network=task.agent_network,
             )
             # a non-zero exit (e.g. 124 from `timeout`) fails the run, but its outputs were saved
             task_output["agent_exit_code"] = exit_code
@@ -93,6 +96,18 @@ async def worker(
                 f"{task.competition.id}"
             )
             task_output["success"] = False
+        try:
+            if not args.skip_grading:  # the agent's container has been removed
+                task_output["grading"] = await asyncio.to_thread(
+                    grade_run,
+                    client=client,
+                    competition=task.competition,
+                    run_dir=task.path_to_run,
+                    image=args.grader_image,
+                    container_config=task.container_config,
+                    logger=run_logger,
+                    timeout=args.grading_timeout,
+                )
         finally:
             tasks_outputs[task.run_id] = task_output
             queue.task_done()
@@ -111,6 +126,23 @@ async def main(args):
             "Agent requires running in a privileged container, but the environment variable "
             "`I_ACCEPT_RUNNING_PRIVILEGED_CONTAINERS` is not set to `True`! Carefully consider if "
             "you wish to run this agent before continuing. See agents/README.md for more details."
+        )
+    if not args.skip_grading:
+        try:
+            client.images.get(args.grader_image)
+        except docker.errors.ImageNotFound:
+            raise ValueError(
+                f"The grader image `{args.grader_image}` does not exist. Build it with "
+                f"`docker build --target grader -t {args.grader_image} -f environment/Dockerfile "
+                ".`, or pass --skip-grading and grade the run group with "
+                "experiments/make_submission.py and `timeseriesgym grade`."
+            ) from None
+
+    if args.agent_network != "none":
+        logger.warning(
+            f"Agent containers are on the Docker network `{args.agent_network}`: unless that "
+            "network filters traffic, agents can download public answers. The model proxy "
+            "still keeps the API keys on the host."
         )
 
     run_group = f"{get_timestamp()}_run-group_{agent.name}"
@@ -132,6 +164,7 @@ async def main(args):
 
     with open(args.container_config) as f:
         container_config = json.load(f)
+    check_privileges(agent, container_config, args.allow_privileged_without_sysbox)
 
     # Create tasks for each (competition * seed)
     logger.info(f"Launching run group: {run_group}")
@@ -150,6 +183,7 @@ async def main(args):
                 path_to_run_group=run_dir.parent,
                 path_to_run=run_dir,
                 container_config=container_config,
+                agent_network=args.agent_network,
             )
             tasks.append(task)
 
@@ -179,6 +213,7 @@ async def main(args):
     metadata = {
         "run_group": run_group,
         "created_at": get_timestamp(),
+        "agent_network": args.agent_network,
         "runs": tasks_outputs,
     }
     run_group_dir = get_runs_dir(args.run_dir) / run_group
@@ -225,6 +260,24 @@ if __name__ == "__main__":
         default=DEFAULT_CONTAINER_CONFIG_PATH,
     )
     parser.add_argument(
+        "--agent-network",
+        help="Docker network of the agent containers. The default, `none`, gives them no "
+        "network: only the model proxy. `bridge` (Docker's default network) or a network of "
+        "your own lets agents reach whatever it reaches; see agents/README.md.",
+        type=str,
+        required=False,
+        default="none",
+    )
+    parser.add_argument(
+        "--allow-privileged-without-sysbox",
+        help="Run an agent that needs a privileged container (OpenHands) even if the container "
+        "configuration does not use Sysbox. Its code can then reach the host, and the private "
+        "data on it.",
+        action="store_true",
+        required=False,
+        default=False,
+    )
+    parser.add_argument(
         "--retain",
         help="Whether to retain the container after the run instead of removing it.",
         action="store_true",
@@ -266,10 +319,35 @@ if __name__ == "__main__":
         required=False,
         default=False,
     )
+    parser.add_argument(
+        "--grader-image",
+        help="Docker image of the grading step, which grades each run with the private data in "
+        "a separate container after the agent's container has stopped.",
+        type=str,
+        required=False,
+        default=GRADER_IMAGE,
+    )
+    parser.add_argument(
+        "--skip-grading",
+        help="Do not grade the runs (grade them later with experiments/make_submission.py and "
+        "`timeseriesgym grade`).",
+        action="store_true",
+        required=False,
+        default=False,
+    )
+    parser.add_argument(
+        "--grading-timeout",
+        help="Seconds the grading of a run may take.",
+        type=int,
+        required=False,
+        default=GRADING_TIMEOUT,
+    )
 
     args = parser.parse_args()
     if args.n_workers < 1:  # no worker would take the queued tasks: queue.join() never returns
         parser.error("--n-workers must be at least 1")
+    if args.agent_network == "host" or args.agent_network.startswith("container:"):
+        parser.error("--agent-network cannot share the host's or another container's network")
     if not hasattr(tarfile, "data_filter"):  # every extraction of the run's outputs would fail
         parser.error("Python 3.11.4 or later is required to extract the runs' outputs safely")
 

@@ -11,7 +11,7 @@ set -x
 
   # --------- Environment checks
   # Confirm that we don't have access to this
-  ls /private  # Expect "permission denied"
+  ls /private  # Expect "No such file or directory": the answers are not in this container
   # Data should be mounted correctly
   ls /home/data  # Expect to see the data files
   # Confirm that validation tool works
@@ -38,7 +38,6 @@ set -x
 
   source /opt/conda/bin/activate agent
 
-  sudo /agent_build.sh \
-    && conda run -n agent --no-capture-output python setup.py "$@" \
+  conda run -n agent --no-capture-output python setup.py "$@" \
     && conda run -n agent --no-capture-output python start.py "$@"
 } 2>&1 | tee $LOGS_DIR/agent.log

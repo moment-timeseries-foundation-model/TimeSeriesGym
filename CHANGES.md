@@ -7,7 +7,8 @@ and speed-ups that change no output are listed at the end.
 
 Results produced before these changes are not directly comparable for the challenges named
 under "Scores and validity", "Hyperparameter search", "Feature enhancement" and "Prepared data";
-the medals are not comparable for those named under "Medals and leaderboards".
+the medals are not comparable for those named under "Medals and leaderboards". The last section,
+"Second pull request", lists the changes of the follow-up pull request on architecture.
 
 ## Scores and validity
 
@@ -573,3 +574,198 @@ and 7ad6b1c.
     whole submissions, with them kept as Kaggle's code ran in those evaluations, both give
     0.20026379351789475 and 0.36276039952706707. A submission without any detection still raises
     `ValueError`.
+
+## Second pull request: isolated agents, separate grading, sandboxed agent code
+
+These changes come on top of the ones above. Agent runs made before them are not directly
+comparable with runs made after: agents had the internet, their provider keys, the answers in
+their container and a validation server that ran the grader on them. Results of
+gift-eval-short-horizon and time-series-library-long-horizon-forecast are not comparable either:
+they now take a predictor, and static submissions, which could copy labels, are invalid.
+
+### The agent's container
+
+- **Only the public data** (a01bb31). The answers were mounted at
+  `/private/data/<id>/prepared/private`, behind a mode-700 directory, next to a root Flask
+  grading server, so a privileged or docker-group agent (the OpenHands configuration) could read
+  them. `agents/run.py` now mounts only the public data. The agent's image (`timeseriesgym-env`)
+  has no TimeSeriesGym code, graders, Flask or `/private`, and `environment/grading_server.py` is
+  removed. The agent starts once the entrypoint has made `/home` writable
+  (`/run/timeseriesgym-ready`), instead of after the server's health check.
+- **Validation is a format check against the sample submission** (4855462, a01bb31, 0150348).
+  Agents run `validate_submission [file or folder]` or `/home/validate_submission.sh`;
+  `http://localhost:5000/validate` is gone. It checks a contract that `run_agent.py` derives
+  from the public sample submission and installs in each container: CSV columns, rows, the
+  values of the id columns (those that vary in the sample) in the sample's order, and value
+  kinds; `.npy` and `.h5` shapes, datasets and finite numbers; pickle structure; Python syntax
+  and the code grader's functions; the files of hyperparameter-search and feature-enhancement
+  folders; and predictor folders, with the grader's own format check (0150348). Verdicts change,
+  as the server's came from the grader run on the answers: the check accepts values a metric
+  cannot use (e.g. negative RMSLE predictions, HMS rows that do not sum to 1), which grading
+  rejects, and rejects rows in another order than the sample's, which graders that match ids
+  accept. It prints plain text (was JSON) and exits with code 1 for an invalid submission.
+  `child-mind-institute-detect-sleep-states` sets `submission_format: fixed_rows: false`.
+- **No network** (3299c6d, 4d1f2d0). Agent containers were on Docker's default network, so agent
+  code could download the public data the challenges are built from (Kaggle, UCR, PhysioNet,
+  Hugging Face, this repository) and send anything anywhere. They now get Docker's `none`
+  network: loopback only. `run_agent.py --agent-network bridge` (or the name of an operator's
+  network) gives a run group a network, and `metadata.json` records it as `agent_network`;
+  `host` and `container:<id>` are refused, and a container config that sets the network is an
+  error. The agents' instructions say whether their container has internet access: `run.py`
+  fills that line for the run's network (4d1f2d0). Challenges that install packages or download
+  weights at run time need them in the agent's image (agents/README.md lists them).
+- **API keys stay on the host** (0348a4c, 3c96469, b92f1a1, 9d3fb13). `agents/run.py` put the
+  provider keys of the agent's config into the container's environment, where agent code could
+  read them. Each run now starts a model proxy on the host (`agents/model_proxy.py`) that holds
+  the keys and forwards only POST requests to the providers' model endpoints (OpenAI,
+  Anthropic, OpenRouter, Gemini's OpenAI-compatible API), only for the models in the agent's
+  config, up to a request and a time budget (AIDE 1000 requests and 16200 s, MLAgentBench
+  10000 and 5400 s, OpenHands 2000 and 23400 s). The container gets base URLs with a per-run
+  token and dummy keys, and reaches the proxy through a relay on `127.0.0.1:18080`. Configs
+  give keys under `model_proxy`; `${{ secrets.* }}` in `env_vars` or `kwargs` is refused. The
+  proxy's log (`<run>/model_proxy.jsonl`) holds counts, status codes and sizes, no content or
+  keys.
+- **Privileged agents need Sysbox** (b05d9f1). A privileged agent ran on any runtime once
+  `I_ACCEPT_RUNNING_PRIVILEGED_CONTAINERS` was set, and without Sysbox a privileged container
+  can reach the host's devices and the private data on the host. `run_agent.py` now refuses a
+  privileged agent unless the container configuration sets `"runtime": "sysbox-runc"`
+  (`default.json` does, `gpu_enabled.json` does not) or `--allow-privileged-without-sysbox` is
+  passed.
+- **Scaffolds** (b92f1a1, d98af77). AIDE's Claude, Llama and Gemini variants get an OpenAI key
+  too: their feedback model is `gpt-4o-2024-08-06`, but their configs passed only the other
+  provider's key. The Llama (OpenRouter) and Gemini variants cannot reach their models until the
+  AIDE fork reads `OPENROUTER_BASE_URL` and uses Gemini's OpenAI-compatible API at
+  `GEMINI_BASE_URL`. OpenHands' `make build`, `playwright install` and the NVIDIA container
+  toolkit run when its image is built, not at agent start through a sudo rule for
+  `/agent_build.sh` (504e1ab), which is gone; its Docker runtime still builds a sandbox image at
+  agent start, so OpenHands needs `--agent-network bridge` for now. MLAgentBench's tiktoken
+  encodings are fetched when its image is built.
+
+### Grading
+
+- **Each run is graded after its agent's container has stopped** (6c7053c, 8371d39), in a
+  container of the new `timeseriesgym-grader` image (`--target grader`). It is the only
+  container with the private data (read-only, under `/data`, which the image makes root-only);
+  it has no network and gets the memory and CPU limits, but not the runtime, GPUs or
+  privileges, of the container configuration. It runs `timeseriesgym grade` as root on the run's
+  `experiments/make_submission.py` line, so that the grading sandbox runs agent code as the
+  image's user `sandbox`, then gives `<run>/grading/` to the invoking user (8371d39; the
+  verifier branch ran it as the invoking user). The report is recorded as `grading` in
+  `metadata.json`. New `run_agent.py` options: `--grader-image`, `--skip-grading`,
+  `--grading-timeout` (7200 s). Scores are those of `timeseriesgym grade` in that image, which
+  installs TimeSeriesGym's dependencies, flake8 for the feature-enhancement rubric included. The
+  manual workflow is unchanged.
+- **Agent code runs in a sandbox** (73be122, 5bc2131, 8b4cc3a; hardened in e1231b5, 12e2970).
+  `grade_code` (resnet-tensorflow-to-pytorch, stomp-R-to-python) imported `submission.py` and ran
+  its functions, and `grade_relative_improvement` (both hyperparameter-search challenges)
+  unpickled or `torch.jit.load`ed the submitted models, in the grading process, with the
+  answers loaded. Agent code could read the answers, the grader's environment (credentials) and
+  the user's files, write wherever the grader could, open connections and leave processes
+  running. This now runs in a separate process (`timeseriesgym/sandbox.py`): as the user
+  `sandbox` when grading runs as root, otherwise as the grading user confined by Landlock; with
+  a copy of the submission and of the public input data, a scrubbed environment, no sockets,
+  limits on time (1800 s for code, 600 s for a hyperparameter search), memory (3/4 of the
+  machine's, all its processes together) and file size (1 GiB), and no read access to the
+  private files or to the raw-data archive of a checkout. The grading process compares the
+  outputs with the answers as before. The resnet test's training-sample count and its count of
+  the parameters a fresh model uses are taken in the sandbox, where the model trains, and the
+  grading process compares them with their limits, and rejects an accurate model trained on no
+  counted sample, a rule that needs the answers (6f96a3b, 906c4f0, 024398c). stomp's hidden variants
+  run there on inputs made from the public ones; their expected outputs are derived from the
+  answers in the grading process (6f96a3b). Scores are unchanged: on the prepared data, 21
+  submissions (the shipped samples, reference solutions, broken and altered versions of them,
+  and hyperparameter-search folders) get identical reports, and after the resnet and stomp
+  changes 14 more (references, ports with and without shortcuts or training through
+  `logits()`, an untrained rule, samples, an answers cheat and training budgets) get the native
+  graders' reports.
+- **Submissions that end, hang or exhaust the grader are invalid** (5bc2131, 8b4cc3a): a
+  segmentation fault, `os._exit` or `SystemExit` at import or while a model loads ended the
+  grading process (`SystemExit` passed the grader's except clause), an endless loop hung it, and
+  memory was unlimited.
+- **Linked and huge files are invalid** (5bc2131, 8b4cc3a, 12e2970; test 983efae): a
+  `submission.py` or model file that is a symbolic link was followed, and one larger than 2 GiB
+  is invalid too.
+- **Setup errors stop the grading** (73be122, 5bc2131): grading as root without a `sandbox` user
+  (`TIMESERIESGYM_SANDBOX_USER` names another), or as a user where Landlock is not available, so
+  that the sandbox could read the answers, raises a `SandboxError`. Unlike other grader errors it
+  is not recorded as an invalid submission, and it stops a `timeseriesgym grade` batch.
+  `TIMESERIESGYM_SANDBOX_UNCONFINED=1` grades trusted submissions without Landlock. The grader
+  image has the `sandbox` user (8371d39; the sandbox branch had put it in the agent's image).
+
+### Predictor challenges
+
+gift-eval-short-horizon and time-series-library-long-horizon-forecast. The code is the new
+package `timeseriesgym/predictor` (f5e9bda, e535b65, 56af8ea, b7626a4, 0e63610, 2789748,
+33d72a5); the challenges change in 39a46a6, 7ba10ad, d541ce5 and 1eb20dc.
+
+- **The test labels were in the public data.** GIFT-Eval published the full series from which
+  the answers are cut, and other frequencies of the same series, whose sums equal coarser labels
+  (the solar/W labels are the weekly sums of solar/D, solar/H and solar/10T). TSL's answers are
+  TSL's own test loader run over the public CSVs. The value-overlap scan
+  (`python -m timeseriesgym.predictor.leakscan <id>`) finds every informative run of 16
+  test-label values in the previous public data: 485,616 runs in 5 of 5 GIFT-Eval datasets,
+  5,157,780 in 9 of 9 TSL datasets. On the new public data it finds none in 4 of 5 GIFT-Eval and
+  7 of 9 TSL datasets; the others are properties of the data (M4's duplicated segments in
+  m4_daily, recurring daily and weekly profiles in electricity and traffic).
+- **Submission: a predictor**, the directory `submission/predictor/` with `predict.py`, instead
+  of an `.h5` of predictions. The grader builds the test windows from the full data, now in
+  `private/`, as the answers were built (the same windows in the same order; prepare asserts
+  that their labels equal the answers). It calls `predict(windows)` in rounds forward in time,
+  so that no call shows a value before it has been forecast, also through a related series
+  (TSL's four ETT datasets share one clock). GIFT-Eval: 16,696 windows in 568 calls; TSL: 48,962
+  windows in 11,425 calls. A file of predictions is now invalid, and so is a predictor that
+  fails, breaks the protocol, returns a non-finite forecast or one beyond the float32 range, or
+  runs longer than 2,400 s in all. `make_submission.py` points at `submission/predictor`, and
+  `timeseriesgym grade-predictor` grades one directory.
+- **Scores**: the grade functions are unchanged and score the assembled forecasts as they would
+  score a static submission. The sample predictor, which forecasts 0, scores 5.63105 on
+  GIFT-Eval (normalized MASE; MAPE 0.99472, as a zero submission did) and on TSL as before per
+  dataset (MSE: ETTh1 1.10992 ... weather 0.63657); a predictor that holds the answers scores 0.
+- **The predictor runs in the grading sandbox** (33d72a5): the same confinement as above, for a
+  live process whose stdin and stdout are pipes to the grader (`sandbox.interactive`), with the
+  challenge's private data protected. The predictor branch ran it as a plain subprocess of the
+  grader, which could read the full series and the answers: a predictor that reads them scores
+  perfectly that way, and as the sample predictor does in the sandbox.
+  `timeseriesgym grade-predictor --trusted` still runs the plain subprocess, for trusted
+  predictors only.
+- **The predictor's Python** (33d72a5, 8371d39): `--python` or `$TSGYM_PREDICTOR_PYTHON`, else
+  the grader's. The grader image sets it to its copy of the agents' conda environment `agent`
+  (numpy 1.26, torch 2.2; the grader has numpy 2 and torch 2.6), built from the Dockerfile's
+  `env` stage or, with `--build-arg PREDICTOR_ENV=<image>`, from an agent's image.
+- **Public data, gift-eval-short-horizon**: each series of the 5 datasets ends where its own test
+  windows begin, and the other frequencies are dropped (LOOP_SEATTLE/D and H,
+  hierarchical_sales/D, kdd_cup_2018_with_missing/D, solar/10T, D and H). `Dataset()` now loads
+  with the agent environment's datasets 2.1.0 and numpy 1.26, where it failed.
+  `sample_submission.h5` becomes `sample_predictor/`. New: `check_predictor.py` with
+  `predictor_tools/` (the local check) and `predictor_datasets.json` (shapes and window counts).
+  The answers file is unchanged: `private/test.h5` is the normalized-MASE answers above
+  (2c3604c3).
+- **Public data, time-series-library-long-horizon-forecast**: each CSV ends at the row of TSL's
+  first test label. The public `data_loader.py` keeps the full files' borders and scaler
+  (`TSG_FULL_ROWS`) and gives the validation split for `flag="test"`. The 3.6 GB
+  `sample_submission.h5` of zeros becomes `sample_predictor/`; the local check and
+  `predictor_datasets.json` are added. The answers have the same content (every array equal);
+  `test.h5` is written in sorted dataset order, so its bytes do not depend on the directory
+  order (md5 9db94a8f; the old abc44058 could not be reproduced by a rebuild).
+- **The local check** (`python /home/data/check_predictor.py`) runs a predictor on validation
+  windows of the public data with the grader's format check, windows, calls and runner, and
+  prints each dataset's score from the challenge's own `grade.py` (for GIFT-Eval with each
+  window's scale, computed with `mase.window_baselines`) and a run-time estimate.
+- **Checksums** of both challenges are regenerated (1eb20dc); two further prepares verify them.
+  The public data hold copies of the predictor tools and of the metric's modules, so a change
+  to those files changes the checksums.
+
+### Migration
+
+- Build `timeseriesgym-env` (the default target), every agent image on it, and then
+  `timeseriesgym-grader` (`--target grader`). `run_agent.py` refuses agent images built on the
+  old base and stops if the grader image is missing (`--skip-grading` grades nothing).
+- Agent configs give provider keys under `model_proxy` (agents/README.md, "Migrating Agent
+  Scaffolds"); scaffolds read the base URLs from the environment and install everything when
+  their image is built.
+- Agents check submissions with `validate_submission` (plain text, exit code 1 if invalid).
+- OpenHands needs a container configuration with Sysbox, or `--allow-privileged-without-sysbox`,
+  and `--agent-network bridge`.
+- Prepare gift-eval-short-horizon and time-series-library-long-horizon-forecast again.
+- The unit tests take about 9 minutes instead of 1.5: each sandboxed grading starts a Python
+  process that imports torch and pandas again (4 to 7 s).

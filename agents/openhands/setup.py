@@ -5,7 +5,8 @@ from pathlib import Path
 from templates import additional_notes_template, config_template
 from utils import get_gpu_generation, str_to_bool
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # a dummy: the model proxy holds the key
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # the run's model proxy
 CODE_DIR = Path(os.getenv("CODE_DIR"))
 AGENT_DIR = Path(os.getenv("AGENT_DIR"))
 
@@ -33,6 +34,7 @@ config = config_template.substitute(
     max_steps=args.max_steps,
     model=args.model,
     api_key=OPENAI_API_KEY,
+    base_url=OPENAI_BASE_URL,
     agent=args.agent,
     shm_size=args.shm_size,
     debug=args.debug,

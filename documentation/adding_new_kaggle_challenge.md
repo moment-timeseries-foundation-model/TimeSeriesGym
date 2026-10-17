@@ -238,6 +238,13 @@ grading_type: standard
 score_higher_is_better: false
 ```
 
+### 2.6 Format Check for Agents (Optional)
+
+The agents' format check, `validate_submission`, compares submissions with the sample
+submission. If the sample's rows or id columns do not describe a valid submission, set
+`submission_format` in `config.yaml` (see
+[adding_new_challenges.md](adding_new_challenges.md#36-format-check-for-agents-submission_format-optional)).
+
 ## Step 3: Register the Competition
 
 Add your competition to the appropriate split files:

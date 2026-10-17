@@ -453,7 +453,7 @@ def test_resnet_training_beyond_n_epochs_fails(resnet_data, tmp_path, source):
 
 
 def test_resnet_training_at_import_counts(resnet_data, tmp_path):
-    path = str(Registry(resnet_data).get_competition(RESNET).public_dir / "train_data.pt")
+    path = "data/train_data.pt"  # the grading sandbox's copy of the public data, in its cwd
     source = PRETRAINED_AT_IMPORT.replace("@PATH@", repr(path))
     report = _grade_resnet(resnet_data, tmp_path, source, n_epochs=1)
     assert report.valid_submission and report.test_metric == "0/1"

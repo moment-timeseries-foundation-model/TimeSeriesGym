@@ -1,4 +1,18 @@
-FROM ubuntu:20.04
+# Two images. The agent's base image, timeseriesgym-env, is the default target:
+#   docker build --platform=linux/amd64 -t timeseriesgym-env -f environment/Dockerfile .
+# The grader grades each run in a separate container after the agent's container has stopped
+# (agents/grading.py):
+#   docker build --platform=linux/amd64 --target grader -t timeseriesgym-grader \
+#     -f environment/Dockerfile .
+# Only the grader has TimeSeriesGym and its graders installed, and only the grader's container
+# gets the private data. The agent's container gets the public data and a format check.
+
+# The agent environment the grader runs predictors with: the `env` stage below, or an agent's
+# image (--build-arg PREDICTOR_ENV=<image>), whose conda env `agent` the grader copies
+ARG PREDICTOR_ENV=env
+
+# The agent's base image (the default target, at the end of this file)
+FROM ubuntu:20.04 AS env
 
 # Avoid interactive dialog from apt-get and other packages requiring configuration
 ENV DEBIAN_FRONTEND=noninteractive
@@ -60,30 +74,59 @@ ENV PATH="/opt/conda/bin:${PATH}"
 
 # Installs from here onward go into the conda base env; previous was installed to /usr/bin/python
 
-# Install stuff for the grading server: timeseriesgym and flask
-COPY . /timeseriesgym
-RUN pip install flask && pip install -e /timeseriesgym
+# The format check, validate_submission, runs in the conda base env and needs only these. This
+# image has no TimeSeriesGym code, graders or private data (see the grader target above).
+RUN pip install "numpy>=1.26" "pandas>=2.2" "h5py>=3.10"
 
 # Reset DEBIAN_FRONTEND
 ENV DEBIAN_FRONTEND=
 
-# Make private directory (root) owner-only. Grading server will be added here, later in the build
-# The test set answers will be added here separately via a mounted docker volume
-RUN mkdir /private && chmod 700 /private
-
-# Copy over relevant files
-COPY environment/grading_server.py /private/grading_server.py
+# Copy over relevant files. run_agent.py adds the challenge's format, contract.json, to
+# /opt/timeseriesgym in each container.
+COPY environment/validate_submission.py /opt/timeseriesgym/validate_submission.py
 COPY environment/instructions.txt /home/instructions.txt
 COPY environment/validate_submission.sh /home/validate_submission.sh
+COPY environment/validate_submission.sh /usr/local/bin/validate_submission
 COPY environment/entrypoint.sh /entrypoint.sh
 
-# Create nonroot user; make entrypoint executable
+# Create nonroot user; make entrypoint and format check executable
 RUN useradd -m nonroot \
     && mkdir /home/submission \
-    && chmod +x /entrypoint.sh
+    && chmod 755 /opt/timeseriesgym \
+    && chmod +x /entrypoint.sh /home/validate_submission.sh /usr/local/bin/validate_submission
 
 WORKDIR /home
 
 # IMPORTANT: This needs to run as root! Downstream Dockerfiles must not change the default USER for when the container starts.
-# Entrypoint script is in charge of setting up the user environment and running the grading server
+# Entrypoint script is in charge of setting up the user environment (permissions under /home)
 ENTRYPOINT ["/entrypoint.sh"]
+
+FROM ${PREDICTOR_ENV} AS predictor-env
+
+# The grader
+FROM python:3.11-slim-bookworm AS grader
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    DEEPEVAL_TELEMETRY_OPT_OUT=YES
+
+COPY . /timeseriesgym
+RUN pip install -e /timeseriesgym
+
+# Agent code (code submissions, models, predictors) runs in the grading sandbox as the user
+# `sandbox` (timeseriesgym/sandbox.py). The private data are mounted under /data, which that
+# user cannot enter.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sandbox \
+    && mkdir -m 700 /data
+
+# Predictors run with the agent environment's Python and packages, at the agents' path
+COPY --from=predictor-env /opt/conda/envs/agent /opt/conda/envs/agent
+ENV TSGYM_PREDICTOR_PYTHON=/opt/conda/envs/agent/bin/python
+
+# run_agent.py runs `timeseriesgym grade` in it as root, with no network, and gives the outputs
+# to the invoking user
+WORKDIR /tmp
+ENTRYPOINT ["timeseriesgym"]
+
+# The default target: the agent's base image, timeseriesgym-env
+FROM env

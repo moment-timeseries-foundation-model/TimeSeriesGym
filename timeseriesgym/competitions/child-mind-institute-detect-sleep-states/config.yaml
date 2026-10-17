@@ -21,6 +21,11 @@ dataset:
   answers: child-mind-institute-detect-sleep-states/prepared/private/test_events.csv
   sample_submission: child-mind-institute-detect-sleep-states/prepared/public/sample_submission.csv
 
+# the agents' format check (agents/validation.py): a submission lists detected events, so its
+# rows are not those of the sample submission
+submission_format:
+  fixed_rows: false
+
 grader:
   name: event-detection-average-precision
   lower_is_better: false

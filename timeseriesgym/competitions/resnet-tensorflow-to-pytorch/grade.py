@@ -1,9 +1,10 @@
-import importlib
+import importlib.util
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from timeseriesgym import sandbox
 from timeseriesgym.grade_code_helper import (
     grade_class,
     grade_class_method,
@@ -18,6 +19,15 @@ from .architecture import keras_trainable_parameters, trainable_parameters_in_us
 from .training_budget import TrainingSampleCounter
 
 logger = get_logger(__name__)
+
+SCORE_KEYS = (
+    "defined_classes",
+    "initialized_classes",
+    "defined_class_methods",
+    "executed_class_methods",
+    "defined_functions",
+    "executed_functions",
+)
 
 
 def _test_outputs(submission_module, coding_config: dict):
@@ -41,26 +51,32 @@ def _test_outputs(submission_module, coding_config: dict):
         return None
 
 
-def _architecture_matches(submission_module, coding_config: dict) -> bool:
-    """Whether a fresh ResNet's forward pass uses exactly the Keras model's number of trainable
-    parameters for the grading arguments (architecture.py)."""
+def _parameters_in_use(submission_module, coding_config: dict) -> int | None:
+    """The trainable parameters a fresh ResNet's forward pass uses with the grading arguments
+    (architecture.py), or None if it cannot be built or run."""
     resnet_config = coding_config["required_classes"]["ResNet"]
-    init_args = resnet_config["required_methods"]["__init__"]["required_args"]
+    model = initialize_class(submission_module, "ResNet", resnet_config)
+    if model is None:
+        return None
+    try:
+        x = resnet_config["required_methods"]["forward"]["required_args"]["x"]
+        return int(trainable_parameters_in_use(model, x))
+    except Exception as e:
+        logger.error(f"Error counting the trainable parameters of ResNet: {e}")
+        return None
+
+
+def _architecture_matches(used: int | None, coding_config: dict) -> bool:
+    """Whether the forward pass uses exactly the Keras model's number of trainable parameters
+    for the grading arguments (architecture.py)."""
+    init_args = coding_config["required_classes"]["ResNet"]["required_methods"]["__init__"]
+    init_args = init_args["required_args"]
     expected = keras_trainable_parameters(
         int(init_args["input_shape"][0]),
         int(init_args["n_feature_maps"]),
         int(init_args["n_classes"]),
     )
-    model = initialize_class(submission_module, "ResNet", resnet_config)
-    if model is None:
-        return False
-    try:
-        x = resnet_config["required_methods"]["forward"]["required_args"]["x"]
-        used = trainable_parameters_in_use(model, x)
-    except Exception as e:
-        logger.error(f"Error counting the trainable parameters of ResNet: {e}")
-        return False
-    if used != expected:
+    if used is not None and used != expected:
         logger.warning(
             f"ResNet's forward pass uses {used} trainable parameters; the Keras model of "
             f"resnet.py has {expected} with these arguments: the test fails"
@@ -68,14 +84,13 @@ def _architecture_matches(submission_module, coding_config: dict) -> bool:
     return used == expected
 
 
-def grade_code(
-    submission_file_path: Path,
-    answers: pd.DataFrame,
-    coding_config: dict,
-) -> dict:
+def run_submission(work: Path, job: dict) -> None:
+    """The sandbox half of grade_code: the native grader up to where it reads the answers."""
+    coding_config = sandbox.job_coding_config(work, job)
+
     # load the submission module
-    module_name = submission_file_path.stem
-    spec = importlib.util.spec_from_file_location(module_name, submission_file_path)
+    path = work / job["submission"]
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     submission_module = importlib.util.module_from_spec(spec)
 
     # The test model may be trained on at most n_epochs passes over train_data. The count
@@ -92,6 +107,16 @@ def grade_code(
 
         # task-specific grading: model test accuracy
         outputs = _test_outputs(submission_module, coding_config)
+
+    # the test predictions, saved before any other call of the submission can change them
+    two_outputs, error = isinstance(outputs, tuple) and len(outputs) == 2, None
+    if two_outputs:
+        try:
+            # outputs[0] is the dummy test labels, true labels are in answers
+            # outputs[1] is the model predictions in (n_samples, n_classes)
+            sandbox.save_array(work, "preds.npy", np.argmax(outputs[1], axis=1))
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"[:2000]
 
     # grade class definitions and initializations
     class_scores = grade_class(submission_module, coding_config)
@@ -111,8 +136,9 @@ def grade_code(
     # grade function definitions and executions
     function_scores = grade_function(submission_module, coding_config)
 
-    # task-specific grading: the architecture (after the test model, outside its sample count)
-    architecture_matches = _architecture_matches(submission_module, coding_config)
+    # task-specific grading: the architecture (after the test model, outside its sample count);
+    # the trusted half compares the count with the Keras model's
+    parameters_in_use = _parameters_in_use(submission_module, coding_config)
 
     # combine all scores
     scores = {
@@ -129,13 +155,51 @@ def grade_code(
         f"{function_scores['total_functions']}",
     }
 
+    result = {
+        "two_outputs": two_outputs,
+        "error": error,
+        "samples": counter.samples,
+        "sample_budget": sample_budget,
+        "parameters_in_use": parameters_in_use,
+    }
+    sandbox.write_json(work, "result.json", {"scores": scores, **result})
+
+
+def _count(result: dict, key: str) -> int:
+    value = result.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise InvalidSubmissionError("Submission invalid! Unusable results from the sandbox.")
+    return value
+
+
+def grade_code(
+    submission_file_path: Path,
+    answers: pd.DataFrame,
+    coding_config: dict,
+    private_paths: tuple[Path, ...] | None = None,
+) -> dict:
+    # The submission runs in the grading sandbox (run_submission), which also counts the
+    # samples the test model is trained on and the parameters a fresh model's forward pass uses;
+    # this compares its predictions with the answers and the counts with their limits.
+    with sandbox.run_code(
+        f"{__name__}:run_submission", submission_file_path, coding_config, private_paths
+    ) as run:
+        result = run.result()
+        scores = sandbox.scores(result, SCORE_KEYS)
+        if not isinstance(result.get("two_outputs"), bool):
+            raise InvalidSubmissionError("Submission invalid! Unusable results from the sandbox.")
+        samples, sample_budget = _count(result, "samples"), _count(result, "sample_budget")
+        used = (
+            None if result.get("parameters_in_use") is None else _count(result, "parameters_in_use")
+        )
+        preds = run.array("preds.npy")
+
     test_accuracy = 0.0
     true_labels = answers["label"].to_numpy()
-    if isinstance(outputs, tuple) and len(outputs) == 2:
+    if result["two_outputs"]:
         try:
-            # outputs[0] is the dummy test labels, true labels are in answers
-            # outputs[1] is the model predictions in (n_samples, n_classes)
-            preds = np.argmax(outputs[1], axis=1)
+            if preds is None:
+                raise ValueError(result.get("error"))
             if len(preds) == len(true_labels):
                 test_accuracy = np.mean(preds == true_labels)
         except Exception as e:
@@ -143,20 +207,23 @@ def grade_code(
             test_accuracy = 0.0
 
     # A model better than any constant class that was trained on no sample the counter saw
-    # (stored weights, a hand-written rule, or training it cannot see) is not graded.
+    # (stored weights, a hand-written rule, or training it cannot see) is not graded. The rule
+    # needs the answers, so it is applied here, to the count the sandbox reported.
     best_constant = float(answers["label"].value_counts(normalize=True).max())
-    if counter.samples == 0 and test_accuracy > best_constant:
+    if samples == 0 and test_accuracy > best_constant:
         raise InvalidSubmissionError(
             f"the test model reached accuracy {test_accuracy:.4f}, above the best constant class "
             f"({best_constant:.4f}), but no training sample was back-propagated through a layer "
             "with parameters: train it with `train`, through the model's layers"
         )
-    within_budget = counter.samples <= sample_budget
+    within_budget = samples <= sample_budget
     if not within_budget:
         logger.warning(
-            f"The test model was trained on {counter.samples} samples, more than "
+            f"The test model was trained on {samples} samples, more than "
             f"n_epochs * len(train_data) = {sample_budget}: the test fails"
         )
+
+    architecture_matches = _architecture_matches(used, coding_config)
 
     # the synthetic time series dataset is an easy task
     # the correct ResNet implementation should achieve > 80% accuracy with the provided parameters

@@ -40,20 +40,33 @@ RUN conda install -y -n ${CONDA_ENV_NAME} -c conda-forge python=3.12 nodejs=22.1
     conda run -n ${CONDA_ENV_NAME} poetry add build && \
     conda clean -afy
 
+# Agents have no network at run time (agents/README.md), so everything is installed now:
+# OpenHands' build (its Python and frontend dependencies), Playwright's browsers, readable by
+# nonroot, and the NVIDIA container toolkit, which entrypoint.sh configures if there is a GPU.
+# (These ran at agent start before, through a sudo rule for a build script.)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN conda run -n ${CONDA_ENV_NAME} --no-capture-output make build && \
+    conda run -n ${CONDA_ENV_NAME} --no-capture-output playwright install && \
+    chmod -R a+rX ${PLAYWRIGHT_BROWSERS_PATH}
+RUN keyring=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && \
+    repo=https://nvidia.github.io/libnvidia-container && \
+    apt-get update && apt-get install -y gnupg && \
+    curl -fsSL $repo/gpgkey | gpg --dearmor -o $keyring && \
+    curl -fsSL $repo/stable/deb/nvidia-container-toolkit.list \
+      | sed "s#deb https://#deb [signed-by=$keyring] https://#g" \
+      > /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
+    apt-get update && apt-get install -y nvidia-container-toolkit && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY setup.py start.py templates.py utils.py start.sh ${AGENT_DIR}/
 COPY entrypoint.sh /agent_entrypoint.sh
-COPY build.sh /agent_build.sh
 
 RUN chmod +x /agent_entrypoint.sh
 
 # OpenHands logging controls
 ENV LOG_ALL_EVENTS=1
-
-# Allow `sudo /agent_build.sh` (start.sh runs it once, before the agent starts), but restrict
-# reading or editing the file. It must stay outside /home: /entrypoint.sh makes everything under
-# /home writable for nonroot at container start.
-RUN echo "ALL ALL=NOPASSWD: /agent_build.sh" >> /etc/sudoers && \
-    chmod 711 /agent_build.sh
+# litellm downloads its model price list at import unless it uses the copy it ships with
+ENV LITELLM_LOCAL_MODEL_COST_MAP=True
 
 # run the agent's entrypoint script instead (which also runs root entrypoint)
 ENTRYPOINT ["/agent_entrypoint.sh"]
