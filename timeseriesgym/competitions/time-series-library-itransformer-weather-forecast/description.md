@@ -51,13 +51,13 @@ Your `data` directory includes the following:
 
 * **Time-Series-Library/** – the cloned TSL repository
 * **weather.csv** – the raw weather time series data
-* **itransformer.pdf** – reference paper for iTransformer implementation
+* **itransformer.txt** – the pertinent sections of the iTransformer paper
 * **sample\_submission.npy** – an example output; your pipeline will generate this automatically if configured correctly
 
 ## Evaluation
 
-* If implemented correctly and the output path is set to the `submission/` folder, your pipeline will generate a `pred.npy` file containing your model's predictions.
-* **Score = 100** if your results exactly match the reference.
+* If implemented correctly and the output path is set to the `submission/` folder, your pipeline will generate a `pred.npy` file containing your model's predictions, with the shape of `sample_submission.npy`. Note that the experiment saves `output_path + 'pred.npy'`, so the output path needs a trailing slash (e.g. `--output_path /home/submission/`).
+* **Score = 1** if every element of your results matches the reference within the default tolerances of `numpy.isclose`.
 * **Score = 0** if the file is missing, incorrect, or manually fabricated.
 
 > ⚠ **Note:** Any attempt to hard-code or replicate the expected results without running the actual model will be considered an academic integrity violation.

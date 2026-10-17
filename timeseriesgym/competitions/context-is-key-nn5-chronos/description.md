@@ -15,6 +15,7 @@ In this challenge, you will evaluate the time-series foundation model [Chronos](
    cd context-is-key-forecasting
    pip install -r requirements.txt
    ```
+   - `pip install -r requirements.txt` installs CiK's dependencies, not CiK itself: `cik_benchmark` and `run_baselines` import only if the root of the repository is on Python's module search path. When it runs a script file, Python adds the script's directory to that path, not the working directory, so a script saved outside the repository fails with `ModuleNotFoundError: No module named 'cik_benchmark'` (or `'run_baselines'`) even when you run it from the root. Save your scripts in the root of the repository, or run them with `PYTHONPATH=<path to context-is-key-forecasting>`.
 
 2. **Every subset in CiK provides an evaluation Task instance**
    - In `cik_benchmark/tasks/nn5_tasks.py`, the `__TASKS__` list contains all tasks for the NN5 dataset. Please run the evaluation on these Task instances.
@@ -22,7 +23,7 @@ In this challenge, you will evaluate the time-series foundation model [Chronos](
 3. **Use Chronos**
    - The `experiment_chronos` function in `run_baselines.py` demonstrates how to evaluate the full CiK benchmark. Refer to its implementation to understand the repository structure.
 
-4. **Run the evaluation on Chronous-small and save result**
+4. **Run the evaluation on Chronos-small and save result**
    ```python
    import pickle
    from pathlib import Path
@@ -55,7 +56,7 @@ result = {
 
 ## Evaluation
 - We will compare your `submission.pkl` against our reference output.
-- **Score = 100** if your results match exactly.
+- **Score = 1** if your results match exactly.
 - **Score = 0** if the file is missing, incorrect, or fabricated without a real run.
 
 > ⚠ Any attempt to “hard-code” or copy the reference results without running the evaluation will be flagged as an integrity violation.

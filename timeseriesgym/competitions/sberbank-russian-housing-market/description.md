@@ -19,6 +19,8 @@ Where:
 - \(p_i\) is your predicted price (`price_doc`)
 - \(a_i\) is the actual price
 
+Predictions must be finite and non-negative.
+
 ## Submission File
 For each `id` in the test set, you must predict the sale price (`price_doc`). The file should contain a header and have the following format:
 
@@ -31,7 +33,7 @@ id,price_doc
 ```
 
 ## Dataset Description
-The aim of this competition is to predict the sale price of each property. The target variable in `train.csv` is `price_doc`.
+The aim of this competition is to predict the sale price of each property. The target variable in `train_features.csv` is `price_doc`; `test_features.csv` has the same columns without it (`data_dictionary.txt` calls these files `train.csv` and `test.csv`).
 
 - **Training data:** August 2011 – Dec 2014
 - **Test data:** Jan 2015 – June 2015

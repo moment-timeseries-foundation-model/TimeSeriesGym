@@ -1,22 +1,20 @@
 import logging
-import os
 import sys
-import zipfile
 from pathlib import Path
 
 import gdown
 import h5py
 import numpy as np
 
+from timeseriesgym.utils import clone_repository, extract
+
 
 def prepare(raw: Path, public: Path, private: Path):
     # Download the long-term forecast dataset from Google Drive by TSL authors
     url = "https://drive.google.com/drive/folders/1vE0ONyqPlym2JaaAoEe0XNDR8FS_d322"
-    try:
-        gdown.download_folder(url=url, output=str(raw), quiet=False, use_cookies=False)
-    except Exception as e:
-        logging.error(f"Failed to download the dataset from Google Drive: {e}")
-        return
+    # gdown returns None when it cannot list the folder; failures must stop the prepare
+    if not gdown.download_folder(url=url, output=str(raw), quiet=False, use_cookies=False):
+        raise RuntimeError(f"Failed to download the dataset from Google Drive: {url}")
 
     # Unzip the downloaded files in the long_term_forecast directory
     zip_dir = raw
@@ -24,21 +22,19 @@ def prepare(raw: Path, public: Path, private: Path):
         extract_dir = zip_dir  # Create folder with same name as zip (without .zip)
 
         logging.info(f"Unzipping {zip_path.name} to {extract_dir}...")
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_dir)
+        extract(zip_path, extract_dir)
 
         # move the folder to public
         extracted_folder = extract_dir / zip_path.stem
         extracted_folder.rename(public / zip_path.stem)
 
     # Download the tsl GitHub repository
-    try:
-        os.system(
-            f"cd {public}; git clone --branch long-horizon-forecast --single-branch https://github.com/raycai420/Time-Series-Library.git"
-        )
-    except Exception as e:
-        logging.error(f"Failed to clone the Time-Series-Library repository: {e}")
-        return
+    clone_repository(
+        "https://github.com/raycai420/Time-Series-Library.git",
+        public / "Time-Series-Library",
+        branch="long-horizon-forecast",
+        commit="7f9820b0cc67c6ae12307df2cc0a348a7721b5ff",
+    )
 
     # Remove all .json and .csv files from the cloned repository
     for file in (public / "Time-Series-Library").rglob("*"):

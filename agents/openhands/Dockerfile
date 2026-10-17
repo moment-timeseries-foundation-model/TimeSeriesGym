@@ -40,17 +40,20 @@ RUN conda install -y -n ${CONDA_ENV_NAME} -c conda-forge python=3.12 nodejs=22.1
     conda run -n ${CONDA_ENV_NAME} poetry add build && \
     conda clean -afy
 
-COPY setup.py start.py templates.py utils.py start.sh build.sh ${AGENT_DIR}/
+COPY setup.py start.py templates.py utils.py start.sh ${AGENT_DIR}/
 COPY entrypoint.sh /agent_entrypoint.sh
+COPY build.sh /agent_build.sh
 
 RUN chmod +x /agent_entrypoint.sh
 
 # OpenHands logging controls
 ENV LOG_ALL_EVENTS=1
 
-# Allow the agent to do `sudo /build.sh`, but restrict it from reading or editing the file.
-RUN echo "ALL ALL=NOPASSWD: ${AGENT_DIR}/build.sh" >> /etc/sudoers && \
-    chmod 711 ${AGENT_DIR}/build.sh
+# Allow `sudo /agent_build.sh` (start.sh runs it once, before the agent starts), but restrict
+# reading or editing the file. It must stay outside /home: /entrypoint.sh makes everything under
+# /home writable for nonroot at container start.
+RUN echo "ALL ALL=NOPASSWD: /agent_build.sh" >> /etc/sudoers && \
+    chmod 711 /agent_build.sh
 
 # run the agent's entrypoint script instead (which also runs root entrypoint)
 ENTRYPOINT ["/agent_entrypoint.sh"]

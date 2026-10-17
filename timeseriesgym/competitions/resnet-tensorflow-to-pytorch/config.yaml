@@ -11,6 +11,7 @@ dataset:
 
 grader:
   name: python-code-grading
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.resnet-tensorflow-to-pytorch.grade:grade_code
 
 preparer: timeseriesgym.competitions.resnet-tensorflow-to-pytorch.prepare:prepare
@@ -48,7 +49,7 @@ coding_config:
         val_data:
           file_name: val_data.pt
         batch_size: 64
-        n_epochs: 1
+        n_epochs: 40
         learning_rate: 0.001
         verbose: true
     predict:

@@ -6,7 +6,7 @@ A: A lot! And not just in dollars, but in environmental impact.
 
 Thankfully, significant investments are being made to improve building efficiencies to reduce costs and emissions. The question is, are the improvements working? That’s where you come in. Under pay-for-performance financing, the building owner makes payments based on the difference between their real energy consumption and what they would have used without any retrofits. The latter values have to come from a model. Current methods of estimation are fragmented and do not scale well. Some assume a specific meter type or don’t work with different building types.
 
-In this competition, you’ll develop accurate models of metered building energy usage in the following areas: **chilled water**, **electric**, **hot water**, and **steam** meters. The data comes from over 1,000 buildings over a three-year timeframe. With better estimates of these energy-saving investments, large scale investors and financial institutions will be more inclined to invest in this area to enable progress in building efficiencies.
+In this competition, you’ll develop accurate models of metered building energy usage in the following areas: **chilled water**, **electric**, **hot water**, and **steam** meters. The data comes from over 1,000 buildings. This version of the competition uses the year 2016: the training labels cover 2016-01-01 to 2016-08-31, and the test set covers 2016-10-31 to 2016-12-31, hourly. The two months in between (2016-09-01 to 2016-10-30) have no labels, so the test does not follow straight on from the training labels, as Kaggle's test lay up to two years after its training year. The weather covers the whole year: `train_features.csv` runs from 2016-01-01 to 2016-10-30 and `test_features.csv` covers the test period. With better estimates of these energy-saving investments, large scale investors and financial institutions will be more inclined to invest in this area to enable progress in building efficiencies.
 
 ## About the Host
 Founded in 1894, **ASHRAE** serves to advance the arts and sciences of heating, ventilation, air conditioning, refrigeration, and their allied fields. ASHRAE members represent building system design and industrial process professionals around the world. With over 54,000 members serving in 132 countries, ASHRAE supports research, standards writing, publishing, and continuing education—shaping tomorrow’s built environment today.
@@ -21,12 +21,14 @@ $$
 $$
 
 Where:
-- \(n\) is the total number of observations (public + private)
+- \(n\) is the total number of observations
 - \(p_i\) is your prediction of the meter reading
 - \(a_i\) is the actual meter reading
 - \(\log(x)\) is the natural logarithm of \(x\)
 
-*Note: Not all rows in the test set will necessarily be scored.*
+Predictions must be finite and non-negative.
+
+Medal thresholds come from the final Kaggle leaderboard, which was scored on Kaggle's test data from 2017 and 2018. The test set here is the last two months of 2016, two months after the training labels end, so medals are only a rough guide to where a score would rank on Kaggle.
 
 ## Submission File
 For each row in the test set, you must predict the `meter_reading`. The file should contain a header and have the following format:
@@ -56,13 +58,14 @@ Assessing the value of energy efficiency improvements can be challenging, since 
 
 - **train_features.csv**, **test_features.csv**
   - `site_id` – meteorological station link
+  - `timestamp` – date and hour of the weather observation
   - `air_temperature`, `dew_temperature` (℃)
   - `cloud_coverage` (oktas)
   - `precip_depth_1_hr` (mm)
   - `sea_level_pressure` (hPa)
   - `wind_direction` (0–360°), `wind_speed` (m/s)
 
-- **building_meta.csv**
+- **building_metadata.csv**
   - `site_id` – links to weather files
   - `building_id` – foreign key for train/test
   - `primary_use` – building category

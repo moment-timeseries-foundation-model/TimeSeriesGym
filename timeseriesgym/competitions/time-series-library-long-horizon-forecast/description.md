@@ -61,9 +61,9 @@ Your objective is to tackle the [Long Term Forecasting Challenge (LTF)](https://
 
    output_h5_file = ... #submission file path
    with h5py.File(output_h5_file, "r") as answers_file:
-      submission = load_arbitrary_h5(answers_file["labels"])
+      submission = load_arbitrary_h5(answers_file["submission"])
    ```
-   * Each dataset under the `labels` group must use the **competition name** as the key and contain a **prediction array with the required shape** as the value.
+   * Each dataset under the `submission` group must use the **dataset name** (the CSV file stem, e.g. `ETTh1`) as the key and contain a **prediction array with the required shape** as the value.
    * Submissions that do not follow this format will receive a score of **0**.
 
 ## Data
@@ -71,11 +71,12 @@ Your objective is to tackle the [Long Term Forecasting Challenge (LTF)](https://
 Your `data` directory includes the following:
 
 * **Time-Series-Library/** – the cloned TSL repository
-* **datanames/** – the raw time series data in `.csv` format. You will need these file to correctly load the dataset class in TSL.
+* **ETT-small/, electricity/, exchange_rate/, illness/, traffic/, weather/** – the raw time series data in `.csv` format (`ETTh1`, `ETTh2`, `ETTm1`, `ETTm2`, `electricity`, `exchange_rate`, `national_illness`, `traffic`, `weather`). You will need these files to correctly load the dataset class in TSL.
 * **sample\_submission.h5** – an example output for submission
 
 ## Evaluation
 
-* Your prediction will be evaluated base on Mean Squared Error (MSE) between prediction and ground truth at each time stamp.
+* Your prediction will be evaluated based on Mean Squared Error (MSE) between prediction and ground truth at each time stamp, computed separately for each dataset.
+* The ground truth is the target of TSL's data loader for the test split (all variables, as with `--features M`). The loader standardises each dataset with a scaler fitted on its training split, so predict on that standardised scale, not in raw units (do not inverse-transform your predictions).
 
 > ⚠ **Note:** Any attempt to hard-code or replicate the expected results without running the actual model is strictly prohibited.

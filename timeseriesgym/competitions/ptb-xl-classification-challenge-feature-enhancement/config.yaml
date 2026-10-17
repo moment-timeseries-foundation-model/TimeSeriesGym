@@ -14,6 +14,7 @@ dataset:
 
 grader:
   name: custom-feature-enhancement-grading
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.ptb-xl-classification-challenge-feature-enhancement.grade:grade_feature_enhancement
 
 feature_enhancement_config:

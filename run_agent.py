@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import tarfile
 import time
 import traceback
 from dataclasses import dataclass
@@ -57,9 +58,14 @@ async def worker(
             f"{task.agent.name}"
         )
 
-        task_output = {}
+        task_output = {
+            "competition_id": task.competition.id,
+            "agent_id": task.agent.id,
+            "seed": task.seed,
+            "run_dir": str(task.path_to_run),
+        }
         try:
-            await asyncio.to_thread(
+            exit_code = await asyncio.to_thread(
                 run_in_container,
                 client=client,
                 competition=task.competition,
@@ -70,7 +76,9 @@ async def worker(
                 run_dir=task.path_to_run,
                 logger=run_logger,
             )
-            task_output["success"] = True
+            # a non-zero exit (e.g. 124 from `timeout`) fails the run, but its outputs were saved
+            task_output["agent_exit_code"] = exit_code
+            task_output["success"] = exit_code == 0
 
             run_logger.info(
                 f"[Worker {idx}] Finished running seed {task.seed} for {task.competition.id} and "
@@ -260,6 +268,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    logger = get_logger(__name__)
+    if args.n_workers < 1:  # no worker would take the queued tasks: queue.join() never returns
+        parser.error("--n-workers must be at least 1")
+    if not hasattr(tarfile, "data_filter"):  # every extraction of the run's outputs would fail
+        parser.error("Python 3.11.4 or later is required to extract the runs' outputs safely")
 
     asyncio.run(main(args))

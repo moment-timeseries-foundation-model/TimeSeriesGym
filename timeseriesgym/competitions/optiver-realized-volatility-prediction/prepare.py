@@ -10,8 +10,20 @@ def get_stock_id(s: str) -> str:
 
 
 def prepare(raw: Path, public: Path, private: Path):
+    """The test is the held-out stocks at a held-out set of time buckets (`time_id`s).
+
+    `train.csv` keeps the other stocks' targets at the other time buckets only: it has no target
+    at a test time bucket, for any stock. (When it had every other stock's target there, a model
+    using their mean per time bucket scored better than Kaggle's winner.) As on Kaggle, where the
+    order book and trades of the test period were given but not their targets, the book and trade
+    files keep every stock's data at every time bucket. Time IDs are not in time order, so a
+    seeded random choice of them is a random choice of time buckets.
+    """
     random_state = 0  # Used for reproducibility
-    test_size = 0.1  # 10% of the data will be used for testing
+    test_size = 0.1  # 10% of the stocks are held out for testing
+    # 25% of the time buckets are held out: the test then has about 11,500 rows, and Kaggle's
+    # hidden test (about 150,000 targets next to 428,932 training targets) was 26% of all rows.
+    test_time_size = 0.25
 
     old_train_ids = sorted(
         [folder.name for folder in (raw / "book_train.parquet").glob("*") if folder.is_dir()]
@@ -44,11 +56,6 @@ def prepare(raw: Path, public: Path, private: Path):
         f"{len(old_train_ids)}."
     )
 
-    assert set(new_train_ids).intersection(new_test_ids) == set(), (
-        f"Expected the new train and test instances to be disjoint. Got an intersection of "
-        f"{set(new_train_ids).intersection(new_test_ids)}."
-    )
-
     for new_train_id in new_train_ids:
         shutil.copytree(
             src=raw / "book_train.parquet" / new_train_id,
@@ -71,11 +78,27 @@ def prepare(raw: Path, public: Path, private: Path):
 
     # Construct new train and test ground truth csvs
     raw_df = pd.read_csv(raw / "train.csv")
-    train_df = raw_df.loc[raw_df["stock_id"].isin(new_train_stock_ids)]
+    time_ids = sorted(raw_df["time_id"].unique())
+    new_train_time_ids, new_test_time_ids = train_test_split(
+        time_ids, test_size=test_time_size, random_state=random_state
+    )
+
+    is_train_time = raw_df["time_id"].isin(new_train_time_ids)
+    train_df = raw_df.loc[raw_df["stock_id"].isin(new_train_stock_ids) & is_train_time]
     train_df.to_csv(public / "train.csv", index=False)
 
-    test_df = raw_df.loc[raw_df["stock_id"].isin(new_test_stock_ids)]
+    test_df = raw_df.loc[raw_df["stock_id"].isin(new_test_stock_ids) & ~is_train_time].copy()
     test_df["row_id"] = test_df["stock_id"].astype(str) + "-" + test_df["time_id"].astype(str)
+
+    assert set(train_df["time_id"]).isdisjoint(
+        new_test_time_ids
+    ), "Expected train.csv to have no target at a test time bucket."
+    assert set(train_df["stock_id"]).isdisjoint(
+        new_test_stock_ids
+    ), "Expected train.csv to have no target of a test stock."
+    assert set(test_df["time_id"]) == set(
+        new_test_time_ids
+    ), "Expected the test set to cover every held-out time bucket."
     # provide the mapping between the other data files and the submission file
     # provide the mapping of all test examples, instead of only a few rows as in the test.csv in
     # description.md
@@ -88,7 +111,7 @@ def prepare(raw: Path, public: Path, private: Path):
 
     assert len(actual_stock_ids) == len(new_test_ids), (
         f"Expected the new test instances to have {len(new_test_ids)} unique stock IDs. Got "
-        f"{len(test_df['stock_id'].unique())} unique stock IDs."
+        f"{len(actual_stock_ids)} unique stock IDs."
     )
 
     sample_submission = test_df.copy()

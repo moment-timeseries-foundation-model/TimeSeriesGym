@@ -25,7 +25,7 @@ is the prediction for that observation.
 Example 1. Suppose we have one observation, with an actual value of 12.5 and a prediction of 12.5 (good job!). The RMSE will be:
 
 $$
-\text { RMSE }_{\text {examplel } 1}=\sqrt{\frac{1}{1}(12.5-12.5)^2}=0
+\text { RMSE }_{\text {example } 1}=\sqrt{\frac{1}{1}(12.5-12.5)^2}=0
 $$
 
 Example 2. We'll add another data point. Your prediction for the second data point is 11.0 and the actual value is 14.0. The RMSE will be:
@@ -33,10 +33,6 @@ Example 2. We'll add another data point. Your prediction for the second data poi
 $$
 \operatorname{RMSE}_{\text {example } 2}=\sqrt{\frac{1}{2}\left((12.5-12.5)^2+(11.0-14.0)^2\right)}=\sqrt{\frac{9}{2}} \approx 2.12
 $$
-
-### Kernel Submissions
-
-You can make submissions directly from Kaggle Kernels. By adding your teammates as collaborators on a kernel, you can share and edit code privately with them.
 
 ### Submission File
 
@@ -76,8 +72,8 @@ Andy Chavez, DJ Sterling, Julia Elliott, Lakshmanan V, Sagar, Will Cukierski. (2
 
 ### File descriptions
 
-- **train.csv** - Input features and target `fare_amount` values for the training set (about 55M rows).
-- **test.csv** - Input features for the test set (about 10K rows). Your goal is to predict `fare_amount` for each row.
+- **labels.csv** - Input features and target `fare_amount` values for the training set (about 55M rows). There is no `train.csv`.
+- **test.csv** - Input features for the test set (about 10K rows). Your goal is to predict `fare_amount` for each row. Like the original competition's test set, it holds only rides that start and end in the New York City area (longitude -74.263242 to -72.986532 and latitude 40.568973 to 41.709555, the ranges of the original test set) with 1 to 6 passengers. The training set is not filtered this way.
 - **sample_submission.csv** - a sample submission file in the correct format (columns `key` and `fare_amount`). This file 'predicts' `fare_amount` to be $`11.35` for all rows, which is the mean `fare_amount` from the training set.
 
 ### Data fields

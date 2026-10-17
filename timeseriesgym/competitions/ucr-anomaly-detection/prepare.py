@@ -13,13 +13,7 @@ logger = logging.getLogger(__name__)
 def parse_ucr_anomaly_detection_dataset(datasets_name: str):
     underscore_split = datasets_name.split("_")
     dataset_dict = {
-        "name": underscore_split[0]
-        + "_"
-        + underscore_split[1]
-        + "_"
-        + underscore_split[2]
-        + "_"
-        + underscore_split[3],
+        "name": "_".join(underscore_split[:4]),
         "end_training_data": int(underscore_split[4]),
         "anomaly_begin": int(underscore_split[5]),
         "anomaly_end": int(underscore_split[6]),
@@ -44,12 +38,8 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
 
     sample_submission_h5_file = public / "sample_submission.h5"
     labels_h5_file = private / "labels.h5"
-    datasets_for_processing_original = Path(
-        "timeseriesgym/competitions/ucr-anomaly-detection/datasets.txt"
-    )
-    anomaly_dataset_code_original = Path(
-        "timeseriesgym/competitions/ucr-anomaly-detection/anomaly_dataset.py"
-    )
+    datasets_for_processing_original = Path(__file__).parent / "datasets.txt"
+    anomaly_dataset_code_original = Path(__file__).parent / "anomaly_dataset.py"
 
     shutil.copy2(datasets_for_processing_original, public / "datasets.txt")
     shutil.copy2(anomaly_dataset_code_original, public / "anomaly_dataset.py")
@@ -83,10 +73,14 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
             else:
                 df = pd.read_csv(datasets_path / file, header=None)
 
+            # The archive's indices are 1-based and inclusive (it was made in MATLAB): points 1 to
+            # `end_training_data` are the training data, and the anomaly is points `anomaly_begin`
+            # to `anomaly_end`, of length end - begin + 1. Read as 0-based, the labels started one
+            # point late and missed the first point of each anomaly.
             training_df = df.iloc[: dataset_dict["end_training_data"]]
             test_df = df.iloc[dataset_dict["end_training_data"] :]
-            anomaly_begin = int(dataset_dict["anomaly_begin"]) - int(
-                dataset_dict["end_training_data"]
+            anomaly_begin = (
+                int(dataset_dict["anomaly_begin"]) - 1 - int(dataset_dict["end_training_data"])
             )
             anomaly_end = int(dataset_dict["anomaly_end"]) - int(dataset_dict["end_training_data"])
 

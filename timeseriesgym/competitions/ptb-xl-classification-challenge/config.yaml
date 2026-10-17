@@ -12,6 +12,7 @@ dataset:
 
 grader:
   name: accuracy
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.ptb-xl-classification-challenge.grade:grade
 
 preparer: timeseriesgym.competitions.ptb-xl-classification-challenge.prepare:prepare

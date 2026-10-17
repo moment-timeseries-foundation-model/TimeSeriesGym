@@ -2,6 +2,8 @@ id: ventilator-pressure-prediction-missing
 parent_id: ventilator-pressure-prediction
 name: "Google Brain - Ventilator Pressure Prediction with Missing Data"
 
+description: timeseriesgym/competitions/ventilator-pressure-prediction-missing/description.md
+
 competition_type: simple
 awards_medals: true
 prizes:

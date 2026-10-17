@@ -4,6 +4,10 @@ from .event_detection_average_precision import score
 
 
 def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
+    # Events with a missing step mark nights without that event. Counted as positives they
+    # capped recall at the share of events with a step (0.730 on the TimeSeriesGym split, below
+    # the Kaggle gold threshold); the competition's own solution contains only events with a step.
+    answers = answers.dropna(subset=["step"])
     return score(
         solution=answers,
         submission=submission,

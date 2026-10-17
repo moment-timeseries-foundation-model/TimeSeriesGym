@@ -7,7 +7,7 @@ In this competition, your task is to implement ResNet for `Time Series Classific
 
 ## Code Requirements
 
-Your PyTorch implementation **must** include a `ResNet` class and two functions: `train` and `predict`. Note that capitalization matters for evaluation—e.g., `resnet` is not considered correct if the class name is specified as `ResNet`. Below are the specifications:
+Your PyTorch implementation **must** include a `ResNet` class and two functions: `train` and `predict`. Note that capitalization matters for evaluation—e.g., the class must be named `ResNet`; a class named `resnet` is not considered correct. Below are the specifications:
 
 ### ResNet
 
@@ -26,7 +26,7 @@ It **must** include two methods: `__init__` and `forward`, each with the followi
 | Parameter           | Type     | Description                                                     |
 |---------------------|----------|-----------------------------------------------------------------|
 | `output_directory`  | str      | Directory to save the model and load an existing model from.    |
-| `input_shape`       | tuple    | Shape of the input time series (n_channels, n_time_steps).      |
+| `input_shape`       | tuple or list | Shape of the input time series (n_channels, n_time_steps). |
 | `n_classes`         | int      | Number of classes for the classification tasks.                 |
 | `n_feature_maps`    | int      | Number of feature maps in the convolutional layers.             |
 | `verbose`           | bool     | If True, print details.                                         |
@@ -86,16 +86,16 @@ Submissions will be evaluated based on the following three criteria:
 
 - **Code Definition**: All required components must be implemented and conform to the specifications outlined in **Code Requirements**.
 - **Code Execution**: The `ResNet` class (including `__init__` and `forward`), as well as the `train` and `predict` functions, must execute successfully and produce valid outputs when given inputs that meet the specifications.
-- **Test Results**: A model trained using your implementation should achieve at least 80% accuracy on the test set, using the provided training dataset.
+- **Test Results**: A model trained using your implementation, with the grading arguments shown below, should achieve an accuracy greater than 80% on the test set, using the provided training dataset. The accuracy is that of `argmax(y_pred, axis=1)` against the ground-truth test labels. The model must be trained for `n_epochs` passes over `train_data`, and no more: the grader counts the samples that are back-propagated through layers with parameters (in any model and through any method, from the moment `submission.py` is imported until `predict` returns), and the test fails if there are more than `n_epochs * len(train_data)`. Forward passes without back-propagation, such as validation or predictions, do not count. A submission whose model is more accurate than predicting one class for every series, but was trained on no counted sample, is invalid. The test also checks the architecture: a `ResNet` built with the grading arguments must use, in its forward pass, exactly as many trainable parameters as the Keras model of `resnet.py` built with the same arguments, 504,258 trainable parameters here (every convolution, batch normalization and dense layer of `resnet.py`, and no others). A parameter is used if one backward pass gives it a gradient, so layers that are defined but not used do not count.
 
-The following sample code illustrates how test predictions are generated using your implemented `ResNet` model:
+The following sample code illustrates how test predictions are generated using your implemented `ResNet` model. The grader passes the arguments by keyword, with these values, so the parameter names must match the specifications above:
 
 ```python
 from submission import ResNet, train, predict
 
-model = ResNet(output_directory, input_shape, n_classes, n_feature_maps, verbose, random_seed)
-model = train(model, train_data, val_data, batch_size, n_epochs, learning_rate, verbose)
-y_true, y_pred = predict(model, test_data)
+model = ResNet(output_directory="./output/", input_shape=[1, 50], n_classes=2, n_feature_maps=64, verbose=True, random_seed=42)
+model = train(model=model, train_data=train_data, val_data=val_data, batch_size=64, n_epochs=40, learning_rate=0.001, verbose=True)
+y_true, y_pred = predict(model=model, test_data=test_data)
 ```
 
 ### Submission Format

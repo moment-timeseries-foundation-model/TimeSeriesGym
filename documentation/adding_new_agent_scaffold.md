@@ -65,8 +65,8 @@ COPY . ${AGENT_DIR}
 # Set the working directory
 WORKDIR ${AGENT_DIR}
 
-# Set entrypoint to start script
-ENTRYPOINT ["./start.sh"]
+# Do not set ENTRYPOINT, CMD or USER: the base image's /entrypoint.sh must start as root and
+# runs the grading server; run_agent.py then runs ${AGENT_DIR}/start.sh as `nonroot`.
 ```
 
 ## Step 3: Create a Start Script

@@ -18,6 +18,7 @@ dataset:
 
 grader:
   name: root-mean-squared-logarithmic-error
+  lower_is_better: true
   grade_fn: timeseriesgym.competitions.online-sales.grade:grade
 
 preparer: timeseriesgym.competitions.online-sales.prepare:prepare

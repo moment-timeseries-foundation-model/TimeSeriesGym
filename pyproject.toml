@@ -33,11 +33,13 @@ dependencies = [
   "pyquaternion>=0.9.9",
   "shapely>=2.0.5",
   "numpy==2.0.2",
+  "h5py>=3.11",
   "torch==2.6.0",
   "xgboost==2.1.1",
   "datasets==3.4.1",
   "gluonts==0.16.1",
   "pytest==8.3.5",
+  "flake8==7.1.1",  # the PTB-XL feature-enhancement rubric runs it
   "wfdb==4.2.0",
   "pyarrow==20.0.0",
   "gdown==5.2.0",
@@ -53,7 +55,7 @@ timeseriesgym = "timeseriesgym.cli:main"
 
 [project.optional-dependencies]
 formatters = ["black>=23.3", "isort>=5.13"]
-dev = ["pytest>=8.2", "mypy>=1.10", "pre-commit>=3.7", "ruff>=0.3.0"]
+dev = ["pytest>=8.2", "mypy>=1.10", "pre-commit>=3.7", "ruff==0.6.9"]
 
 [tool.setuptools.package-data]
 timeseriesgym = ["competitions/**/*"]

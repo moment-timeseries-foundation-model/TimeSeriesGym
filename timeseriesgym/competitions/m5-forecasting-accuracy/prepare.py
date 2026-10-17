@@ -9,7 +9,8 @@ def prepare(raw: Path, public: Path, private: Path):
     calendar = read_csv(raw / "calendar.csv")
     prices = read_csv(raw / "sell_prices.csv")
 
-    train_dates = calendar[calendar["d"] <= "d_1913"]
+    # compare day numbers, not strings: "d_500" > "d_1913" as strings
+    train_dates = calendar[calendar["d"].str.removeprefix("d_").astype(int) <= 1913]
     train_prices = prices[prices["wm_yr_wk"].isin(train_dates["wm_yr_wk"].unique())]
     sample_submission = read_csv(raw / "sample_submission.csv")
 
@@ -36,19 +37,12 @@ def prepare(raw: Path, public: Path, private: Path):
     output_file = private / "test.jsonl"
 
     with open(output_file, "w", encoding="utf-8") as fout:
-        # Process entire_dataset
-        for record in entire_dataset.to_dict(orient="records"):
-            record["source"] = "test"
-            fout.write(json.dumps(record) + "\n")
-        # Process calendar
-        for record in calendar.to_dict(orient="records"):
-            record["source"] = "calendar"
-            fout.write(json.dumps(record) + "\n")
-        # Process sell_prices
-        for record in prices.to_dict(orient="records"):
-            record["source"] = "sell_prices"
-            fout.write(json.dumps(record) + "\n")
-        # process sample_submission
-        for record in sample_submission.to_dict(orient="records"):
-            record["source"] = "sample_submission"
-            fout.write(json.dumps(record) + "\n")
+        for source, df in [
+            ("test", entire_dataset),
+            ("calendar", calendar),
+            ("sell_prices", prices),
+            ("sample_submission", sample_submission),
+        ]:
+            for record in df.to_dict(orient="records"):
+                record["source"] = source
+                fout.write(json.dumps(record) + "\n")
