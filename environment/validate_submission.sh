@@ -1,21 +1,9 @@
 #!/bin/bash
 
-# This script is a tool for agents to submit a file to the grading server for validation.
+# The agent's format check: compares a submission with the challenge's sample submission in
+# /home/data. It has no access to the test answers and gives no score.
+# Usage: validate_submission.sh [submission file or folder]   (default: /home/submission)
+# Prints "Submission is valid. ..." (exit code 0) or "Submission invalid! <reason>" (exit code 1).
+# Also installed as the command `validate_submission`.
 
-# validate_submission.sh
-# Usage: ./validate_submission.sh user_submission.csv
-
-SUBMISSION_FILE=$1
-SERVER_URL="http://localhost:5000/validate"
-
-if [ -z "$SUBMISSION_FILE" ]; then
-    echo "Usage: $0 <submission_file>"
-    exit 1
-fi
-
-if [ ! -f "$SUBMISSION_FILE" ]; then
-    echo "File $SUBMISSION_FILE does not exist."
-    exit 1
-fi
-
-curl -X POST -F "file=@${SUBMISSION_FILE}" ${SERVER_URL}
+exec /opt/conda/bin/python -I /opt/timeseriesgym/validate_submission.py "$@"

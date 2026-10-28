@@ -1,4 +1,6 @@
+import json
 import logging
+import string
 import time
 from pathlib import Path
 
@@ -6,16 +8,51 @@ import docker
 from docker.models.containers import Container
 from dotenv import dotenv_values
 
+from agents.model_proxy import ModelProxy
 from agents.registry import Agent
+from agents.validation import install_contract, submission_contract
 from environment.utils import (
     create_competition_container,
     extract_from_container,
     extract_from_container_sysbox,
+    put_file,
 )
 from timeseriesgym.registry import Competition
 from timeseriesgym.utils import purple
 
 CONSTANTS = dotenv_values(Path(__file__).parent.resolve() / ".shared_env")
+DATA_DIR = "/home/data"  # the competition's public data, in the agent's container
+READY_FILE = "/run/timeseriesgym-ready"  # environment/entrypoint.sh: /home is ready for the agent
+INSTRUCTIONS = Path(__file__).parents[1] / "environment" / "instructions.txt"
+INSTRUCTIONS_PATH = "/home/instructions.txt"  # in the agent's container
+NO_NETWORK = (
+    "- This container has no internet access: nothing can be downloaded or installed. Use the "
+    "packages that are installed and the data in `/home/data/`"
+)
+
+
+def instructions(network: str) -> str:
+    """The agents' general instructions (environment/instructions.txt), with the line on the
+    network of their container: "none", or the Docker network run_agent.py was given."""
+    line = NO_NETWORK
+    if network != "none":
+        line = f"- This container is on the Docker network `{network}`: it may reach the internet"
+    return string.Template(INSTRUCTIONS.read_text()).substitute(network_access=line)
+
+
+def check_privileges(agent: Agent, container_config: dict, allow_without_sysbox: bool) -> None:
+    """A privileged agent container can reach the host's devices, and through them the host's
+    copy of the private data, unless it runs under Sysbox (`"runtime": "sysbox-runc"` in the
+    container configuration), which keeps it in a user namespace. Raises ValueError for a
+    privileged agent without Sysbox, unless `allow_without_sysbox`."""
+    privileged = agent.privileged or bool(container_config.get("privileged"))
+    if privileged and container_config.get("runtime") != "sysbox-runc" and not allow_without_sysbox:
+        raise ValueError(
+            "The agent runs in a privileged container, and the container configuration does not "
+            'use Sysbox ("runtime": "sysbox-runc"): agent code could reach the host and the '
+            "private data there. Use a configuration with Sysbox, or pass "
+            "--allow-privileged-without-sysbox to accept this (see agents/README.md)."
+        )
 
 
 def save_output(container: Container, save_dir: Path, container_config: dict) -> Path:
@@ -102,10 +139,19 @@ def run_in_container(
     retain_container: bool,
     run_dir: Path,
     logger: logging.Logger,
+    network: str = "none",
 ) -> int:
     """
-    Runs environment containing the competition and agent for a set maximum amount of time.
-    The outputs are saved to `run_dir` whatever the agent's exit code.
+    Runs the agent in a container with the competition's public data (no private data, no
+    grader: the run is graded after this container has stopped, see agents/grading.py) and
+    the contract of its format check, `validate_submission`. The outputs are saved to
+    `run_dir` whatever the agent's exit code.
+
+    The agents' instructions are written into the container with a line on its network.
+
+    The container is on the Docker network `network`; the default, "none", gives it no network.
+    An agent with a `model_proxy` config calls its models through a model proxy for this run
+    (agents/model_proxy.py), which keeps the API keys on the host.
 
     Args:
         client: Docker client.
@@ -116,46 +162,63 @@ def run_in_container(
         retain_container: Whether to retain the container after the run instead of removing it.
         run_dir: Path to the directory where all assets associated with the run are stored.
         logger: Logger for the run.
+        network: Docker network mode of the container.
 
     Returns:
         The exit code of the agent's start script.
     """
     volumes_config = {
         competition.public_dir.resolve().as_posix(): {
-            "bind": "/home/data",
-            "mode": "ro",
-        },
-        competition.private_dir.resolve().as_posix(): {
-            "bind": f"/private/data/{competition.id}/prepared/private/",
+            "bind": DATA_DIR,
             "mode": "ro",
         },
     }
-
-    container = create_competition_container(
-        client=client,
-        competition=competition,
-        container_config=container_config,
-        volumes_config=volumes_config,
-        env_vars={
-            "COMPETITION_ID": competition.id,
-            **agent.env_vars,
-        },
-        container_image=image,
-        privileged=agent.privileged,
+    contract = submission_contract(
+        competition,
+        data_dir=DATA_DIR,
+        submission_dir=CONSTANTS["SUBMISSION_DIR"],
+        code_dir=CONSTANTS["CODE_DIR"],
     )
+    (run_dir / "validation_contract.json").write_text(json.dumps(contract, indent=2))
+
+    proxy = ModelProxy.for_agent(agent, run_dir)  # None for an agent without a model_proxy
+    try:
+        container = create_competition_container(
+            client=client,
+            competition=competition,
+            container_config=container_config,
+            volumes_config={**volumes_config, **(proxy.volumes if proxy else {})},
+            env_vars={
+                "COMPETITION_ID": competition.id,
+                **agent.env_vars,
+                **(proxy.container_env() if proxy else {}),  # after the agent's own: these win
+            },
+            container_image=image,
+            privileged=agent.privileged,
+            network_mode=network,
+        )
+    except BaseException:
+        if proxy is not None:
+            proxy.close()
+        raise
 
     logger.info(purple(f"Run started: {run_dir}"))
     try:
         time_start = time.monotonic()
+        install_contract(container, contract)
+        put_file(container, INSTRUCTIONS_PATH, instructions(network).encode())
         container.start()
         exit_code, _ = container.exec_run(
-            'timeout 60s sh -c "while ! curl -s http://localhost:5000/health > /dev/null; do sleep 1; done"'  # noqa E501
+            ["timeout", "60", "sh", "-c", f"while [ ! -e {READY_FILE} ]; do sleep 1; done"]
         )
         if exit_code != 0:
             raise RuntimeError(
-                "The grading server failed to start within 60 seconds. This is likely due to an "
-                "error in `entrypoint.sh`; check the logs."
+                "The container's entrypoint did not finish within 60 seconds (it makes /home "
+                "writable for the agent). This is likely due to an error in `entrypoint.sh`; "
+                "check the logs."
             )
+        if proxy is not None:
+            proxy.start_relay(container)  # and waits until the proxy answers through it
         exit_code = execute_agent(container, agent, logger)
         # also for failed runs: their logs, and the submission an agent that timed out had saved
         save_output(container, run_dir, container_config)
@@ -166,3 +229,6 @@ def run_in_container(
         return exit_code
     finally:
         clean_up(container, logger, retain_container)
+        if proxy is not None:
+            proxy.close()
+            logger.info(proxy.summary())

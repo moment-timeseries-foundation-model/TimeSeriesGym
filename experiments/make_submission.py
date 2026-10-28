@@ -8,7 +8,8 @@ failed runs included, so that the grading report counts every run: a run without
 submission points at a path that does not exist, which is graded as invalid. The path is the
 submission file whose suffix matches the challenge's sample submission (the most recently
 written one if there are several: the agent instructions say only the last file is evaluated),
-or the submission directory for hyperparameter-search and feature-enhancement challenges.
+or the submission directory for hyperparameter-search and feature-enhancement challenges, or
+the predictor directory (`submission/predictor`) for the predictor challenges.
 Hyperparameter-search lines also carry "solution_file_path": the run's code directory (the
 agent's /home/code), which the graders require and search for a hyperparameter search.
 Feature-enhancement lines carry "solution_files_path": the folder with the run's model code,
@@ -32,6 +33,8 @@ def submission_path_for(run_dir: Path, competition) -> Path:
         or competition.feature_enhancement_config is not None
     ):
         return submission_dir  # their graders read several files from the folder
+    if competition.predictor_config is not None:
+        return submission_dir / "predictor"  # the grader runs predict.py and its files
     suffix = competition.sample_submission.suffix
     candidates = []
     if submission_dir.is_dir():
@@ -54,6 +57,18 @@ def solution_files_path_for(run_dir: Path, competition) -> Path:
     return run_dir / "code"
 
 
+def submission_line(run_dir: Path, competition) -> dict:
+    """The JSONL line of one run (run_agent.py's grading step, agents/grading.py, grades it)."""
+    path = submission_path_for(run_dir, competition)
+    line = {"competition_id": competition.id, "submission_path": str(path)}
+    if competition.hyperparameter_search_config is not None:
+        # passed even if missing: the graders then reject the run (no solution code)
+        line["solution_file_path"] = str(run_dir / "code")
+    if competition.feature_enhancement_config is not None:
+        line["solution_files_path"] = str(solution_files_path_for(run_dir, competition))
+    return line
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--metadata", required=True, type=Path)
@@ -72,15 +87,7 @@ def main() -> None:
             exit_code = run.get("agent_exit_code")
             logger.warning(f"{run_id}: run failed (agent exit code {exit_code}), still graded")
         competition = reg.get_competition(run["competition_id"])
-        run_dir = Path(run["run_dir"])
-        path = submission_path_for(run_dir, competition)
-        line = {"competition_id": competition.id, "submission_path": str(path)}
-        if competition.hyperparameter_search_config is not None:
-            # passed even if missing: the graders then reject the run (no solution code)
-            line["solution_file_path"] = str(run_dir / "code")
-        if competition.feature_enhancement_config is not None:
-            line["solution_files_path"] = str(solution_files_path_for(run_dir, competition))
-        lines.append(line)
+        lines.append(submission_line(Path(run["run_dir"]), competition))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(line) + "\n" for line in lines))

@@ -35,6 +35,7 @@ class Competition:
     checksums: Path
     leaderboard: Path
     feature_enhancement_config: dict | None = None
+    predictor_config: dict | None = None  # the submission is a predictor (timeseriesgym/predictor)
     awards_medals: bool = True  # informational, as on Kaggle: medals are ranked by leaderboard
 
     def __post_init__(self):
@@ -88,6 +89,7 @@ class Competition:
                 hyperparameter_search_config=data.get("hyperparameter_search_config"),
                 coding_config=data.get("coding_config"),
                 feature_enhancement_config=data.get("feature_enhancement_config"),
+                predictor_config=data.get("predictor_config"),
                 raw_dir=data["raw_dir"],
                 public_dir=data["public_dir"],
                 private_dir=data["private_dir"],
