@@ -21,7 +21,7 @@ Photos by [Joel Filipe](https://unsplash.com/@joelfilip?utm_source=unsplash&utm
 
 ### Metric
 
-Submissions are evaluated based on their [classification accuracy](https://developers.google.com/machine-learning/crash-course/classification/accuracy), the percentage of predicted labels that are correct.
+Submissions are evaluated based on their [classification accuracy](https://developers.google.com/machine-learning/crash-course/classification/accuracy), the fraction of predicted labels that are correct.
 
 ### Submission Format
 
@@ -76,7 +76,7 @@ In this competition your task is to predict whether a passenger was transported 
 
 ## File and Data Field Descriptions
 
-- **train.csv** - Personal records for about two-thirds (~8700) of the passengers, to be used as training data.
+- **train.csv** - Personal records for about 90% (7,823) of the passengers of the original competition's training set, to be used as training data.
     - `PassengerId` - A unique Id for each passenger. Each Id takes the form `gggg_pp` where `gggg` indicates a group the passenger is travelling with and `pp` is their number within the group. People in a group are often family members, but not always.
     - `HomePlanet` - The planet the passenger departed from, typically their planet of permanent residence.
     - `CryoSleep` - Indicates whether the passenger elected to be put into suspended animation for the duration of the voyage. Passengers in cryosleep are confined to their cabins.
@@ -87,7 +87,7 @@ In this competition your task is to predict whether a passenger was transported 
     - `RoomService`, `FoodCourt`, `ShoppingMall`, `Spa`, `VRDeck` - Amount the passenger has billed at each of the *Spaceship Titanic*'s many luxury amenities.
     - `Name` - The first and last names of the passenger.
     - `Transported` - Whether the passenger was transported to another dimension. This is the target, the column you are trying to predict.
-- **test.csv** - Personal records for the remaining one-third (~4300) of the passengers, to be used as test data. Your task is to predict the value of `Transported` for the passengers in this set.
+- **test.csv** - Personal records for the remaining 10% (870) of those passengers, to be used as test data. Your task is to predict the value of `Transported` for the passengers in this set.
 - **sample_submission.csv** - A submission file in the correct format.
     - `PassengerId` - Id for each passenger in the test set.
     - `Transported` - The target. For each passenger, predict either `True` or `False`.

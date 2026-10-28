@@ -1,5 +1,5 @@
 import argparse
-import os
+import subprocess
 from pathlib import Path
 
 from tqdm import tqdm
@@ -100,8 +100,8 @@ def download_mitdb(download_dir: Path, force: bool = False, **kwargs):
             file_url = f"{base_url}{record}.{extension}"
 
             if force or not data_path.joinpath(f"{record}.{extension}").exists():
-                download_cmd = f"cd {data_path} && curl -O {file_url}"
-                os.system(download_cmd)
+                # `curl -f` fails on an HTTP error instead of saving the error page as the file.
+                subprocess.run(["curl", "-fsSL", "-O", file_url], cwd=data_path, check=True)
 
     # Zip the downloaded files
     compress(data_path, data_path.parent / "MIT-BIH-Arrhythmia.zip")

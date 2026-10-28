@@ -5,6 +5,8 @@ video.
 
 """
 
+import bisect
+
 import numpy as np
 import pandas as pd
 import pandas.api.types
@@ -288,14 +290,144 @@ def match_detections(
     tolerance x series_id evaluation group.
     """
     detections_sorted = detections.sort_values(score_column_name, ascending=False).dropna()
-    is_matched = np.full_like(detections_sorted[event_column_name], False, dtype=bool)
+    detections_sorted["matched"] = greedy_match(
+        tolerance, ground_truths, detections_sorted[time_column_name], time_column_name
+    )
+
+    return detections_sorted
+
+
+def greedy_match(
+    tolerance: float, ground_truths: pd.DataFrame, detection_times: pd.Series, time_column: str
+) -> np.ndarray:
+    """Which detections match, in the order of `detection_times` (decreasing confidence).
+
+    In turn, each detection takes the ground truth nearest to it with an error below
+    `tolerance` that no earlier detection took, the first in `ground_truths` order on ties.
+    Matched ground truths are remembered as row tuples, so a row equal to a matched one counts
+    as matched too, and a row holding a float NaN (which equals no other) never does.
+
+    This is the result of `_match_loop`, which compares every detection with every ground
+    truth, in time linear in the detections: a detection can only take one of the few ground
+    truths within the tolerance of it, so the next detection to match is the first one after
+    the last match that is near a ground truth still free.
+    """
+    gt_times = ground_truths[time_column]
+    if not _exact_in_float64(tolerance, gt_times, detection_times):
+        return _match_loop(tolerance, ground_truths, detection_times, time_column)
+    try:
+        aliases = _matched_aliases(ground_truths)
+    except TypeError:  # an unhashable value: the loop fails as it did, if it gets that far
+        return _match_loop(tolerance, ground_truths, detection_times, time_column)
+    gt = gt_times.to_numpy(dtype=np.float64)
+    det = detection_times.to_numpy(dtype=np.float64)
+    is_matched = np.zeros(len(det), dtype=bool)
+    finite = np.flatnonzero(np.isfinite(gt))  # no other ground truth is within any tolerance
+    if len(det) == 0 or len(finite) == 0:
+        return is_matched
+
+    # Every (detection, ground truth) pair with an error below the tolerance. The errors grow
+    # (as computed, too) away from a detection's position among the sorted ground truths.
+    order = finite[np.argsort(gt[finite], kind="stable")]
+    gt_sorted = gt[order]
+    position = np.searchsorted(gt_sorted, det)
+    pair_det, pair_gt = [], []
+    with np.errstate(invalid="ignore"):
+        for step, first in ((-1, position - 1), (1, position)):
+            dets, idx = np.arange(len(det)), first
+            while len(dets):
+                inside = (idx >= 0) & (idx < len(gt_sorted))
+                dets, idx = dets[inside], idx[inside]
+                near = np.abs(det[dets] - gt_sorted[idx]) < tolerance
+                dets, idx = dets[near], idx[near]
+                pair_det.append(dets)
+                pair_gt.append(order[idx])
+                idx = idx + step
+    pair_det, pair_gt = np.concatenate(pair_det), np.concatenate(pair_gt)
+    by_gt = np.lexsort((pair_det, pair_gt))
+    pair_det, pair_gt = pair_det[by_gt], pair_gt[by_gt]
+    cuts = np.flatnonzero(np.diff(pair_gt)) + 1
+    # For each ground truth still free: the detections near it, in order, from `start` on.
+    pending = {
+        int(pair_gt[a]): pair_det[a:b].tolist()
+        for a, b in zip(np.r_[0, cuts], np.r_[cuts, len(pair_gt)], strict=True)
+        if b > a
+    }
+    cursor = dict.fromkeys(pending, 0)
+    is_free = np.ones(len(gt), dtype=bool)
+    start = 0
+    while pending:
+        nearest = len(det)  # the next detection near a free ground truth
+        for j in list(pending):
+            cursor[j] = bisect.bisect_left(pending[j], start, cursor[j])
+            if cursor[j] == len(pending[j]):
+                del pending[j]
+            else:
+                nearest = min(nearest, pending[j][cursor[j]])
+        if nearest == len(det):
+            break
+        with np.errstate(invalid="ignore"):
+            error = np.abs(det[nearest] - gt)
+            candidate = is_free & (error < tolerance)
+        best = int(np.argmin(np.where(candidate, error, np.inf)))  # the first minimum
+        is_matched[nearest] = True
+        for j in aliases[best]:
+            is_free[j] = False
+            pending.pop(j, None)
+        start = nearest + 1
+    return is_matched
+
+
+def _exact_in_float64(tolerance, *times: pd.Series) -> bool:
+    """Whether float64 arithmetic gives the loop's errors and comparisons exactly.
+
+    The loop computes with the Python values of the columns. NumPy integers and floats convert
+    to float64 the same way; only two integer columns are subtracted exactly, which float64
+    matches while both stay below 2**52.
+    """
+    if not all(isinstance(t.dtype, np.dtype) and t.dtype.kind in "iuf" for t in times):
+        return False
+    if isinstance(tolerance, bool | np.bool_):
+        return False
+    if isinstance(tolerance, int | np.integer):
+        if not abs(int(tolerance)) < 2**52:
+            return False
+    elif not isinstance(tolerance, float):  # Python float or np.float64
+        return False
+    if all(t.dtype.kind in "iu" for t in times):
+        return all(len(t) == 0 or max(abs(int(t.min())), abs(int(t.max()))) < 2**52 for t in times)
+    return True
+
+
+def _matched_aliases(ground_truths: pd.DataFrame) -> list[list[int]]:
+    """For each ground truth, those that count as matched once it is matched.
+
+    The loop keeps the matched rows as tuples and skips any row equal to one of them. Each
+    pass of itertuples makes new float objects, so the tuples are taken from two passes, as
+    the loop compares those of different passes.
+    """
+    kept: dict = {}
+    for k, row in enumerate(ground_truths.itertuples(index=False)):
+        kept.setdefault(row, []).append(k)
+    aliases = [[] for _ in range(len(ground_truths))]
+    for j, row in enumerate(ground_truths.itertuples(index=False)):
+        for k in kept.get(row, ()):
+            aliases[k].append(j)
+    return aliases
+
+
+def _match_loop(
+    tolerance: float, ground_truths: pd.DataFrame, detection_times: pd.Series, time_column: str
+) -> np.ndarray:
+    """The original assignment: every detection against every ground truth (Kaggle's code)."""
+    is_matched = np.zeros(len(detection_times), dtype=bool)
     gts_matched = set()
-    for i, det in enumerate(detections_sorted.itertuples(index=False)):
+    for i, det_time in enumerate(detection_times):
         best_error = tolerance
         best_gt = None
 
         for gt in ground_truths.itertuples(index=False):
-            error = abs(getattr(det, time_column_name) - getattr(gt, time_column_name))
+            error = abs(det_time - getattr(gt, time_column))
             if error < best_error and gt not in gts_matched:
                 best_gt = gt
                 best_error = error
@@ -304,9 +436,7 @@ def match_detections(
             is_matched[i] = True
             gts_matched.add(best_gt)
 
-    detections_sorted["matched"] = is_matched
-
-    return detections_sorted
+    return is_matched
 
 
 def precision_recall_curve(
@@ -410,34 +540,52 @@ def event_detection_ap(
         columns=[event_column_name, "tolerance", series_id_column_name],
     )
 
-    # Create match evaluation groups: event-class x tolerance x series_id
-    detections_grouped = aggregation_keys.merge(
-        detections_filtered, on=[event_column_name, series_id_column_name], how="left"
-    ).groupby([event_column_name, "tolerance", series_id_column_name])
+    # Create match evaluation groups: event-class x tolerance x series_id. The tolerances of an
+    # event class share its detections, which are merged and sorted once per event-class x
+    # series_id (with the event class's first tolerance) rather than once per tolerance.
+    detections_grouped = (
+        aggregation_keys.drop_duplicates([event_column_name, series_id_column_name])
+        .merge(detections_filtered, on=[event_column_name, series_id_column_name], how="left")
+        .groupby([event_column_name, "tolerance", series_id_column_name])
+    )
     ground_truths_grouped = aggregation_keys.merge(
         ground_truths, on=[event_column_name, series_id_column_name], how="left"
     ).groupby([event_column_name, "tolerance", series_id_column_name])
     # Match detections to ground truth events by evaluation group
-    detections_matched = []
+    detections_sorted = {}
+    detections_matched = {}  # event-class x tolerance: (matched, score) of each series_id
     for key in aggregation_keys.itertuples(index=False):
-        dets = detections_grouped.get_group(key)
-        gts = ground_truths_grouped.get_group(key)
-        detections_matched.append(match_detections(dets["tolerance"].iloc[0], gts, dets))
-    detections_matched = pd.concat(detections_matched)
-
-    # Compute AP per event x tolerance group
-    event_classes = ground_truths[event_column_name].unique()
-    ap_table = (
-        detections_matched.query("event in @event_classes")
-        .groupby([event_column_name, "tolerance"])
-        .apply(
-            lambda group: average_precision_score(
-                group["matched"].to_numpy(),
-                group[score_column_name].to_numpy(),
-                class_counts[group[event_column_name].iat[0]],
+        event, tolerance, series_id = key
+        if (event, series_id) not in detections_sorted:  # its first tolerance
+            detections_sorted[event, series_id] = (
+                detections_grouped.get_group(key)
+                .sort_values(score_column_name, ascending=False)
+                .dropna()
             )
+        dets = detections_sorted[event, series_id]
+        gts = ground_truths_grouped.get_group(key)
+        is_matched = greedy_match(
+            gts["tolerance"].iloc[0], gts, dets[time_column_name], time_column_name
         )
-    )
+        detections_matched.setdefault((event, tolerance), []).append(
+            (is_matched, dets[score_column_name].to_numpy())
+        )
+
+    # Compute AP per event x tolerance group (each in the detections' order, as before)
+    event_classes = ground_truths[event_column_name].unique()
+    ap_keys, ap_values = [], []
+    for (event, tolerance), groups in detections_matched.items():
+        matches = np.concatenate([m for m, _ in groups])
+        if len(matches) and event in event_classes:
+            scores = np.concatenate([s for _, s in groups])
+            ap_keys.append((event, tolerance))
+            ap_values.append(average_precision_score(matches, scores, class_counts[event]))
+    if not ap_keys:  # no detection at all; the table of the whole merge failed here as well
+        raise ValueError("there are no detections to score")
+    ap_table = pd.Series(
+        ap_values,
+        index=pd.MultiIndex.from_tuples(ap_keys, names=[event_column_name, "tolerance"]),
+    ).sort_index()
     # Average over tolerances, then over event classes
     mean_ap = ap_table.groupby(event_column_name).mean().sum() / len(event_classes)
 

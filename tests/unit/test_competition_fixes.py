@@ -1,0 +1,1189 @@
+"""Regression tests for fixes to competition graders and prepare scripts.
+
+Each test shows the fixed case and that a valid, correctly ordered submission (or a normal
+prepare) is unaffected.
+"""
+
+import ast
+import hashlib
+import importlib
+import pickle
+import re
+import shutil
+import struct
+import subprocess
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+from sklearn.metrics import accuracy_score, root_mean_squared_error
+from sklearn.model_selection import train_test_split
+
+from timeseriesgym.competitions.utils import download_file
+from timeseriesgym.grade_helpers import Grader, GradingInput
+from timeseriesgym.metrics import root_mean_squared_log_error
+from timeseriesgym.utils import InvalidSubmissionError
+
+
+def _module(competition_id: str, name: str = "grade"):
+    return importlib.import_module(f"timeseriesgym.competitions.{competition_id}.{name}")
+
+
+def _grade_fn(competition_id: str):
+    return _module(competition_id).grade
+
+
+# ---------------------------------------------------------------- id-matched CSV graders
+
+ID_MATCHED = {
+    # competition: (id columns, target column, metric(y_true, y_pred))
+    "ashrae-energy-prediction": (
+        ["building_id", "meter", "timestamp"],
+        "meter_reading",
+        root_mean_squared_log_error,
+    ),
+    "recruit-restaurant-visitor-forecasting": (["id"], "visitors", root_mean_squared_log_error),
+    "sberbank-russian-housing-market": (["id"], "price_doc", root_mean_squared_log_error),
+    "time-series-exam-1-1": (["question_id"], "answer", accuracy_score),
+}
+
+
+def _id_frame(id_columns, n=12):
+    rng = np.random.default_rng(0)
+    if id_columns == ["building_id", "meter", "timestamp"]:
+        ids = {
+            "building_id": np.repeat([0, 1, 2], 4),
+            "meter": np.tile([0, 0, 1, 1], 3),
+            "timestamp": np.tile(["2016-10-31 00:00:00", "2016-10-31 01:00:00"], 6),
+        }
+    elif id_columns == ["id"]:
+        ids = {"id": [f"air_{i:04d}_2017-03-01" for i in range(n)]}
+    else:
+        ids = {id_columns[0]: np.arange(1, n + 1)}
+    frame = pd.DataFrame(ids)
+    return frame, rng
+
+
+@pytest.mark.parametrize("competition_id", ID_MATCHED)
+def test_id_matched_graders_align_rows_by_id(competition_id):
+    id_columns, target, metric = ID_MATCHED[competition_id]
+    grade = _grade_fn(competition_id)
+    answers, rng = _id_frame(id_columns)
+    answers[target] = rng.integers(0, 4, len(answers))
+    submission = answers.copy()
+    submission[target] = rng.integers(0, 4, len(answers))
+
+    # valid, correctly ordered: the positional score, as before
+    expected = metric(answers[target].to_numpy(), submission[target].to_numpy())
+    assert grade(submission.copy(), answers.copy()) == expected
+
+    # the same predictions in another row order: same score (was scored against other rows)
+    shuffled = submission.sample(frac=1, random_state=1).reset_index(drop=True)
+    assert not shuffled[id_columns].equals(submission[id_columns])
+    assert grade(shuffled, answers.copy()) == pytest.approx(expected)
+
+    # a repeated id in place of another, same length: rejected (was scored)
+    repeated = submission.copy()
+    repeated.loc[1, id_columns] = repeated.loc[0, id_columns].to_numpy()
+    with pytest.raises(InvalidSubmissionError, match="duplicate"):
+        grade(repeated, answers.copy())
+
+    # an unknown id: rejected
+    unknown = submission.copy()
+    column = id_columns[-1]
+    unknown[column] = unknown[column].astype(object)
+    unknown.loc[0, column] = "unknown"
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(unknown, answers.copy())
+
+    # no id column: rejected (was scored by position)
+    with pytest.raises(InvalidSubmissionError, match=f"`{id_columns[0]}`"):
+        grade(submission.drop(columns=id_columns[0]), answers.copy())
+
+
+def test_ashrae_length_message_is_formatted():
+    grade = _grade_fn("ashrae-energy-prediction")
+    answers, _ = _id_frame(["building_id", "meter", "timestamp"])
+    answers["meter_reading"] = 1.0
+    with pytest.raises(InvalidSubmissionError, match=r"answer length 12$"):
+        grade(answers.iloc[:5].copy(), answers.copy())
+
+
+def test_nyc_rejects_keys_that_do_not_match():
+    grade = _grade_fn("new-york-city-taxi-fare-prediction")
+    keys = [f"2010-10-0{i} 21:26:11.0000001" for i in range(1, 7)]
+    answers = pd.DataFrame({"key": keys, "fare_amount": [5.0, 8.0, 3.5, 12.0, 7.0, 9.5]})
+    submission = pd.DataFrame({"key": keys, "fare_amount": [6.0, 8.0, 4.0, 10.0, 7.5, 9.0]})
+
+    expected = root_mean_squared_error(answers.fare_amount, submission.fare_amount)
+    assert grade(submission.copy(), answers.copy()) == pytest.approx(expected)
+    shuffled = submission.sample(frac=1, random_state=0)
+    assert grade(shuffled, answers.copy()) == pytest.approx(expected)
+
+    reformatted = submission.copy()
+    reformatted["key"] = reformatted["key"].str.replace(".0000001", "")  # was scored by position
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(reformatted, answers.copy())
+    repeated = submission.copy()
+    repeated.loc[1, "key"] = repeated.loc[0, "key"]
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(repeated, answers.copy())
+    with pytest.raises(InvalidSubmissionError, match="length"):
+        grade(submission.iloc[:-1], answers.copy())
+
+
+# ---------------------------------------------------------------- MIT-BIH
+
+
+def test_mit_bih_requires_one_column_per_class():
+    grade = _grade_fn("MIT-BIH-Arrhythmia")
+    classes = np.array([0, 1, 5, 2, 0, 3, 4, 0])
+    answers = np.eye(6)[classes]
+    prediction = np.eye(6)[[0, 1, 5, 2, 0, 3, 0, 1]]
+    assert grade(prediction, answers) == pytest.approx(
+        accuracy_score(classes, [0, 1, 5, 2, 0, 3, 0, 1])
+    )
+    for shape in [(8, 5), (8, 1), (8, 7), (7, 6)]:
+        with pytest.raises(InvalidSubmissionError, match="shape"):
+            grade(np.zeros(shape), answers)  # (8, 1) used to score as "class 0 everywhere"
+
+
+def test_mit_bih_weak_supervision_selects_classes_by_name():
+    grade = _grade_fn("MIT-BIH-Arrhythmia-Weak-Supervision")
+    pvc = np.array([0, 1, 0, 0, 1, 0])
+    answers = pd.DataFrame({"Id": range(6), "normal": 1 - pvc, "pvc": pvc})
+    guess = np.array([0, 1, 1, 0, 1, 0])
+    submission = pd.DataFrame({"Id": range(6), "normal": 1 - guess, "pvc": guess})
+    expected = accuracy_score(pvc, guess)
+    assert grade(submission.copy(), answers.copy()) == pytest.approx(expected)
+
+    # the same labels with the class columns in the other order: same score (were all flipped)
+    swapped = submission[["Id", "pvc", "normal"]]
+    assert grade(swapped, answers.copy()) == pytest.approx(expected)
+    shuffled = submission.sample(frac=1, random_state=0)
+    assert grade(shuffled, answers.copy()) == pytest.approx(expected)
+
+    with pytest.raises(InvalidSubmissionError, match="missing columns"):
+        grade(submission.rename(columns={"pvc": "PVC"}), answers.copy())
+    other_ids = submission.assign(Id=range(1, 7))
+    with pytest.raises(InvalidSubmissionError, match="do not match"):
+        grade(other_ids, answers.copy())
+
+
+# ---------------------------------------------------------------- non-finite predictions
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_amp_optiver_osic_reject_non_finite_predictions(bad):
+    amp = _grade_fn("amp-parkinsons-disease-progression-prediction")
+    ids = [f"55_0_updrs_{k}_plus_0_months" for k in range(1, 5)]
+    answers = pd.DataFrame({"prediction_id": ids, "rating": [3.0, 0.0, 10.0, 1.0], "group_key": 0})
+    submission = answers.assign(rating=[4.0, 0.0, 8.0, 1.0])
+    expected = np.mean(200 * np.abs([1.0, 0.0, 2.0, 0.0]) / np.array([9.0, 2.0, 20.0, 4.0]))
+    assert amp(submission.copy(), answers.copy()) == pytest.approx(expected)
+    with pytest.raises(InvalidSubmissionError, match="finite"):
+        amp(submission.assign(rating=[4.0, bad, 8.0, 1.0]), answers.copy())
+
+    optiver = _grade_fn("optiver-realized-volatility-prediction")
+    answers = pd.DataFrame({"row_id": ["0-5", "0-11", "1-5"], "target": [0.002, 0.001, 0.004]})
+    submission = answers.assign(target=[0.0025, 0.001, 0.003])
+    rmspe = np.sqrt(np.mean(((answers.target - submission.target) / answers.target) ** 2))
+    assert optiver(submission.copy(), answers.copy()) == pytest.approx(rmspe)
+    with pytest.raises(InvalidSubmissionError, match="finite"):
+        optiver(submission.assign(target=[0.0025, bad, 0.003]), answers.copy())
+
+    osic = _grade_fn("osic-pulmonary-fibrosis-progression")
+    answers = pd.DataFrame({"Patient_Week": ["p_1", "p_2"], "FVC": [3000, 2500]})
+    submission = pd.DataFrame(
+        {"Patient_Week": ["p_0", "p_1", "p_2"], "FVC": [1, 3100, 2400], "Confidence": [1, 100, 200]}
+    )
+    sigma, delta = np.array([100, 200]), np.array([100, 100])
+    laplace = np.mean(-np.sqrt(2) * delta / sigma - np.log(np.sqrt(2) * sigma))
+    assert osic(submission.copy(), answers.copy()) == pytest.approx(laplace)
+    for column in ["FVC", "Confidence"]:
+        broken = submission.copy()
+        broken[column] = broken[column].astype(float)
+        broken.loc[1, column] = bad
+        with pytest.raises(InvalidSubmissionError, match="finite"):
+            osic(broken, answers.copy())  # NaN used to give a "valid" NaN score
+    # rows that are not scored may hold anything, as before
+    unscored = submission.copy()
+    unscored.loc[0, "FVC"] = np.nan
+    assert osic(unscored, answers.copy()) == pytest.approx(laplace)
+
+
+# ---------------------------------------------------------------- M5: ids
+
+
+def _m5_answers(rng):
+    days = [f"d_{i}" for i in range(1, 1942)]
+    items = pd.DataFrame(
+        {
+            "item_id": ["A", "B", "C", "D"],
+            "dept_id": ["D1", "D1", "D2", "D2"],
+            "cat_id": ["C1", "C1", "C2", "C2"],
+            "store_id": ["S1", "S1", "S1", "S1"],
+            "state_id": ["CA", "CA", "CA", "CA"],
+        }
+    )
+    items.insert(0, "id", [f"{i}_S1_evaluation" for i in items.item_id])
+    sales = pd.DataFrame(rng.integers(1, 9, size=(4, len(days))), columns=days)
+    test = pd.concat([items, sales], axis=1)
+    calendar = pd.DataFrame({"d": [f"d_{i}" for i in range(1, 1970)]})
+    calendar["wm_yr_wk"] = 11101 + (np.arange(1969) // 7)
+    prices = pd.DataFrame(
+        [
+            (s, i, w, 1.0 + k)
+            for k, i in enumerate("ABCD")
+            for s in ["S1"]
+            for w in calendar.wm_yr_wk.unique()
+        ],
+        columns=["store_id", "item_id", "wm_yr_wk", "sell_price"],
+    )
+    sample = pd.DataFrame({"id": [f"{i}_S1_validation" for i in "ABCD"]})
+    for k in range(1, 29):
+        sample[f"F{k}"] = 0
+    records = []
+    for source, frame in [
+        ("test", test),
+        ("calendar", calendar),
+        ("sell_prices", prices),
+        ("sample_submission", sample),
+    ]:
+        records += [dict(r, source=source) for r in frame.to_dict(orient="records")]
+    return records, test, sample
+
+
+def test_m5_rejects_repeated_or_unknown_ids():
+    grade = _grade_fn("m5-forecasting-accuracy")
+    rng = np.random.default_rng(0)
+    answers, test, sample = _m5_answers(rng)
+    truth = test[[f"d_{1913 + k}" for k in range(1, 29)]].to_numpy()
+    perfect = sample.copy()
+    perfect.iloc[:, 1:] = truth
+    assert grade(perfect.copy(), answers) == pytest.approx(0.0)
+
+    noisy = sample.copy()
+    noisy.iloc[:, 1:] = truth + rng.integers(0, 3, truth.shape)
+    score = grade(noisy.copy(), answers)
+    assert score > 0
+    assert grade(noisy.sample(frac=1, random_state=0), answers) == pytest.approx(score)
+
+    repeated = noisy.copy()
+    repeated.loc[1, "id"] = repeated.loc[0, "id"]  # was scored with rows shifted onto other series
+    with pytest.raises(InvalidSubmissionError, match="ids"):
+        grade(repeated, answers)
+    with pytest.raises(InvalidSubmissionError, match="ids"):
+        grade(noisy.assign(id=noisy.id.str.replace("_validation", "_evaluation")), answers)
+
+
+# ---------------------------------------------------------------- hyperparameter search
+
+
+def _hps_folder(tmp_path):
+    from xgboost import XGBRegressor
+
+    folder = tmp_path / "submission"
+    folder.mkdir()
+    (folder / "baseline_model.pkl").write_bytes(pickle.dumps(XGBRegressor()))
+    (folder / "model.pkl").write_bytes(pickle.dumps(XGBRegressor(max_depth=3)))
+    answers = pd.DataFrame({"row_id": ["0-5", "0-11", "1-5"], "target": [0.002, 0.001, 0.004]})
+    answers.assign(target=[0.003, 0.002, 0.002]).to_csv(
+        folder / "baseline_submission.csv", index=False
+    )
+    answers.assign(target=[0.0025, 0.001, 0.003]).to_csv(folder / "submission.csv", index=False)
+    answers.assign(target=0.0).to_csv(tmp_path / "sample_submission.csv", index=False)
+    return folder, answers, tmp_path / "sample_submission.csv"
+
+
+def test_hyperparameter_search_requires_the_solution_code(tmp_path):
+    cid = "optiver-realized-volatility-prediction-hyperparameter-search"
+    module = _module(cid)
+    config = {
+        "baseline_submission_name": "baseline_submission.csv",
+        "improved_submission_name": "submission.csv",
+        "baseline_model_name": "baseline_model.pkl",
+        "improved_model_name": "model.pkl",
+    }
+    folder, answers, sample_path = _hps_folder(tmp_path)
+    sample = module.grade(pd.read_csv(sample_path), answers)
+    improved = module.grade(pd.read_csv(folder / "submission.csv"), answers)
+    expected = -(improved - sample) / sample
+
+    script = tmp_path / "search.py"
+    script.write_text("import optuna\nstudy = optuna.create_study()\nstudy.optimize(f)\n")
+    assert module.grade_hyperparameter_search(
+        folder, answers, config, script, sample_path
+    ) == pytest.approx(expected)
+    code_dir = tmp_path / "code"
+    code_dir.mkdir()
+    (code_dir / "train.py").write_text("print('train')\n")
+    shutil.copy(script, code_dir / "search.py")
+    assert module.grade_hyperparameter_search(
+        folder, answers, config, code_dir, sample_path
+    ) == pytest.approx(expected)
+
+    no_search = tmp_path / "manual.py"
+    no_search.write_text("from sklearn.linear_model import Ridge\nRidge(alpha=3.0)\n")
+    assert (
+        module.grade_hyperparameter_search(folder, answers, config, no_search, sample_path)
+        == -np.inf
+    )
+
+    # without the solution code: invalid (was graded), and before any pickle is loaded
+    (folder / "model.pkl").write_bytes(b"not a pickle")
+    for missing in [None, tmp_path / "absent.py"]:
+        with pytest.raises(InvalidSubmissionError, match="solution code is required"):
+            module.grade_hyperparameter_search(folder, answers, config, missing, sample_path)
+    grader = Grader(
+        name="hps", grade_fn=f"timeseriesgym.competitions.{cid}.grade:grade_hyperparameter_search"
+    )
+    inputs = GradingInput(
+        submission_folder_path=folder,
+        answers=answers,
+        hyperparameter_search_config=config,
+        sample_submission_path=sample_path,
+    )
+    assert grader(inputs) is None
+
+
+# ---------------------------------------------------------------- feature-enhancement rubric
+
+
+def _fe():
+    return _module("ptb-xl-classification-challenge-feature-enhancement")
+
+
+def test_feature_rubric_judges_every_function_and_class():
+    fe = _fe()
+    full = "def f(x: int, *a: int, k: int = 1, **kw: int) -> int:\n    return x\n"
+    method = "class A:\n    '''A.'''\n\n    def m(self, x: int) -> int:\n        return x\n"
+    partial = full + "def g(y):\n    return y\n"  # one annotated function used to suffice
+    assert fe.has_type_hints(ast.parse(full)) and fe.has_type_hints(ast.parse(method))
+    assert not fe.has_type_hints(ast.parse(partial))
+    assert not fe.has_type_hints(ast.parse("def h(z: int):\n    return z\n"))
+
+    documented = "class A:\n    '''A.'''\n\nclass B:\n    '''B.'''\n"
+    assert fe.has_class_docstrings(ast.parse(documented))
+    assert not fe.has_class_docstrings(ast.parse(documented + "\nclass C:\n    pass\n"))
+
+    body = "    x = 1\n    y = 2\n    z = 3\n    return x + y + z\n"
+    doc = "def d():\n    '''Doc.'''\n" + body
+    assert fe.has_function_docstrings(ast.parse(doc))
+    # an undocumented function starting with an assignment used to be skipped
+    assert not fe.has_function_docstrings(ast.parse(doc + "def u():\n" + body))
+
+
+DOCUMENTED = '''
+def f(x: int) -> int:
+    """F.
+
+    Args:
+        x: x.
+
+    Returns:
+        x.
+    """
+    return x
+'''
+
+
+def test_feature_rubric_needs_both_sections_in_docstrings():
+    fe = _fe()
+    both = DOCUMENTED
+    assert fe.has_docstring_sections([ast.parse(both)], ["Args", "Returns"])
+    args_only = both.replace("Returns:", "Gives:")
+    assert not fe.has_docstring_sections([ast.parse(args_only)], ["Args", "Returns"])
+    in_comments = "# Args:\n# Returns:\nx = 1\n"
+    assert not fe.has_docstring_sections([ast.parse(in_comments)], ["Args", "Returns"])
+    # one section per file still counts, as both appear in the submission's docstrings
+    split = [ast.parse(args_only), ast.parse(both.replace("Args:", "Params:"))]
+    assert fe.has_docstring_sections(split, ["Args", "Returns"])
+
+
+TRAIN = """
+import hydra
+from omegaconf import DictConfig
+from torch.utils.tensorboard import SummaryWriter
+
+
+@hydra.main(config_path="conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    writer = SummaryWriter(log_dir="runs/x")
+    writer.add_scalar("loss", 1.0, 0)
+    model = hydra.utils.instantiate(cfg.model)
+    writer.add_graph(model, None)
+"""
+
+
+def _uvarint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte, n = n & 0x7F, n >> 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _field(number: int, payload: bytes) -> bytes:  # a length-delimited protobuf field
+    return _uvarint(number << 3 | 2) + _uvarint(len(payload)) + payload
+
+
+def _event_file(path: Path, scalars: str | None = "simple_value") -> Path:
+    """An event file as SummaryWriter writes it: TFRecord records of a file_version Event, then
+    an Event whose summary holds a scalar (or none, as after add_graph alone)."""
+    crc = _fe().masked_crc32c
+
+    def record(data: bytes) -> bytes:
+        length = struct.pack("<Q", len(data))
+        return length + struct.pack("<I", crc(length)) + data + struct.pack("<I", crc(data))
+
+    wall_time = _uvarint(1 << 3 | 1) + struct.pack("<d", 1.0)  # double wall_time = 1
+    data = record(wall_time + _field(3, b"brain.Event:2"))  # string file_version = 3
+    value = _field(1, b"Loss/train")  # Summary.Value: string tag = 1
+    if scalars == "simple_value":
+        value += _uvarint(2 << 3 | 5) + struct.pack("<f", 0.5)  # float simple_value = 2
+    else:  # metadata = 9, plugin_data = 1, plugin_name = 1: the newer tensor-style scalars
+        value += _field(9, _field(1, _field(1, b"scalars")))
+    if scalars is not None:  # int64 step = 2, Summary summary = 5, repeated Value value = 1
+        data += record(wall_time + _uvarint(2 << 3) + _uvarint(1) + _field(5, _field(1, value)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def test_feature_rubric_ignores_comments_and_needs_event_files(tmp_path):
+    fe = _fe()
+    commented = "\n".join(f"# {line}" for line in TRAIN.splitlines()) + "\nx = 1\n"
+    config = "model:\n  hidden: 8\n"
+    assert fe.evaluate_hydra_usage(TRAIN, config) == pytest.approx(1.0)
+    assert fe.evaluate_hydra_usage(commented, "# model:\nother: 1\n") == 0.0
+    assert fe.evaluate_tensorboard_usage(commented, tmp_path) == 0.0
+
+    assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(0.8)
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "x").write_text("not a log")  # any file used to count as a log
+    assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(0.8)
+    _event_file(tmp_path / "runs" / "events.out.tfevents.1.host")
+    assert fe.evaluate_tensorboard_usage(TRAIN, tmp_path) == pytest.approx(1.0)
+
+
+def test_feature_rubric_does_not_count_code_in_strings():
+    fe = _fe()
+    quoted = f"CODE = {TRAIN!r}\n"  # every pattern the checks looked for, in a string literal
+    assert ast.literal_eval(ast.parse(quoted).body[0].value) == TRAIN
+    assert fe.evaluate_tensorboard_usage(quoted, Path("/nonexistent")) == 0.0  # was 0.8
+    assert fe.evaluate_hydra_usage(quoted, "model:\n  hidden: 8\n") == pytest.approx(0.2)  # was 0.8
+    aliased = TRAIN.replace("import hydra", "import hydra.utils").replace(
+        "from torch.utils.tensorboard import SummaryWriter", "import torch.utils.tensorboard as tb"
+    )
+    aliased = aliased.replace("SummaryWriter(", "tb.SummaryWriter(")
+    assert fe.evaluate_tensorboard_usage(aliased, Path("/nonexistent")) == pytest.approx(0.8)
+    assert fe.evaluate_hydra_usage(aliased, "model:\n  hidden: 8\n") == pytest.approx(1.0)
+
+
+def test_feature_rubric_needs_an_event_file_with_scalars(tmp_path):
+    fe = _fe()
+    # the CRC32C check value of b"123456789" is 0xE3069283; TFRecord rotates it and adds a delta
+    rotated = ((0xE3069283 >> 15) | (0xE3069283 << 17)) & 0xFFFFFFFF
+    assert fe.masked_crc32c(b"123456789") == (rotated + 0xA282EAD8) & 0xFFFFFFFF
+
+    runs = tmp_path / "runs"
+    real_file = _event_file(tmp_path / "real" / "events.out.tfevents.1.host")
+    real = real_file.read_bytes()
+    placeholders = {
+        "empty": b"",
+        "one byte": b"\0",  # passed before
+        "text": b"not an event file\n" * 10,
+        "truncated": real[:-3],
+        "a corrupted record": real[:20] + bytes([real[20] ^ 1]) + real[21:],
+        "no scalars (add_graph alone)": None,
+    }
+    for name, data in placeholders.items():
+        path = runs / "x" / f"events.out.tfevents.{len(name)}.host"
+        if data is None:
+            _event_file(path, scalars=None)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        assert fe.find_event_file(runs) is None, name
+        path.unlink()
+    (runs / "x" / "events.out.tfevents.9.link").symlink_to(real_file)
+    assert fe.find_event_file(runs) is None  # a symbolic link is not followed
+    for scalars in ("simple_value", "plugin"):
+        path = _event_file(runs / "y" / f"events.out.tfevents.{scalars}.host", scalars=scalars)
+        assert fe.find_event_file(runs) == path
+        path.unlink()
+
+
+def test_feature_rubric_accepts_the_type_hints_of_the_descriptions_examples():
+    fe = _fe()
+    examples = [  # description.md, as annotated now; `__init__` without `-> None` was rejected
+        "def __init__(self, input_dim: int, hidden_dim: int, num_classes: int):\n    pass\n",
+        "def __init__(self, config: dict | None = None, in_channels: int = 12):\n    pass\n",
+        "def main(cfg: DictConfig) -> None:\n    pass\n",
+    ]
+    for code in examples:
+        assert fe.has_type_hints(ast.parse(code)), code
+    assert not fe.has_type_hints(ast.parse("def __init__(self, n):\n    pass\n"))
+    assert not fe.has_type_hints(ast.parse("def f(n: int):\n    return n\n"))  # not __init__
+
+
+def test_feature_rubric_keeps_quoted_hashes_in_the_config():
+    fe = _fe()
+    flow = '{name: "run #1", model: {hidden: 8}}\n'  # was cut at "#1", losing `model:`
+    assert fe.evaluate_hydra_usage(TRAIN, flow) == pytest.approx(1.0)
+    commented = "name: 'a # b'  # model: x\n"  # a real comment still does not count
+    assert fe.evaluate_hydra_usage(TRAIN, commented) == pytest.approx(0.8)
+
+
+def test_feature_rubric_scores_the_shipped_example_as_before():
+    fe = _fe()
+    example = Path(fe.__file__).parent / "example"
+    model, train = (example / "model.py").read_text(), (example / "train.py").read_text()
+    trees = [ast.parse(model), ast.parse(train)]
+    assert all(fe.has_type_hints(tree) and fe.has_function_docstrings(tree) for tree in trees)
+    assert fe.has_class_docstrings(trees[0])
+    assert fe.has_docstring_sections(trees, ["Args", "Returns"])
+    config = (example / "conf" / "config.yaml").read_text()
+    assert fe.evaluate_hydra_usage(train, config, model) == pytest.approx(1.0)
+    assert fe.evaluate_tensorboard_usage(train, example) == pytest.approx(0.8)  # no runs/ shipped
+
+
+MODEL_READS_THE_CONFIG = """
+class Net:
+    def __init__(self, config=None):
+        self.hidden = getattr(config.model, "hidden", 8)
+"""
+MODEL_TAKES_VALUES = """
+class Net:
+    def __init__(self, hidden=8):
+        self.hidden = hidden
+
+
+def build(hidden):
+    return Net(hidden)
+"""
+
+
+@pytest.mark.parametrize(
+    "main, body, model, builds",
+    [
+        # the old check: `cfg.model` or `cfg['model']` anywhere in train.py
+        ("cfg", "model = Net()\nprint('model config:', dict(cfg.model))", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net()\ncfg.model", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net()\nnote = 'cfg.model'", MODEL_TAKES_VALUES, 0),
+        ("cfg", "model = Net(cfg)", MODEL_TAKES_VALUES, 0),
+        ("config", "model = Net(config)", MODEL_READS_THE_CONFIG, 1),  # was rejected
+        ("cfg", "model = Net(config=cfg)", MODEL_READS_THE_CONFIG, 1),
+        ("cfg", "model = Net(**cfg.model)", MODEL_TAKES_VALUES, 1),
+        ("cfg", 'model = Net(cfg["model"].hidden)', MODEL_TAKES_VALUES, 1),  # was rejected
+        ("cfg", "section = cfg.model\nmodel = build(section.hidden)", MODEL_TAKES_VALUES, 1),
+        ("cfg", "model = hydra.utils.instantiate(cfg.model)", "", 1),
+    ],
+    ids=[
+        "print",
+        "bare reference",
+        "string",
+        "config ignored by the model",
+        "config read by the model",
+        "config as a keyword",
+        "unpacked section",
+        "subscripted section",
+        "value of an assigned section",
+        "hydra instantiate",
+    ],
+)
+def test_feature_rubric_needs_the_model_built_from_the_config(main, body, model, builds):
+    fe = _fe()
+    train = (
+        "import hydra\nfrom model import Net, build\nfrom omegaconf import DictConfig\n\n\n"
+        f'@hydra.main(config_path="conf", config_name="config")\n'
+        f"def main({main}: DictConfig) -> None:\n"
+        + "".join(f"    {line}\n" for line in body.split("\n"))
+    )
+    assert fe.builds_model_from_config(train, model) == bool(builds)
+    expected = 1.0 if builds else 0.8
+    assert fe.evaluate_hydra_usage(train, "model:\n  hidden: 8\n", model) == pytest.approx(expected)
+
+
+def _flake8_reports(monkeypatch, fe, problems: str = ""):
+    """flake8 is not installed everywhere the tests run: a run of it that reports `problems`."""
+    run = subprocess.CompletedProcess([], 1 if problems else 0, problems, "")
+    monkeypatch.setattr(fe.subprocess, "run", lambda *args, **kwargs: run)
+
+
+FE_CONFIG = {
+    "model_code_file": "model.py",
+    "training_file": "train.py",
+    "config_file": "config.yaml",
+}
+
+
+@pytest.mark.parametrize(
+    "failed_check, old_score",
+    [
+        (None, 0.9375),
+        ("no event file", 0.8875),
+        ("a flake8 problem in each file", 0.93056),
+        ("an unannotated function", 0.90972),
+        ("no model section in the config", 0.8875),
+    ],
+)
+def test_feature_enhancement_score_is_the_accuracy_gated_by_the_rubric(
+    tmp_path, monkeypatch, failed_check, old_score
+):
+    fe = _fe()
+    project = tmp_path / "project"  # the shipped example, with the logs that training writes
+    shutil.copytree(Path(fe.__file__).parent / "example", project)
+    _event_file(project / "runs" / "x" / "events.out.tfevents.1.host")
+    answers = pd.read_csv(project / "submission.csv")
+    answers.loc[:24, "label"] = (answers.loc[:24, "label"] + 1) % 5  # accuracy 0.75
+    _flake8_reports(monkeypatch, fe)
+    if failed_check == "no event file":
+        shutil.rmtree(project / "runs")
+    elif failed_check == "a flake8 problem in each file":
+        _flake8_reports(monkeypatch, fe, "train.py:1:1: E203 whitespace before ':'\n")
+    elif failed_check == "an unannotated function":
+        with open(project / "model.py", "a") as f:
+            f.write('\n\ndef helper(x):\n    """Return x."""\n    return x\n')
+    elif failed_check == "no model section in the config":
+        (project / "conf" / "config.yaml").write_text("name: run\n")
+
+    scores = fe.grade_feature_enhancement(project, answers, FE_CONFIG, project)
+    sub_scores = [scores["tensorboard_score"], scores["code_quality_score"], scores["hydra_score"]]
+    # the old score was the mean of the sub-scores and the accuracy
+    assert (sum(sub_scores) + scores["accuracy"]) / 4 == pytest.approx(old_score, abs=1e-5)
+    assert scores["accuracy"] == pytest.approx(0.75)
+    assert scores["overall_score"] == (0.75 if failed_check is None else 0.0)
+    assert scores["rubric_passed"] == (failed_check is None)
+    assert (min(sub_scores) == 1.0) == (failed_check is None)
+
+
+def test_feature_rubric_needs_a_working_flake8(tmp_path, monkeypatch):
+    fe = _fe()
+    files = [str(tmp_path / "model.py"), str(tmp_path / "train.py")]
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("flake8")
+
+    monkeypatch.setattr(fe.subprocess, "run", missing)
+    with pytest.raises(RuntimeError, match="flake8"):  # it gave half the lint credit
+        fe.check_linting(*files)
+    crashed = subprocess.CompletedProcess([], 1, "", "Traceback (most recent call last): ...")
+    monkeypatch.setattr(fe.subprocess, "run", lambda *args, **kwargs: crashed)
+    with pytest.raises(RuntimeError, match="flake8"):  # it counted as no problems
+        fe.check_linting(*files)
+
+
+def test_feature_rubric_runs_flake8_without_configs_or_noqa_and_allows_black_slices(
+    tmp_path, monkeypatch
+):
+    fe = _fe()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(fe.subprocess, "run", run)
+    fe.check_linting("model.py", "train.py")
+    for argv in calls:  # it ran `flake8 --max-line-length=100 <file>`
+        assert argv[0] == "flake8"
+        assert {"--isolated", "--disable-noqa", "--extend-ignore=E203"} <= set(argv)
+
+
+@pytest.mark.skipif(shutil.which("flake8") is None, reason="flake8 is not installed")
+def test_feature_rubric_lint_with_flake8(tmp_path, monkeypatch):
+    fe = _fe()
+    monkeypatch.chdir(tmp_path)
+    clean = tmp_path / "clean.py"
+    clean.write_text('"""Doc."""\n\nX = [1, 2, 3]\nY = X[1 : len(X) - 1]\n')  # black's slice
+    noqa = tmp_path / "noqa.py"
+    noqa.write_text('"""Doc."""\n\nX = "' + "x" * 100 + '"  # noqa: E501\n')
+    assert fe.check_linting(str(clean), str(clean))[0] == 1.0
+    assert fe.check_linting(str(clean), str(noqa))[0] < 1.0  # `# noqa` does not count
+    (tmp_path / "setup.cfg").write_text("[flake8]\nignore = E501\n")
+    assert fe.check_linting(str(clean), str(noqa))[0] < 1.0  # nor does a config file
+
+
+# ---------------------------------------------------------------- amp prepare
+
+
+def _amp_raw(raw: Path) -> None:
+    rows = []
+    for patient in range(10, 30):
+        for month, rated in [(0, 4), (6, 4), (12, 1)]:  # month 12: only part 1 is rated
+            ratings = [
+                patient * 10 + month + part if part <= rated else np.nan for part in range(1, 5)
+            ]
+            rows.append([f"{patient}_{month}", patient, month, *ratings, "On"])
+    columns = ["visit_id", "patient_id", "visit_month", "updrs_1", "updrs_2", "updrs_3", "updrs_4"]
+    clinical = pd.DataFrame(rows, columns=[*columns, "upd23b_clinical_state_on_medication"])
+    raw.mkdir(parents=True)
+    clinical.to_csv(raw / "train_clinical_data.csv", index=False)
+    clinical.head(0).to_csv(raw / "supplemental_clinical_data.csv", index=False)
+    pd.DataFrame({"visit_id": ["10_0"], "patient_id": [10], "Peptide": ["P"]}).to_csv(
+        raw / "train_peptides.csv", index=False
+    )
+    pd.DataFrame({"visit_id": ["10_0"], "patient_id": [10], "UniProt": ["U"]}).to_csv(
+        raw / "train_proteins.csv", index=False
+    )
+    (raw / "example_test_files").mkdir()
+    pd.DataFrame(columns=["prediction_id", "rating", "group_key"]).to_csv(
+        raw / "example_test_files" / "sample_submission.csv", index=False
+    )
+    pd.DataFrame(
+        columns=["visit_id", "visit_month", "patient_id", "updrs_test", "row_id", "group_key"]
+    ).to_csv(raw / "example_test_files" / "test.csv", index=False)
+
+
+def test_amp_prepare_gives_each_prediction_id_its_own_part(tmp_path):
+    prepare = _module("amp-parkinsons-disease-progression-prediction", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    _amp_raw(raw)
+    public.mkdir()
+    private.mkdir()
+    prepare(raw, public, private)
+
+    truth = pd.read_csv(private / "ground_truth.csv")
+    sample = pd.read_csv(public / "sample_submission.csv")
+    assert truth.prediction_id.is_unique  # was up to 4 rows (one per part) per id
+    assert sample.prediction_id.tolist() == truth.prediction_id.tolist()
+    clinical = pd.read_csv(raw / "train_clinical_data.csv").set_index("visit_id")
+    for prediction_id, rating in zip(truth.prediction_id, truth.rating, strict=True):
+        patient, month, _, part, _, plus, _ = prediction_id.split("_")
+        assert clinical.loc[f"{patient}_{int(month) + int(plus)}", f"updrs_{part}"] == rating
+
+    patient = truth.prediction_id.str.split("_").str[0].iloc[0]
+    ids = set(truth.prediction_id)
+    # a target visit with one rated part: the same single answer as before
+    assert f"{patient}_0_updrs_1_plus_12_months" in ids
+    # no answer for a part that is not rated at the target visit (was given part 1's rating)
+    assert f"{patient}_0_updrs_2_plus_12_months" not in ids
+    # the public test visits are all test rows with a rating, as before
+    test_clinical = pd.read_csv(public / "test_clinical_data.csv")
+    assert len(test_clinical) == 9 * test_clinical.patient_id.nunique()
+    assert test_clinical.row_id.is_unique
+
+
+# ---------------------------------------------------------------- M5 prepare
+
+
+def test_m5_prepare_keeps_prices_of_every_training_day(tmp_path):
+    prepare = _module("m5-forecasting-accuracy", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    for d in (raw, public, private):
+        d.mkdir()
+    records, test, sample = _m5_answers(np.random.default_rng(0))
+    test.to_csv(raw / "sales_train_evaluation.csv", index=False)
+    calendar = pd.DataFrame([r for r in records if r["source"] == "calendar"]).drop(
+        columns="source"
+    )
+    calendar.to_csv(raw / "calendar.csv", index=False)
+    prices = pd.DataFrame([r for r in records if r["source"] == "sell_prices"]).drop(
+        columns="source"
+    )
+    prices.to_csv(raw / "sell_prices.csv", index=False)
+    evaluation = sample.assign(id=sample.id.str.replace("_validation", "_evaluation"))
+    pd.concat([sample, evaluation]).to_csv(raw / "sample_submission.csv", index=False)
+
+    prepare(raw, public, private)
+
+    week = calendar.set_index("d")["wm_yr_wk"]
+    public_weeks = set(pd.read_csv(public / "sell_prices.csv").wm_yr_wk)
+    assert week["d_500"] in public_weeks  # "d_500" > "d_1913" as strings: was dropped
+    assert public_weeks == set(week[[f"d_{i}" for i in range(1, 1914)]])
+    assert week["d_1941"] not in public_weeks  # forecast-period prices stay out, as before
+    train = pd.read_csv(public / "train.csv")
+    assert train.columns[-1] == "d_1913" and len(train) == 4
+    assert pd.read_csv(public / "sample_submission.csv").id.tolist() == sample.id.tolist()
+
+
+# ---------------------------------------------------------------- NYC taxi prepare
+
+
+def _nyc_raw(raw: Path) -> None:
+    rng = np.random.default_rng(0)
+    n = 12_000
+    times = pd.Timestamp("2012-01-01") + pd.to_timedelta(rng.integers(0, 10**8, n), unit="s")
+    train = pd.DataFrame(
+        {
+            "key": [f"{t}.{i:07d}" for i, t in enumerate(times)],
+            "fare_amount": rng.uniform(2.5, 60.0, n).round(2),
+            "pickup_datetime": times.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "pickup_longitude": rng.uniform(-74.02, -73.93, n),
+            "pickup_latitude": rng.uniform(40.70, 40.80, n),
+            "dropoff_longitude": rng.uniform(-74.02, -73.93, n),
+            "dropoff_latitude": rng.uniform(40.70, 40.80, n),
+            "passenger_count": rng.integers(1, 7, n),
+        }
+    )
+    # rows unlike Kaggle's test set: missing (0) or far-away coordinates, 0 or more than 6
+    # passengers, a missing dropoff
+    dirty = rng.choice(n, 1_200, replace=False)
+    changes = [
+        ("pickup_longitude", 0.0),
+        ("dropoff_latitude", 0.0),
+        ("pickup_latitude", 45.0),
+        ("dropoff_longitude", -75.5),
+        ("passenger_count", 0),
+        ("passenger_count", 9),
+        ("dropoff_latitude", np.nan),
+    ]
+    for j, i in enumerate(dirty):
+        column, value = changes[j % len(changes)]
+        train.loc[i, column] = value
+    # the edges of Kaggle's test ranges are inside
+    edge = rng.choice(np.setdiff1d(np.arange(n), dirty), 4, replace=False)
+    train.loc[edge, "pickup_longitude"] = -74.263242
+    train.loc[edge, "dropoff_longitude"] = -72.986532
+    train.loc[edge, "pickup_latitude"] = 40.568973
+    train.loc[edge, "dropoff_latitude"] = 41.709555
+    train.loc[edge, "passenger_count"] = [1, 6, 1, 6]
+    raw.mkdir(parents=True)
+    train.to_csv(raw / "train.csv", index=False)
+    (raw / "GCP-Coupons-Instructions.rtf").write_text("{\\rtf1}")
+
+
+def test_nyc_prepare_cleans_the_test_like_kaggle(tmp_path):
+    prepare = _module("new-york-city-taxi-fare-prediction", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    _nyc_raw(raw)
+    public.mkdir()
+    private.mkdir()
+    prepare(raw, public, private)
+
+    raw_train = pd.read_csv(raw / "train.csv", float_precision="round_trip")
+    old_train, old_test = train_test_split(raw_train, test_size=9914, random_state=0)
+    longitudes = old_test[["pickup_longitude", "dropoff_longitude"]]
+    latitudes = old_test[["pickup_latitude", "dropoff_latitude"]]
+    clean = (
+        old_test.passenger_count.between(1, 6)
+        & ((longitudes >= -74.263242) & (longitudes <= -72.986532)).all(axis=1)
+        & ((latitudes >= 40.568973) & (latitudes <= 41.709555)).all(axis=1)
+    )
+    assert 0 < (~clean).sum() < len(old_test)  # the uncleaned test held these rows
+
+    test = pd.read_csv(private / "test.csv", float_precision="round_trip")
+    # the same random sample without the rows outside Kaggle's test ranges, in the same order
+    pd.testing.assert_frame_equal(test, old_test[clean].reset_index(drop=True))
+    edges = old_test.key[old_test.pickup_longitude == -74.263242]
+    assert len(edges) > 0 and edges.isin(test.key).all()  # the ranges include their edges
+    # the training split is unchanged; the dropped test rows are not used
+    labels = pd.read_csv(public / "labels.csv", float_precision="round_trip")
+    pd.testing.assert_frame_equal(labels, old_train.reset_index(drop=True))
+    public_test = pd.read_csv(public / "test.csv", float_precision="round_trip")
+    pd.testing.assert_frame_equal(public_test, test.drop(columns="fare_amount"))
+    sample = pd.read_csv(public / "sample_submission.csv")
+    assert sample.key.tolist() == test.key.tolist()
+    assert (sample.fare_amount == 11.35).all()
+
+
+# ---------------------------------------------------------------- PTB-XL folds
+
+
+def test_ptb_xl_trains_on_folds_one_to_eight():
+    pytest.importorskip("wfdb")
+    download = _module("ptb-xl-classification-challenge", "download_data")
+    df = pd.DataFrame({"strat_fold": np.repeat(np.arange(1, 11), 2)}, index=np.arange(1, 21))
+    paths = [f"records100/00000/{ecg_id:05d}_lr" for ecg_id in df.index]
+    phases = download.obtain_phase_to_paths_dict(df, paths)
+    fold_of = dict(zip(paths, df.strat_fold, strict=True))
+    assert sorted({fold_of[p] for p in phases["train"]}) == list(range(1, 9))  # fold 8 was unused
+    assert {fold_of[p] for p in phases["val"]} == {9}
+    assert {fold_of[p] for p in phases["test"]} == {10}
+
+
+# ---------------------------------------------------------------- checked downloads
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+def test_download_file_fails_instead_of_saving_an_error(tmp_path):
+    source = tmp_path / "source.csv"
+    source.write_text("a,b\n1,2\n")
+    dest = download_file(source.as_uri(), tmp_path / "copy.csv")
+    assert dest.read_text() == "a,b\n1,2\n"
+    with pytest.raises(subprocess.CalledProcessError):
+        download_file((tmp_path / "missing.csv").as_uri(), tmp_path / "missing_copy.csv")
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+def test_download_file_checks_the_md5_checksum(tmp_path):
+    source = tmp_path / "source.py"
+    source.write_text("print(1)\n")
+    md5 = hashlib.md5(b"print(1)\n").hexdigest()
+    assert download_file(source.as_uri(), tmp_path / "a.py", md5=md5).read_text() == "print(1)\n"
+    with pytest.raises(ValueError, match="MD5 checksum"):  # e.g. a moved branch
+        download_file(source.as_uri(), tmp_path / "b.py", md5="0" * 32)
+    assert not (tmp_path / "b.py").exists()
+
+
+def test_stomp_prepare_files_and_failed_download(tmp_path, monkeypatch):
+    module = _module("stomp-R-to-python", "prepare")
+    public, private = tmp_path / "public", tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+
+    def fake_download(url, destination):
+        destination.write_text("x\n1.0\n2.0\n" if url.endswith(".csv") else "# code\n")
+        return destination
+
+    def fake_clone(url, destination, commit=None):
+        (destination / "R").mkdir(parents=True)
+        (destination / "R" / "stomp.R").write_text("stomp <- 1\n")
+        (destination / "README.md").write_text("tsmp\n")
+        return destination
+
+    monkeypatch.setattr(module, "download_file", fake_download)
+    monkeypatch.setattr(module, "clone_repository", fake_clone)
+    module.prepare(tmp_path / "raw", public, private)
+    assert sorted(p.name for p in public.iterdir()) == [
+        "R",
+        "query_data.npy",
+        "ref_data.npy",
+        "sample_submission.py",
+    ]
+    assert (public / "R" / "stomp.R").is_file() and (private / "test_results.csv").is_file()
+
+    def failing_download(url, destination):
+        raise subprocess.CalledProcessError(22, ["curl", url])  # was ignored by os.system
+
+    monkeypatch.setattr(module, "download_file", failing_download)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.prepare(tmp_path / "raw", tmp_path, tmp_path)
+
+
+def test_long_horizon_prepare_does_not_swallow_failures(tmp_path, monkeypatch):
+    pytest.importorskip("gdown")
+    module = _module("time-series-library-long-horizon-forecast", "prepare")
+    monkeypatch.setattr(module.gdown, "download_folder", lambda **kwargs: None)
+    with pytest.raises(RuntimeError, match="Google Drive"):  # used to log and return
+        module.prepare(tmp_path, tmp_path, tmp_path)
+
+    def failing_clone(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, ["git", "fetch"])
+
+    monkeypatch.setattr(module.gdown, "download_folder", lambda **kwargs: ["file"])
+    monkeypatch.setattr(module, "clone_repository", failing_clone)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.prepare(tmp_path, tmp_path, tmp_path)
+
+
+# DataEmbedding_inverted as the iTransformer task's clone (branch itransformer-weather-eval at
+# 493256f) has it: with the four TODOs in models/iTransformer.py, filled in in layers/Embed.py.
+ITRANSFORMER_TODOS = """class DataEmbedding_inverted(nn.Module):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+        super(DataEmbedding_inverted, self).__init__()
+        self.value_embedding = ...#TODO: fill in the missing part
+        self.dropout = ...#TODO: fill in the missing part
+
+    def forward(self, x, x_mark):
+        x = x.permute(0, 2, 1)
+        # x: [Batch Variate Time]
+        if x_mark is None:
+            x = ...#TODO: fill in the missing part
+        else:
+            x = ...#TODO: fill in the missing part
+        # x: [Batch Variate d_model]
+        return self.dropout(x)
+"""
+ITRANSFORMER_FILLED = """class DataEmbedding_inverted(nn.Module):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+        super(DataEmbedding_inverted, self).__init__()
+        self.value_embedding = nn.Linear(c_in, d_model)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x, x_mark):
+        x = x.permute(0, 2, 1)
+        # x: [Batch Variate Time]
+        if x_mark is None:
+            x = self.value_embedding(x)
+        else:
+            x = self.value_embedding(torch.cat([x, x_mark.permute(0, 2, 1)], 1))
+        # x: [Batch Variate d_model]
+        return self.dropout(x)
+"""
+# A neighbouring class of layers/Embed.py with two of the same lines, which must stay.
+EMBED_NEIGHBOUR = """
+
+class DataEmbedding_wo_pos(nn.Module):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+        super(DataEmbedding_wo_pos, self).__init__()
+        self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x, x_mark):
+        if x_mark is None:
+            x = self.value_embedding(x)
+        else:
+            x = self.value_embedding(x) + self.temporal_embedding(x_mark)
+        return self.dropout(x)
+"""
+
+
+def test_itransformer_prepare_stubs_the_embedding_the_task_asks_for(tmp_path, monkeypatch):
+    module = _module("time-series-library-itransformer-weather-forecast", "prepare")
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    for d in (raw, public, private):
+        d.mkdir()
+    np.save(raw / "pred.npy", np.zeros((2, 96, 21), dtype=np.float32))
+    (raw / "weather.csv").write_text("date,OT\n")
+    (raw / "itransformer.txt").write_text("paper\n")
+    header = "import torch\nimport torch.nn as nn\n\n\n"
+
+    def fake_clone(url, destination, branch=None, commit=None):
+        (destination / "layers").mkdir(parents=True)
+        (destination / "models").mkdir()
+        (destination / "layers" / "Embed.py").write_text(
+            header + ITRANSFORMER_FILLED + EMBED_NEIGHBOUR
+        )
+        (destination / "models" / "iTransformer.py").write_text(header + ITRANSFORMER_TODOS)
+        (destination / "models" / "TimeXer.py").write_text(
+            "from layers.Embed import DataEmbedding_inverted, PositionalEmbedding\n"
+        )
+        return destination
+
+    monkeypatch.setattr(module, "clone_repository", fake_clone)
+    module.prepare(raw, public, private)
+    embed = (public / "Time-Series-Library" / "layers" / "Embed.py").read_text()
+    # The answer is gone; the class is still there (TimeXer imports it), with the very TODOs of
+    # models/iTransformer.py, and the rest of the file is unchanged.
+    assert "nn.Linear(c_in, d_model)" not in embed
+    assert "torch.cat([x, x_mark.permute(0, 2, 1)], 1)" not in embed
+    assert embed == header + ITRANSFORMER_TODOS + EMBED_NEIGHBOUR
+    # The checksum of the real stubbed file (the clone at 493256f) is the one recorded.
+    checksums = (Path(module.__file__).parent / "checksums.yaml").read_text()
+    assert "Time-Series-Library/layers/Embed.py: a42f4197cd31c423f4f4c2eb645ce108" in checksums
+    # A clone without the filled-in class (another commit) fails instead of shipping it.
+    with pytest.raises(ValueError, match="DataEmbedding_inverted"):
+        module.stub_embedding(public / "Time-Series-Library" / "layers" / "Embed.py")
+
+
+# ---------------------------------------------------------------- missing-data variants
+
+
+@pytest.mark.parametrize(
+    "competition_id,parent_id,columns",
+    [
+        (
+            "optiver-realized-volatility-prediction-missing",
+            "optiver-realized-volatility-prediction",
+            "every column except `stock_id`, `time_id` and `seconds_in_bucket`",
+        ),
+        (
+            "ventilator-pressure-prediction-missing",
+            "ventilator-pressure-prediction",
+            "`R`, `C`, `u_in` and `u_out`",
+        ),
+    ],
+)
+def test_missing_data_variants_describe_the_missing_values(
+    tmp_path, competition_id, parent_id, columns
+):
+    from timeseriesgym.registry import Registry
+
+    registry = Registry(tmp_path)
+    competition = registry.get_competition(competition_id)
+    simulator = competition.missingness_simulator
+    assert (
+        f"{simulator.missingness_ratio:.0%} of the values of {columns}" in competition.description
+    )
+    # it used to inherit its parent's text, which does not mention the missing values
+    parent = registry.get_competition(parent_id).description
+    assert "### Missing Data" not in parent and "### Files" in competition.description
+
+
+def test_ucr_description_shows_the_shipped_dataset_helper():
+    from timeseriesgym.data import get_checksum
+    from timeseriesgym.utils import load_yaml
+
+    directory = Path(_module("ucr-anomaly-detection").__file__).parent
+    helper = directory / "anomaly_dataset.py"
+    # the shipped copy said the sample submission "Contains the anomaly labels"
+    assert helper.read_text() in (directory / "description.md").read_text()
+    public = load_yaml(directory / "checksums.yaml")["public"]
+    assert public["anomaly_dataset.py"] == get_checksum(helper)  # prepare copies it to public/
+
+
+def test_ucr_prepare_reads_the_archives_indices_as_one_based_and_inclusive(tmp_path):
+    import h5py
+
+    prepare = _module("ucr-anomaly-detection", "prepare").prepare
+    raw, public, private = tmp_path / "raw", tmp_path / "public", tmp_path / "private"
+    files = raw / "AnomalyDatasets_2021" / "UCR_TimeSeriesAnomalyDatasets2021" / "FilesAreInHere"
+    files = files / "UCR_Anomaly_FullData"
+    files.mkdir(parents=True)
+    public.mkdir()
+    private.mkdir()
+    # As in the archive's 005: points 1-4000 (1-based) are training data, and the anomaly is
+    # points 5391-5392, of length 5392 - 5391 + 1; the distorted point is the 5391st.
+    series = np.sin(np.arange(8184) / 4)
+    series[5390] -= 8.0
+    name = "005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1"
+    np.savetxt(files / f"{name}_4000_5391_5392.txt", series)
+    prepare(raw, public, private)
+
+    train = pd.read_csv(public / "train" / f"{name}.csv").to_numpy().ravel()
+    test = pd.read_csv(public / "test" / f"{name}.csv").to_numpy().ravel()
+    assert np.allclose(train, series[:4000]) and np.allclose(test, series[4000:])
+    with h5py.File(private / "labels.h5") as f:
+        labels = f["labels"][name][:]
+    assert np.flatnonzero(labels).tolist() == [1390, 1391]  # was [1391]: the dip was normal
+    assert np.argmin(test) == 1390
+
+
+# ---------------------------------------------------------------- MIT-BIH download
+
+
+def test_mit_bih_download_fails_on_an_http_error(tmp_path, monkeypatch):
+    download = _module("MIT-BIH-Arrhythmia", "download_data")
+    calls = []
+
+    def fake_run(cmd, cwd, check):
+        calls.append(cmd)
+        assert "-f" in cmd[1] and check  # -fsSL: an HTTP error must raise, not save a page
+        raise subprocess.CalledProcessError(22, cmd)
+
+    monkeypatch.setattr(download.subprocess, "run", fake_run)
+    with pytest.raises(subprocess.CalledProcessError):
+        download.download_mitdb(tmp_path)
+    assert len(calls) == 1
+
+
+def test_mit_bih_weak_supervision_downloads_are_pinned(tmp_path, monkeypatch):
+    import h5py
+
+    from timeseriesgym.utils import load_yaml
+
+    module = _module("MIT-BIH-Arrhythmia-Weak-Supervision", "prepare")
+    public, private = tmp_path / "public", tmp_path / "private"
+    public.mkdir()
+    private.mkdir()
+    with h5py.File(public / "train_features.h5", "w") as f:
+        f["train/lead_1"] = np.zeros((3, 4))
+    with h5py.File(public / "train_labels.h5", "w") as f:
+        f["labels"] = np.eye(3)  # normal, PVC, other
+    for name in ("test_features.h5", "sample_submission.h5"):
+        (public / name).touch()
+    (private / "test_labels.h5").touch()
+    downloads = {}
+
+    def fake_download(url, destination, md5=None):
+        downloads[destination.name] = (url, md5)
+        destination.touch()
+        return destination
+
+    monkeypatch.setattr(module, "download_file", fake_download)
+    monkeypatch.setattr(module, "clone_repository", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: None)  # pdftotext
+    module.prepare(tmp_path / "raw", public, private)
+
+    # they were the moving `refs/heads/master` and `latest`, and unchecked
+    tutorial_url, tutorial_md5 = downloads["01_spam_tutorial.py"]
+    assert re.search("/snorkel-tutorials/[0-9a-f]{40}/", tutorial_url)
+    checksums = load_yaml(Path(module.__file__).parent / "checksums.yaml")["public"]
+    assert tutorial_md5 == checksums["01_spam_tutorial.py"]
+    docs_url, docs_md5 = downloads["snorkel-docs.pdf"]
+    assert "/v0.9.7/" in docs_url and re.fullmatch("[0-9a-f]{32}", docs_md5)

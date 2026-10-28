@@ -6,10 +6,13 @@ import pytest
 from pytest import approx
 
 from tests.constants import fast_competitions, sample_submission_scores
-from timeseriesgym.data import download_and_prepare_dataset
-from timeseriesgym.grade import grade_csv
+from timeseriesgym.data import download_and_prepare_dataset, get_leaderboard
+from timeseriesgym.grade import grade_sample
 from timeseriesgym.registry import Registry, registry
 from timeseriesgym.utils import in_ci
+
+# every test downloads and prepares the real competition data
+pytestmark = pytest.mark.network
 
 
 @pytest.fixture(scope="session")
@@ -48,7 +51,7 @@ def test_sample_submission_for_competition_achieves_expected_score(
 
     competition = registry.get_competition(competition_id)
     download_and_prepare_dataset(competition)
-    report = grade_csv(competition.sample_submission, competition)
+    report = grade_sample(competition.sample_submission, competition)
     actual_score = report.score
 
     if not np.isnan(expected_score):
@@ -74,7 +77,7 @@ def test_sample_submission_for_fast_running_competition_achieves_expected_score(
 
     competition = registry.get_competition(competition_id)
     download_and_prepare_dataset(competition)
-    report = grade_csv(competition.sample_submission, competition)
+    report = grade_sample(competition.sample_submission, competition)
     actual_score = report.score
 
     if not np.isnan(expected_score):
@@ -97,8 +100,10 @@ def test_submitting_answers_for_competition_achieves_a_gold_medal(
         registry = registry.set_data_dir(tmp_dir)
 
     competition = registry.get_competition(competition_id)
+    if get_leaderboard(competition) is None:  # none, or a one-row placeholder: no medals
+        pytest.skip(f"`{competition_id}` has no leaderboard to rank against")
     download_and_prepare_dataset(competition)
-    report = grade_csv(competition.gold_submission, competition)
+    report = grade_sample(competition.gold_submission, competition)
 
     assert report.gold_medal
 
@@ -116,7 +121,7 @@ def test_submitting_answers_for_fast_running_competition_achieves_gold_medal(
 
     competition = registry.get_competition(competition_id)
     download_and_prepare_dataset(competition)
-    report = grade_csv(competition.gold_submission, competition)
+    report = grade_sample(competition.gold_submission, competition)
 
     assert report.gold_medal
 
@@ -136,7 +141,7 @@ def test_submitting_sample_submission_for_competition_doesnt_achieve_a_medal(
 
     competition = registry.get_competition(competition_id)
     download_and_prepare_dataset(competition)
-    report = grade_csv(competition.sample_submission, competition)
+    report = grade_sample(competition.sample_submission, competition)
 
     assert not report.any_medal
 
@@ -154,6 +159,6 @@ def test_submitting_sample_submission_for_fast_running_competition_doesnt_achiev
 
     competition = registry.get_competition(competition_id)
     download_and_prepare_dataset(competition)
-    report = grade_csv(competition.sample_submission, competition)
+    report = grade_sample(competition.sample_submission, competition)
 
     assert not report.any_medal

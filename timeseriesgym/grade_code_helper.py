@@ -19,8 +19,12 @@ def load_dataset_for_function(func_config: dict, input_data_dir: Path) -> None:
             if file_path.exists():
                 if file_path.suffix == ".npy":
                     data = np.load(file_path)
-                if file_path.suffix == ".pt":
+                elif file_path.suffix == ".pt":
                     data = torch.load(file_path, weights_only=False)
+                else:  # `data` would be unbound, or the previous argument's
+                    raise ValueError(
+                        f"Unsupported file type for argument `{arg_name}`: {file_path}"
+                    )
                 func_config["required_args"][arg_name] = data
             else:
                 raise FileNotFoundError(f"File {file_path} not found.")
@@ -230,7 +234,7 @@ def grade_function_execution(
             expected_output_type = func_config["expected_output_type"]
 
             try:
-                if type(outputs) == tuple:
+                if type(outputs) is tuple:
                     actual_output_type = [get_type_str(type(output)) for output in outputs]
                 else:
                     actual_output_type = get_type_str(type(outputs))
@@ -245,7 +249,7 @@ def grade_function_execution(
             expected_output_shape = func_config["expected_output_shape"]
 
             try:
-                if type(outputs) == tuple:
+                if type(outputs) is tuple:
                     actual_output_shape = [list(output.shape) for output in outputs]
                 else:
                     actual_output_shape = list(outputs.shape)

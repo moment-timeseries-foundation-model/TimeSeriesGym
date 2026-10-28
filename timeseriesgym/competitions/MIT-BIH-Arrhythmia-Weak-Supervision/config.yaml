@@ -13,6 +13,7 @@ dataset:
 
 grader:
   name: accuracy
+  lower_is_better: false
   grade_fn: timeseriesgym.competitions.MIT-BIH-Arrhythmia-Weak-Supervision.grade:grade
 
 preparer: timeseriesgym.competitions.MIT-BIH-Arrhythmia-Weak-Supervision.prepare:prepare

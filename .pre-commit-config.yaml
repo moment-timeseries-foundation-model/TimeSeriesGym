@@ -1,0 +1,8 @@
+# Hooks for `pre-commit install` (README.md, "Development Setup"): ruff check and ruff format,
+# with the ruff version CI uses and the dev extra pins.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+      - id: ruff-format

@@ -9,6 +9,13 @@ from timeseriesgym.utils import read_csv
 from .constants import TARGET_COLS
 
 
+def _copy_parquets(ids, src_dir: Path, dst_dir: Path, desc: str) -> None:
+    """Copies `<id>.parquet` from `src_dir` to `dst_dir` for each unique id."""
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for id_ in tqdm(ids.unique(), desc=desc):
+        shutil.copy(src_dir / f"{id_}.parquet", dst_dir / f"{id_}.parquet")
+
+
 def prepare(raw: Path, public: Path, private: Path):
     random_state = 0  # Used for reproducibility
     test_size = 0.1  # 10% of the data will be used for testing
@@ -48,41 +55,21 @@ def prepare(raw: Path, public: Path, private: Path):
 
     shutil.copytree(raw / "example_figures", public / "example_figures")
 
-    (public / "train_eegs").mkdir(parents=True, exist_ok=True)
-    for eeg_id in tqdm(
-        new_train["eeg_id"].unique(), desc="Train EEGs", total=len(new_train["eeg_id"].unique())
-    ):
-        shutil.copy(
-            raw / "train_eegs" / f"{eeg_id}.parquet", public / "train_eegs" / f"{eeg_id}.parquet"
-        )
-    (public / "test_eegs").mkdir(parents=True, exist_ok=True)
-    for eeg_id in tqdm(
-        new_test["eeg_id"].unique(), desc="Test EEGs", total=len(new_test["eeg_id"].unique())
-    ):
-        shutil.copy(
-            raw / "train_eegs" / f"{eeg_id}.parquet", public / "test_eegs" / f"{eeg_id}.parquet"
-        )
+    _copy_parquets(new_train["eeg_id"], raw / "train_eegs", public / "train_eegs", "Train EEGs")
+    _copy_parquets(new_test["eeg_id"], raw / "train_eegs", public / "test_eegs", "Test EEGs")
 
-    (public / "train_spectrograms").mkdir(parents=True, exist_ok=True)
-    for spectrogram_id in tqdm(
-        new_train["spectrogram_id"].unique(),
-        desc="Train Spectrograms",
-        total=len(new_train["spectrogram_id"].unique()),
-    ):
-        shutil.copy(
-            raw / "train_spectrograms" / f"{spectrogram_id}.parquet",
-            public / "train_spectrograms" / f"{spectrogram_id}.parquet",
-        )
-    (public / "test_spectrograms").mkdir(parents=True, exist_ok=True)
-    for spectrogram_id in tqdm(
-        new_test["spectrogram_id"].unique(),
-        desc="Test Spectrograms",
-        total=len(new_test["spectrogram_id"].unique()),
-    ):
-        shutil.copy(
-            raw / "train_spectrograms" / f"{spectrogram_id}.parquet",
-            public / "test_spectrograms" / f"{spectrogram_id}.parquet",
-        )
+    _copy_parquets(
+        new_train["spectrogram_id"],
+        raw / "train_spectrograms",
+        public / "train_spectrograms",
+        "Train Spectrograms",
+    )
+    _copy_parquets(
+        new_test["spectrogram_id"],
+        raw / "train_spectrograms",
+        public / "test_spectrograms",
+        "Test Spectrograms",
+    )
 
     assert len(list((public / "train_eegs").rglob("*"))) == len(
         new_train["eeg_id"].unique()

@@ -1,3 +1,6 @@
+LANL-Earthquake-Prediction
+MIT-BIH-Arrhythmia
+MIT-BIH-Arrhythmia-Weak-Supervision
 amp-parkinsons-disease-progression-prediction
 ashrae-energy-prediction
 child-mind-institute-detect-sleep-states
@@ -8,10 +11,7 @@ csdi-reproduce-pm25
 g2net-gravitational-wave-detection
 gift-eval-short-horizon
 hms-harmful-brain-activity-classification
-LANL-Earthquake-Prediction
 m5-forecasting-accuracy
-MIT-BIH-Arrhythmia
-MIT-BIH-Arrhythmia-Weak-Supervision
 moment-anomaly-detection-score
 online-sales
 optiver-realized-volatility-prediction

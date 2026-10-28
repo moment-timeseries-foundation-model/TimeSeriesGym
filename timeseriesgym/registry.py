@@ -34,6 +34,8 @@ class Competition:
     public_dir: Path
     checksums: Path
     leaderboard: Path
+    feature_enhancement_config: dict | None = None
+    awards_medals: bool = True  # informational, as on Kaggle: medals are ranked by leaderboard
 
     def __post_init__(self):
         assert isinstance(self.id, str), "Competition id must be a string."
@@ -69,22 +71,11 @@ class Competition:
             missingness_simulator = MissingnessSimulator.from_dict(data["missingness_simulator"])
         else:
             missingness_simulator = None
-        parent_id = data["parent_id"] if "parent_id" in data else None
-
-        if "hyperparameter_search_config" in data:
-            hyperparameter_search_config = data["hyperparameter_search_config"]
-        else:
-            hyperparameter_search_config = None
-
-        if "coding_config" in data:
-            coding_config = data["coding_config"]
-        else:
-            coding_config = None
 
         try:
             return Competition(
                 id=data["id"],
-                parent_id=parent_id,
+                parent_id=data.get("parent_id"),
                 name=data["name"],
                 description=data["description"],
                 grader=grader,
@@ -94,13 +85,15 @@ class Competition:
                 competition_type=data["competition_type"],
                 prepare_fn=data["prepare_fn"],
                 missingness_simulator=missingness_simulator,
-                hyperparameter_search_config=hyperparameter_search_config,
-                coding_config=coding_config,
+                hyperparameter_search_config=data.get("hyperparameter_search_config"),
+                coding_config=data.get("coding_config"),
+                feature_enhancement_config=data.get("feature_enhancement_config"),
                 raw_dir=data["raw_dir"],
                 public_dir=data["public_dir"],
                 private_dir=data["private_dir"],
                 checksums=data["checksums"],
                 leaderboard=data["leaderboard"],
+                awards_medals=data.get("awards_medals", True),
             )
         except KeyError as e:
             raise ValueError(f"Missing key {e} in competition config!") from e
@@ -144,7 +137,7 @@ class Registry:
             assert (
                 "parent_id" in config
             ), "Only competitions with parent_id can skip description configuration!"
-            description_path = self.get_competitions_dir() / parent_id / "description.md"
+            description_path = self.get_competitions_dir() / config["parent_id"] / "description.md"
         else:
             description_path = get_repo_dir() / config["description"]
         description = description_path.read_text()
@@ -202,8 +195,10 @@ class Registry:
     def list_competition_ids(self) -> list[str]:
         """List all competition IDs available in the registry, sorted alphabetically."""
 
-        competition_configs = self.get_competitions_dir().rglob("config.yaml")
-        competition_ids = [f.parent.stem for f in sorted(competition_configs)]
+        # only direct children: rglob also found example/conf/config.yaml (a Hydra config in
+        # the feature-enhancement example) and listed a competition `conf`
+        competition_configs = self.get_competitions_dir().glob("*/config.yaml")
+        competition_ids = [f.parent.name for f in sorted(competition_configs)]
 
         return competition_ids
 

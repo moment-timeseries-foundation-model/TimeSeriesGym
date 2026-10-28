@@ -1,5 +1,6 @@
-import os
 from pathlib import Path
+
+from timeseriesgym.utils import clone_repository
 
 
 def prepare(raw: Path, public: Path, private: Path):
@@ -10,8 +11,11 @@ def prepare(raw: Path, public: Path, private: Path):
     sample_submission.rename(public / "sample_submission.pkl")
 
     # Download the cik GitHub repository
-    os.system(
-        f"cd {public}; git clone --branch moirai-evaluation --single-branch https://github.com/moment-timeseries-foundation-model/context-is-key-forecasting.git"
+    clone_repository(
+        "https://github.com/moment-timeseries-foundation-model/context-is-key-forecasting.git",
+        public / "context-is-key-forecasting",
+        branch="moirai-evaluation",
+        commit="e69271d9e7b85c8ac110868b1b30dd857cd14850",
     )
 
     # Remove all .json and .csv files from the cloned repository

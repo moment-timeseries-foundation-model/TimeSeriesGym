@@ -5,10 +5,18 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from .mase import window_baselines
+
+
+def _baselines(raw: Path, name: str) -> tuple[np.ndarray, np.ndarray]:
+    from .dataset import Dataset  # needs gluonts and datasets: imported only to prepare
+
+    return window_baselines(Dataset(name=name, term="short", to_univariate=False, storage_path=raw))
+
 
 def prepare(raw: Path, public: Path, private: Path):
-    datasets_path = Path("timeseriesgym/competitions/gift-eval-short-horizon/datasets.txt")
-    dataset_prepare_path = Path("timeseriesgym/competitions/gift-eval-short-horizon/dataset.py")
+    datasets_path = Path(__file__).parent / "datasets.txt"
+    dataset_prepare_path = Path(__file__).parent / "dataset.py"
 
     # copy over to public
     shutil.copy2(datasets_path, public / datasets_path.name)
@@ -56,8 +64,25 @@ def prepare(raw: Path, public: Path, private: Path):
         for name in valid_subset_names:
             data[name][0] = subset_data[name]
 
+        # GIFT-Eval's MASE needs each window's history: keep its scale and seasonal naive
+        # forecast with the answers (the history itself is public)
+        scale_dt, scale_data, naive_data = [], {}, {}
+        for name in valid_subset_names:
+            scale_data[name], naive_data[name] = _baselines(raw, name)
+            if naive_data[name].shape != subset_data[name].shape:
+                raise ValueError(f"The test windows of {name} do not match its answers.")
+            scale_dt.append((name, np.float64, scale_data[name].shape))
+        scales = np.zeros(1, dtype=np.dtype(scale_dt))
+        naive = np.zeros(1, dtype=subset_dt)
+        for name in valid_subset_names:
+            scales[name][0] = scale_data[name]
+            naive[name][0] = naive_data[name]
+
         # Save to the new file
-        subset_file.create_dataset("labels", data=data)
+        labels = subset_file.create_group("labels")
+        labels.create_dataset("target", data=data)
+        labels.create_dataset("seasonal_error", data=scales)
+        labels.create_dataset("seasonal_naive", data=naive)
         logging.info(f"Created {private / 'test.h5'} with subset data.")
 
     # create a sample submission file of the same shape as the test.h5 file

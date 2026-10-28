@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from timeseriesgym.utils import InvalidSubmissionError, get_logger, import_fn
@@ -20,22 +21,32 @@ class GradingInput:
     submission_folder_path: Path | None = None
     hyperparameter_search_config: dict | None = None
     solution_file_path: Path | None = None
+    sample_submission_path: Path | None = None
     submission_file_path: Path | None = None
     coding_config: dict | None = None
+    feature_enhancement_config: dict | None = None
+    solution_files_path: Path | None = None
 
 
 class Grader:
-    def __init__(self, name: str, grade_fn: str) -> None:
+    def __init__(self, name: str, grade_fn: str, lower_is_better: bool | None = None) -> None:
         self.name = name
         self.grade_fn = import_fn(grade_fn)
+        self.lower_is_better = lower_is_better
         assert isinstance(self.name, str), "Grader name must be a string."
         assert len(self.name) > 0, "Grader name cannot be empty."
+        assert lower_is_better in (None, True, False), "Grader lower_is_better must be a bool."
 
-    def is_lower_better(self, leaderboard: pd.DataFrame) -> bool:
+    def is_lower_better(self, leaderboard: pd.DataFrame | None = None) -> bool | None:
         """
-        Determines if a lower score is better based on the leaderboard.
-        Returns True if lower scores are better, False otherwise.
+        Determines if a lower score is better: the config's `grader.lower_is_better`, or else
+        the leaderboard's order. Returns True if lower scores are better, False otherwise, and
+        None if neither is known.
         """
+        if self.lower_is_better is not None:
+            return self.lower_is_better
+        if leaderboard is None:
+            return None
         scores = leaderboard["score"]
         top_score = scores.iloc[0]
         bottom_score = scores.iloc[-1]
@@ -134,21 +145,26 @@ class Grader:
             num_teams
         )
 
+        no_medal = {
+            "gold_medal": False,
+            "silver_medal": False,
+            "bronze_medal": False,
+            "above_median": False,
+            "gold_threshold": gold_threshold,
+            "silver_threshold": silver_threshold,
+            "bronze_threshold": bronze_threshold,
+            "median_threshold": median_threshold,
+        }
+
         if score is None:
-            return {
-                "gold_medal": False,
-                "silver_medal": False,
-                "bronze_medal": False,
-                "above_median": False,
-                "gold_threshold": gold_threshold,
-                "silver_threshold": silver_threshold,
-                "bronze_threshold": bronze_threshold,
-                "median_threshold": median_threshold,
-            }
+            return no_medal
 
         assert isinstance(
             score, float | int
         ), f"Expected `score` to be a `float` or `int` but got a {type(score)}."
+
+        if not np.isfinite(score):  # e.g. -inf from an invalid hyperparameter search
+            return no_medal
 
         gold_medal = score <= gold_threshold if lower_is_better else score >= gold_threshold
         silver_medal = not gold_medal and (
@@ -173,10 +189,35 @@ class Grader:
         }
 
 
+def _score_to_json(score):
+    """Scores are written as strings (or None); dict scores (feature enhancement's sub-scores,
+    per-dataset errors) stay JSON objects instead of becoming their Python repr."""
+    if isinstance(score, dict):
+        return {str(k): _plain(v) for k, v in score.items()}
+    return str(score) if score is not None else None  # TODO: support non-float output better
+
+
+def _plain(value):
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _score_from_json(score):
+    if isinstance(score, dict) or score is None:
+        return score
+    return float(score)
+
+
+def _bool_or_none(value):
+    """An unknown score direction stays None ("not known"); `bool(None)` reported it as False."""
+    return None if value is None else bool(value)
+
+
 @dataclass(frozen=True)
 class CompetitionReport:
     competition_id: str
-    score: float | None
+    score: float | dict | None
     gold_threshold: float | None
     silver_threshold: float | None
     bronze_threshold: float | None
@@ -188,7 +229,7 @@ class CompetitionReport:
     above_median: bool | None
     submission_exists: bool
     valid_submission: bool
-    is_lower_better: bool
+    is_lower_better: bool | None
     created_at: datetime
     submission_path: str
 
@@ -196,9 +237,7 @@ class CompetitionReport:
         # Convert all values to JSON-compatible types explicitly
         return {
             "competition_id": self.competition_id,
-            "score": str(self.score)
-            if self.score is not None
-            else None,  # TODO: find a better way to support none-float output
+            "score": _score_to_json(self.score),
             "gold_threshold": float(self.gold_threshold),
             "silver_threshold": float(self.silver_threshold),
             "bronze_threshold": float(self.bronze_threshold),
@@ -210,7 +249,7 @@ class CompetitionReport:
             "above_median": bool(self.above_median),
             "submission_exists": bool(self.submission_exists),
             "valid_submission": bool(self.valid_submission),
-            "is_lower_better": bool(self.is_lower_better),
+            "is_lower_better": _bool_or_none(self.is_lower_better),
             "created_at": self.created_at.isoformat(),  # Serialize datetime
             "submission_path": self.submission_path,
         }
@@ -220,7 +259,7 @@ class CompetitionReport:
         data = data.copy()  # Avoid accidentally mutating the original dictionary
         typed_data = {
             "competition_id": data["competition_id"],
-            "score": float(data["score"]) if data["score"] is not None else None,
+            "score": _score_from_json(data["score"]),
             "gold_threshold": float(data["gold_threshold"]),
             "silver_threshold": float(data["silver_threshold"]),
             "bronze_threshold": float(data["bronze_threshold"]),
@@ -232,7 +271,7 @@ class CompetitionReport:
             "above_median": bool(data["above_median"]),
             "submission_exists": bool(data["submission_exists"]),
             "valid_submission": bool(data["valid_submission"]),
-            "is_lower_better": bool(data["is_lower_better"]),
+            "is_lower_better": _bool_or_none(data["is_lower_better"]),
             "created_at": datetime.fromisoformat(data["created_at"]),
             "submission_path": data["submission_path"],
         }

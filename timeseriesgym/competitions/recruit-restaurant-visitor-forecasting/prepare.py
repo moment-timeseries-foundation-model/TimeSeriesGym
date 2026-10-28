@@ -1,8 +1,7 @@
-import zipfile
 from copy import deepcopy
 from pathlib import Path
 
-from timeseriesgym.utils import get_logger, read_csv
+from timeseriesgym.utils import extract, get_logger, read_csv
 
 logger = get_logger(__name__)
 
@@ -13,8 +12,7 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     # first, for all file that ends with .zip, unzip it
     for file in raw.glob("*.zip"):
         logger.info(f"Unzipping {file}")
-        with zipfile.ZipFile(file, "r") as zip_ref:
-            zip_ref.extractall(raw)
+        extract(file, raw)
         # remove the zip file
         file.unlink()
 
@@ -39,10 +37,10 @@ def prepare(raw: Path, public: Path, private: Path) -> None:
     train_df = df[df["visit_date"] < stop_date].reset_index(drop=True)
     test_df = df[df["visit_date"] >= stop_date].reset_index(drop=True)
 
-    new_restaurants = []
-    for store_id in test_df["air_store_id"].unique():
-        if store_id not in train_df["air_store_id"].unique():
-            new_restaurants.append(store_id)
+    train_store_ids = train_df["air_store_id"].unique()
+    new_restaurants = [
+        store_id for store_id in test_df["air_store_id"].unique() if store_id not in train_store_ids
+    ]
 
     test_df = test_df[~test_df["air_store_id"].isin(new_restaurants)].reset_index(drop=True)
 

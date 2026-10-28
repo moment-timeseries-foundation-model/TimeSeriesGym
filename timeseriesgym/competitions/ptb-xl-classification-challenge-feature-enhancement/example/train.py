@@ -224,9 +224,8 @@ def make_predictions(
     # Make predictions
     all_predictions = []
     with torch.no_grad():
-        for i in range(0, len(test_signals), 32):  # Process in batches of 32
-            batch = test_signals[i : i + 32].to(device)
-            outputs = model(batch)
+        for batch in torch.split(test_signals, 32):  # Process in batches of 32
+            outputs = model(batch.to(device))
             _, predictions = torch.max(outputs, 1)
             all_predictions.extend(predictions.cpu().numpy())
 

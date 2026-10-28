@@ -5,7 +5,7 @@ Volatility is one of the most prominent terms you'll hear on any trading floor â
 
 As a leading global electronic market maker, Optiver is dedicated to continuously improving financial markets, creating better access and prices for options, ETFs, cash equities, bonds and foreign currencies on numerous exchanges around the world. Optiver's teams have spent countless hours building sophisticated models that predict volatility and continuously generate fairer options prices for end investors. However, an industry-leading pricing algorithm can never stop evolving, and there is no better place than Kaggle to help Optiver take its model to the next level.
 
-In the first three months of this competition, you'll build models that predict short-term volatility for hundreds of stocks across different sectors. You will have hundreds of millions of rows of highly granular financial data at your fingertips, with which you'll design your model forecasting volatility over 10-minute periods. Your models will be evaluated against real market data collected in the three-month evaluation period after training.
+In the first three months of this competition, you'll build models that predict short-term volatility for hundreds of stocks across different sectors. You will have hundreds of millions of rows of highly granular financial data at your fingertips, with which you'll design your model forecasting volatility over 10-minute periods. In this version of the competition, your models will be evaluated on stocks held out from the original training data, at time buckets (`time_id`s) whose targets are held out from the training data.
 
 Through this competition, you'll gain invaluable insight into volatility and financial market structure. You'll also get a better understanding of the sort of data science problems Optiver has faced for decades. We look forward to seeing the creative approaches the Kaggle community will apply to this ever complex but exciting trading challenge.
 
@@ -14,12 +14,16 @@ In order to make Kagglers better prepared for this competition, Optiver's data s
 
 For more information about exciting data science opportunities at Optiver, check out their data science landing page or e-mail their recruiting team directly at datascience@optiver.com.
 
-**This is a Code Competition. Refer to Code Requirements for details.**
-
 ## Evaluation
 Submissions are evaluated using the root mean square percentage error, defined as:
 
 $$\text{RMSPE} = \sqrt{\frac{1}{n}\sum_{i=1}^{n}\left(\frac{y_i - \hat{y}_i}{y_i}\right)^2}$$
+
+The score of a submission is the relative improvement in RMSPE of your improved model over the sample submission, both computed on the test set from `submission.csv` and `sample_submission.csv`:
+
+$$\text{score} = \frac{\text{RMSPE}_{sample} - \text{RMSPE}_{improved}}{\text{RMSPE}_{sample}}$$
+
+The sample submission predicts 0.0 for every row, so its RMSPE is 1 and the score is $1 - \text{RMSPE}_{improved}$. Higher scores are better. Your baseline model and `baseline_submission.csv` do not change the score, but they are required: the submission is invalid if the baseline model is not `xgboost.XGBRegressor()` with default hyperparameters (only `n_jobs`, `nthread`, `verbosity` and `random_state` may be set), if the two models have the same hyperparameters (as returned by `get_params()`, not counting those four settings), if `baseline_submission.csv` or `submission.csv` is not a valid submission, or if your solution code (the `.py` files in `/home/code`) is missing or shows no hyperparameter search with Optuna.
 
 ## Submission File
 For each `row_id` in the test set, you must predict the `target` variable. The file should contain a header and have the following format:
@@ -40,12 +44,6 @@ row_id,target
 * 5th - 10th Place - $5,000
 
 ## Code Requirements
-**This is a Code Competition**
-
-Submissions to this competition must be made through Notebooks. In order for the "Submit" button to be active after a commit, the following conditions must be met:
-* CPU Notebook <= 9 hours run-time
-* GPU Notebook <= 9 hours run-time
-* Internet access disabled
 
 **Important**: This challenge requires you to perform an explicit hyperparameter search. Since you will be evaluated on your optimization process, please document every step in your solution file. Specifically, you are **REQUIRED** to use following baseline model
 
@@ -54,7 +52,7 @@ import xgboost
 baseline_model = xgboost.XGBRegressor()
 
 hyperparameters = ... #improve model through hyperparameter search
-model = xgboost.XGBRegressor(hyperparameters)
+model = xgboost.XGBRegressor(**hyperparameters)
 ```
 
 Perform an explicit hyperparameter search with **Optuna**. You are expected to train both baseline model and improved model, and save them as `pickle` file
@@ -74,18 +72,16 @@ Your submission folder should include following files:
 - **baseline_model.pkl**: Trained baseline model file
 - **model.pkl**: Trained improved model file
 
-Please see the Code Competition FAQ for more information on how to submit. And review the code debugging doc if you are encountering submission errors.
-
 > **Important:** You are required to use **Optuna** for hyperparameter optimization.
 > Any use of alternative tuning libraries will result in an **invalid submission**.
+> Keep the code of your hyperparameter search in `.py` files in `/home/code`: this solution code is required, and the grader checks it for the search.
+> The code must create an Optuna study and run it: `optuna.create_study(...)` (or `optuna.load_study(...)`) and `study.optimize(...)` (or `study.ask()`), or `optuna.integration.OptunaSearchCV(...)` and `fit`.
 
 ## Dataset Description
 
 This dataset contains stock market data relevant to the practical execution of trades in the financial markets. In particular, it includes order book snapshots and executed trades. With one second resolution, it provides a uniquely fine grained look at the micro-structure of modern financial markets.
 
-This is a code competition where only the first few rows of the test set are available for download. The rows that are visible are intended to illustrate the hidden test set format and folder structure. The remainder will only be available to your notebook when it is submitted. The hidden test set contains data that can be used to construct features to predict roughly 150,000 target values. Loading the entire dataset will take slightly more than 3 GB of memory, by our estimation.
-
-This is also a forecasting competition, where the final private leaderboard will be determined using data gathered after the training period closes, which means that the public and private leaderboards will have zero overlap. During the active training stage of the competition a large fraction of the test data will be filler, intended only to ensure the hidden dataset has approximately the same size as the actual test data. The filler data will be removed entirely during the forecasting phase of the competition and replaced with real market data.
+`book_test.parquet`, `trade_test.parquet` and `test.csv` contain the complete test inputs: 12 stocks held out from the original training data, with 11,496 target values to predict at 958 time buckets, a quarter of the original 3,830 chosen at random. `train.csv` has the targets of the other 100 stocks at the other 2,872 time buckets: it has no target at a test time bucket, for any stock. The book and trade files hold every stock's data at every time bucket, the test time buckets included, as in the original competition, which gave the order book and trades of the test period but not their targets: `book_test.parquet` and `trade_test.parquet` for the 12 test stocks, `book_train.parquet` and `trade_train.parquet` for the 100 training stocks.
 
 ### Files
 
@@ -114,7 +110,7 @@ This is also a forecasting competition, where the final private leaderboard will
 - **time_id** - Same as above.
 - **target** - The realized volatility computed over the 10 minute window following the feature data under the same stock/time_id. There is no overlap between feature and target data.
 
-**test.csv** - Provides the mapping between the other data files and the submission file. As with other test files, most of the data is only available to your notebook upon submission with just the first few rows available for download.
+**test.csv** - Provides the mapping between the other data files and the submission file, for every test row.
 
 - **stock_id** - Same as above.
 - **time_id** - Same as above.
@@ -123,4 +119,4 @@ This is also a forecasting competition, where the final private leaderboard will
 **sample_submission.csv** - A sample submission file in the correct format.
 
 - **row_id** - Same as in test.csv.
-- **target** - Same definition as in train.csv. The benchmark is using the median target value from train.csv.
+- **target** - Same definition as in train.csv. The sample submission predicts 0.0 for every row.

@@ -1,20 +1,16 @@
-import numpy as np
 import pandas as pd
 
-from timeseriesgym.utils import InvalidSubmissionError
+from timeseriesgym.competitions.utils import prepare_for_id_matched_metric
+from timeseriesgym.metrics import root_mean_squared_log_error
 
 
 def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> float:
-    submission_array = submission.meter_reading.values
-    answers_array = answers.meter_reading.values
-    if len(submission_array) != len(answers_array):
-        raise InvalidSubmissionError(
-            f"Submission length {len(submission_array)} does not match answer "
-            "length {len(answers_array)}"
-        )
+    # rows are matched on the (building_id, meter, timestamp) key, not by position
+    inputs = prepare_for_id_matched_metric(
+        submission,
+        answers,
+        target_column="meter_reading",
+        id_columns=["building_id", "meter", "timestamp"],
+    )
 
-    log_squared_eeror = (np.log(submission_array + 1) - np.log(answers_array + 1)) ** 2
-    mean_log_squared_error = np.mean(log_squared_eeror)
-    root_mean_log_squared_error = np.sqrt(mean_log_squared_error)
-
-    return root_mean_log_squared_error
+    return root_mean_squared_log_error(inputs["y_true"], inputs["y_pred"])

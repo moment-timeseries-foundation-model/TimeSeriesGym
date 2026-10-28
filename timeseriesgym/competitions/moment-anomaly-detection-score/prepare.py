@@ -1,7 +1,8 @@
-import os
 from pathlib import Path
 
 import numpy as np
+
+from timeseriesgym.utils import clone_repository
 
 
 def prepare(raw: Path, public: Path, private: Path):
@@ -16,8 +17,10 @@ def prepare(raw: Path, public: Path, private: Path):
     np.save(public / "sample_submission.npy", sample_submission)
 
     # Download the tsl GitHub repository
-    os.system(
-        f"cd {public}; git clone https://github.com/moment-timeseries-foundation-model/moment.git"
+    clone_repository(
+        "https://github.com/moment-timeseries-foundation-model/moment.git",
+        public / "moment",
+        commit="37a8bde4eb3dd340bebc9b54a3b893bcba62cd4f",
     )
 
     # Remove all .json and .csv files from the cloned repository

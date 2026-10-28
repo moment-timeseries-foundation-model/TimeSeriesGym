@@ -38,7 +38,7 @@ Submissions are evaluated on the average precision of detected events, averaged 
 
 Detections are matched to ground-truth events within error tolerances, with ambiguities resolved in order of decreasing confidence. For both event classes, we use error tolerance thresholds of 1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30 in minutes, or 12, 36, 60, 90, 120, 150, 180, 240, 300, 360 in steps.
 
-You may find Python code for this metric in the `event_detection_average_precision.py` file.
+The Python code for this metric is not provided in the data directory; its steps are described below.
 
 ### Detailed Description
 
@@ -77,7 +77,7 @@ row_id,series_id,step,event,score
 ...
 ```
 
-Note that while the ground-truth annotations were made following certain conventions (as described on the Data page), there are no such restrictions on your submission file.
+Note that while the ground-truth annotations were made following certain conventions (as described in the Dataset Description below), there are no such restrictions on your submission file.
 
 ## Prizes
 
@@ -90,7 +90,7 @@ Note that while the ground-truth annotations were made following certain convent
 
 ## Dataset Description
 
-The dataset comprises about 500 multi-day recordings of wrist-worn accelerometer data annotated with two event types: *onset*, the beginning of sleep, and *wakeup*, the end of sleep. Your task is to detect the occurrence of these two events in the accelerometer series.
+The original competition's dataset comprises about 500 multi-day recordings of wrist-worn accelerometer data annotated with two event types: *onset*, the beginning of sleep, and *wakeup*, the end of sleep. Your task is to detect the occurrence of these two events in the accelerometer series. This version of the competition uses the 277 recordings of the original training set, split by series into 249 training series and 28 test series.
 
 While sleep logbooks remain the gold-standard, when working with accelerometer data we refer to sleep as the longest single period of inactivity while the watch is being worn. For this data, we have guided raters with several concrete instructions:
 
@@ -119,5 +119,5 @@ Each data series represents this continuous (multi-day/event) recording for a un
     - `series_id` - Unique identifier for each series of accelerometer data in train_series.parquet.
     - `night` - An enumeration of potential onset / wakeup event pairs. At most one pair of events can occur for each night.
     - `event` - The type of event, whether onset or wakeup.
-    - `step` and `timestamp` - The recorded time of occurence of the event in the accelerometer series.
-- **sample_submission.csv** - A sample submission file in the correct format. See the **Evaluation** tab for more details.
+    - `step` and `timestamp` - The recorded time of occurrence of the event in the accelerometer series. Both are empty for nights without a valid sleep window (no event was recorded).
+- **sample_submission.csv** - A sample submission file in the correct format. See the **Evaluation** section for more details.

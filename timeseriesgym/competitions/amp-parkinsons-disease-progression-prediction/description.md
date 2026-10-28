@@ -50,7 +50,7 @@ Protein expression frequencies aggregated from the peptide level data.
 Clinical records without any associated CSF samples. This data is intended to provide additional context about the typical progression of Parkinsons. Uses the same columns as **train_clinical_data.csv**.
 
 ### test_clinical_data.csv
-Contains the same columns as train_clinical_data.csv but for patients in the test set. Used for making predictions.
+The visits of the patients in the test set, used for making predictions: one row per visit and UPDRS part, with the columns `visit_id`, `visit_month`, `patient_id`, `updrs_test` (the UPDRS part, e.g. `updrs_1`), `row_id` (`{visit_id}_{updrs_test}`) and `group_key`. It contains no ratings and no medication column.
 
 ### test_proteins.csv
 Similar to train_proteins.csv but for the test set. May include proteins not found in the training data.
@@ -60,24 +60,26 @@ Similar to train_peptides.csv but for the test set. May include peptides not fou
 
 ### sample_submission.csv
 Template file for submitting predictions. You must generate this file.
-* `prediction_id` - Identifier code following the format `{patient_id}_{visit_id}_updrs_{updrs_part}_plus_{months}`. Indicates the patient, visit, UPDRS part (1-4), and the number of months in the future for which to predict.
+* `prediction_id` - Identifier code following the format `{patient_id}_{visit_month}_updrs_{updrs_part}_plus_{months}_months`, i.e. the `row_id` of a test visit followed by `_plus_{months}_months`. Indicates the patient, visit, UPDRS part (1-4), and the number of months in the future (0, 6, 12 or 24) for which to predict.
 * `rating` - The predicted UPDRS score. This is what you need to fill in for your submission.
-* `group_key` - An identifier derived from the patient_id portion of the prediction_id, useful for grouping related predictions.
+* `group_key` - The `visit_month` of the visit the prediction is made from (the second part of the prediction_id), useful for grouping related predictions.
 
 ## Evaluation
-Submissions are evaluated on SMAPE between forecasts and actual values. We define SMAPE = 0 when the actual and predicted values are both 0.
+Submissions are evaluated on SMAPE between forecasts and actual values, computed after adding 1 to both (SMAPE+1). We define SMAPE = 0 when the actual and predicted values are both 0.
 
-For each patient visit where a protein/peptide sample was taken you will need to estimate both their UPDRS scores for that visit and predict their scores for any potential visits 6, 12, and 24 months later. Predictions for any visits that didn't ultimately take place are ignored.
+For each patient visit in `test_clinical_data.csv`, including visits where no protein/peptide sample was taken, you will need to estimate both their UPDRS scores for that visit and predict their scores for any potential visits 6, 12, and 24 months later. Predictions for any visits that didn't ultimately take place are not included in `sample_submission.csv`.
 
-The **Symmetric Mean Absolute Percentage Error** (**SMAPE** or **sMAPE**) is an accuracy measure based on percentage (or relative) errors. It is usually defined as follows:
+The **Symmetric Mean Absolute Percentage Error** (**SMAPE** or **sMAPE**) is an accuracy measure based on percentage (or relative) errors. It is usually defined as $\frac{100\%}{n} \sum_{t=1}^{n} \frac{|F_t - A_t|}{(|A_t| + |F_t|)/2}$; this competition computes it on values shifted by +1:
 
-$$\text{SMAPE} = \frac{100\%}{n} \sum_{t=1}^{n} \frac{|F_t - A_t|}{(|A_t| + |F_t|)/2}$$
+$$\text{SMAPE+1} = \frac{100\%}{n} \sum_{t=1}^{n} \frac{|F_t - A_t|}{(|A_t + 1| + |F_t + 1|)/2}$$
 
 where:
 - *A<sub>t</sub>* is the actual value
 - *F<sub>t</sub>* is the forecast value
 
-The absolute difference between *A<sub>t</sub>* and *F<sub>t</sub>* is divided by half the sum of absolute values of the actual value *A<sub>t</sub>* and the forecast value *F<sub>t</sub>*. The value of this calculation is summed for every fitted point *t* and divided again by the number of fitted points *n*.
+The absolute difference between *A<sub>t</sub>* and *F<sub>t</sub>* is divided by half the sum of absolute values of the actual value plus one, *A<sub>t</sub>* + 1, and the forecast value plus one, *F<sub>t</sub>* + 1. The value of this calculation is summed for every fitted point *t* and divided again by the number of fitted points *n*.
+
+Medal thresholds come from the final Kaggle leaderboard, which was scored on Kaggle's hidden test set. The test set here is 10% of the patients in the competition's training data, so medals are only a rough guide to where a score would rank on Kaggle.
 
 ## Prizes
 - 1st Place - $25,000

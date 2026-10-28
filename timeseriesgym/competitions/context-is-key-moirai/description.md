@@ -16,6 +16,7 @@ In this challenge you will evaluate the time-series foundation model [MOIRAI](ht
    cd context-is-key-forecasting
    pip install -r requirements.txt
    ```
+   - `pip install -r requirements.txt` installs CiK's dependencies, not CiK itself: `cik_benchmark` and `run_baselines` import only if the root of the repository is on Python's module search path. When it runs a script file, Python adds the script's directory to that path, not the working directory, so a script saved outside the repository fails with `ModuleNotFoundError: No module named 'cik_benchmark'` (or `'run_baselines'`) even when you run it from the root. Save your scripts in the root of the repository, or run them with `PYTHONPATH=<path to context-is-key-forecasting>`.
 
 2. **Implement the MOIRAI predictor**
    - Open `cik_benchmark/baselines/moirai.py`.
@@ -29,7 +30,7 @@ In this challenge you will evaluate the time-series foundation model [MOIRAI](ht
    ```python
    from run_baselines import experiment_moirai
 
-   result, _ = experiment_moirai(model_size="small", n_samples=50)
+   result, _ = experiment_moirai(model_size="small", n_samples=50, output_folder="<output_folder_path>")
    ```
 
 5. **Save your results**
@@ -65,7 +66,7 @@ result = {
 
 ## Evaluation
 - We will compare your `submission.pkl` against our reference output.
-- **Score = 100** if your results match exactly.
+- **Score = 1** if your results match exactly.
 - **Score = 0** if the file is missing, incorrect, or fabricated without a real run.
 
 > ⚠ Any attempt to “hard-code” or copy the reference results without running the evaluation will be flagged as an integrity violation.
